@@ -37,6 +37,25 @@ export interface ChatMessage {
   at: string;
 }
 
+export type SuggestionKind = "addLink" | "editLink" | "removeLink" | "other";
+
+export interface Suggestion {
+  id: string;
+  user: string;
+  kind: SuggestionKind;
+  status: "pending" | "approved" | "rejected";
+  createdAt: string;
+  folderId?: string;
+  linkId?: string;
+  /** name of the existing link at the time it was suggested */
+  linkName?: string;
+  name?: string;
+  url?: string;
+  note?: string;
+  resolvedAt?: string;
+  resolvedNote?: string;
+}
+
 export interface SiteSettings {
   announcement?: string;
   title?: string;

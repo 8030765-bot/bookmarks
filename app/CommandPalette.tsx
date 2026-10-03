@@ -27,6 +27,7 @@ const ICON_PATHS: Record<string, string> = {
   download: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3",
   upload: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12",
   undo: "M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-1",
+  bulb: "M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.2 1 2V17h6v-.3c0-.8.4-1.5 1-2A7 7 0 0 0 12 2z",
 };
 
 export function Icon({ name }: { name: keyof typeof ICON_PATHS | string }) {

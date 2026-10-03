@@ -1,11 +1,13 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BookmarksData, ChatMessage, Folder, Link } from "@/lib/types";
+import { BookmarksData, ChatMessage, Folder, Link, Suggestion } from "@/lib/types";
 import { Icon } from "./CommandPalette";
+import { suggestionSummary } from "./SuggestModal";
 
-type Tab = "overview" | "links" | "folders" | "chat" | "users" | "site" | "data" | "activity";
+type Tab = "overview" | "suggestions" | "links" | "folders" | "chat" | "users" | "site" | "data" | "activity";
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "overview", label: "Overview", icon: "chart" },
+  { id: "suggestions", label: "Suggestions", icon: "bulb" },
   { id: "links", label: "Links", icon: "link" },
   { id: "folders", label: "Folders", icon: "folder" },
   { id: "chat", label: "Chat", icon: "chat" },
@@ -20,6 +22,7 @@ interface AdminInfo {
   users: { username: string; createdAt: string }[];
   banned: string[];
   messageCount: number;
+  suggestions: Suggestion[];
 }
 type LinkRow = { folder: Folder; link: Link };
 
@@ -50,6 +53,7 @@ export default function AdminPanel({
   onClose,
   onLock,
   showToast,
+  applyData,
 }: {
   data: BookmarksData;
   password: string;
@@ -58,6 +62,8 @@ export default function AdminPanel({
   onClose: () => void;
   onLock: () => void;
   showToast: (msg: string) => void;
+  /** push fresh bookmarks into the page after a server-side change */
+  applyData: (data: BookmarksData) => void;
 }) {
   const [tab, setTab] = useState<Tab>(() => {
     try {
@@ -101,6 +107,7 @@ export default function AdminPanel({
     [data]
   );
   const totalClicks = allLinks.reduce((n, r) => n + (r.link.clicks || 0), 0);
+  const pending = info?.suggestions.filter((x) => x.status === "pending").length ?? 0;
 
   return (
     <aside className="admin-panel" aria-label="Admin panel">
@@ -120,6 +127,7 @@ export default function AdminPanel({
       <nav className="admin-tabs">
         {TABS.map((t) => (
           <button key={t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)} title={t.label}>
+            {t.id === "suggestions" && pending > 0 && <span className="tab-badge">{pending}</span>}
             <Icon name={t.icon} />
             <span>{t.label}</span>
           </button>
@@ -128,6 +136,9 @@ export default function AdminPanel({
       <div className="admin-body">
         {tab === "overview" && (
           <OverviewTab data={data} rows={allLinks} totalClicks={totalClicks} info={info} goTo={setTab} />
+        )}
+        {tab === "suggestions" && (
+          <SuggestionsTab data={data} info={info} admin={admin} setInfo={setInfo} applyData={applyData} showToast={showToast} />
         )}
         {tab === "links" && <LinksTab data={data} rows={allLinks} run={run} submitting={submitting} showToast={showToast} />}
         {tab === "folders" && <FoldersTab data={data} run={run} submitting={submitting} showToast={showToast} />}
@@ -158,6 +169,7 @@ function OverviewTab({
     { label: "Users", value: info?.users.length ?? "–", tab: "users" as Tab },
     { label: "Messages", value: info?.messageCount ?? "–", tab: "chat" as Tab },
     { label: "Never clicked", value: neverClicked, tab: "links" as Tab },
+    { label: "Suggestions waiting", value: info ? info.suggestions.filter((x) => x.status === "pending").length : "–", tab: "suggestions" as Tab },
   ];
   return (
     <>
@@ -188,6 +200,142 @@ function OverviewTab({
       <h3 className="admin-h">Latest activity</h3>
       <ActivityList items={(data.activity || []).slice(0, 6)} />
       <button className="btn btn-secondary btn-sm admin-more" onClick={() => goTo("activity")}>See all activity</button>
+    </>
+  );
+}
+
+/* ---------- Suggestions ---------- */
+const KIND_TEXT: Record<Suggestion["kind"], string> = {
+  addLink: "Add website",
+  editLink: "Change website",
+  removeLink: "Remove website",
+  other: "Idea",
+};
+function SuggestionsTab({
+  data, info, admin, setInfo, applyData, showToast,
+}: {
+  data: BookmarksData; info: AdminInfo | null; admin: (a: string, p?: Record<string, any>) => Promise<any>;
+  setInfo: React.Dispatch<React.SetStateAction<AdminInfo | null>>; applyData: (d: BookmarksData) => void; showToast: (m: string) => void;
+}) {
+  const [filter, setFilter] = useState<"pending" | "approved" | "rejected" | "all">("pending");
+  // admin tweaks before approving, keyed by suggestion id
+  const [edits, setEdits] = useState<Record<string, { name?: string; url?: string; folderId?: string }>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  if (!info) return <div className="admin-empty">Loading suggestions…</div>;
+
+  const list = info.suggestions.filter((x) => filter === "all" || x.status === filter);
+  const count = (st: string) => info.suggestions.filter((x) => x.status === st).length;
+  const findLink = (x: Suggestion) => data.folders.find((f) => f.id === x.folderId)?.links.find((l) => l.id === x.linkId);
+  const folderName = (id?: string) => {
+    const f = data.folders.find((ff) => ff.id === id);
+    return f ? `${f.emoji} ${f.name}` : "a deleted folder";
+  };
+
+  async function act(action: string, x: Suggestion, extra: Record<string, unknown> = {}) {
+    setBusy(x.id);
+    try {
+      const json = await admin(action, { id: x.id, ...extra });
+      setInfo((i) => (i ? { ...i, suggestions: json.suggestions } : i));
+      if (json.data) applyData(json.data);
+      return true;
+    } catch (e: any) {
+      showToast(e.message);
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <>
+      <div className="seg">
+        {(["pending", "approved", "rejected", "all"] as const).map((f) => (
+          <button key={f} className={filter === f ? "on" : ""} onClick={() => setFilter(f)}>
+            {f === "rejected" ? "Declined" : f[0].toUpperCase() + f.slice(1)}
+            {f !== "all" && <span>{count(f)}</span>}
+          </button>
+        ))}
+      </div>
+      {list.length === 0 && (
+        <div className="admin-empty">{filter === "pending" ? "All caught up — no suggestions waiting." : "Nothing here."}</div>
+      )}
+      {list.map((x) => {
+        const e = edits[x.id] || {};
+        const link = findLink(x);
+        const gone = (x.kind === "editLink" || x.kind === "removeLink") && !link;
+        const setE = (patch: typeof e) => setEdits((all) => ({ ...all, [x.id]: { ...e, ...patch } }));
+        return (
+          <div key={x.id} className={`sugg-card ${x.status}`}>
+            <div className="sugg-top">
+              <span className="avatar sm">{x.user[0]?.toUpperCase()}</span>
+              <strong>{x.user}</strong>
+              <span className="sugg-kind">{KIND_TEXT[x.kind]}</span>
+              <span className="row-sub inline">{timeAgo(x.createdAt)}</span>
+            </div>
+
+            {x.status !== "pending" ? (
+              <div className="sugg-body">
+                {suggestionSummary(x)}
+                <div className="row-sub">
+                  <span className={`pill ${x.status}`}>{x.status === "rejected" ? "declined" : x.status}</span>
+                  {" "}{timeAgo(x.resolvedAt)}{x.resolvedNote && ` · “${x.resolvedNote}”`}
+                </div>
+              </div>
+            ) : (
+              <div className="sugg-body">
+                {x.kind === "addLink" && (
+                  <div className="sugg-fields">
+                    <input value={e.name ?? x.name ?? ""} onChange={(ev) => setE({ name: ev.target.value })} aria-label="Name" />
+                    <input value={e.url ?? x.url ?? ""} onChange={(ev) => setE({ url: ev.target.value })} aria-label="URL" />
+                    <select value={e.folderId ?? x.folderId} onChange={(ev) => setE({ folderId: ev.target.value })} aria-label="Folder">
+                      {!data.folders.some((f) => f.id === (e.folderId ?? x.folderId)) && <option value={x.folderId}>(deleted folder)</option>}
+                      {data.folders.map((f) => <option key={f.id} value={f.id}>{f.emoji} {f.name}</option>)}
+                    </select>
+                  </div>
+                )}
+                {x.kind === "editLink" && (
+                  <div className="sugg-diff">
+                    {link && x.name && x.name !== link.name && <div><del>{link.name}</del> → <ins>{x.name}</ins></div>}
+                    {link && x.url && <div className="diff-url"><del>{link.url}</del> → <ins>{x.url}</ins></div>}
+                  </div>
+                )}
+                {x.kind === "removeLink" && link && (
+                  <div className="sugg-diff">Remove <strong>{link.name}</strong> from {folderName(x.folderId)}<div className="diff-url">{link.url}</div></div>
+                )}
+                {gone && <div className="sugg-warn">“{x.linkName}” no longer exists — decline or delete this one.</div>}
+                {x.note && <div className="sugg-note">“{x.note}”</div>}
+                <div className="sugg-actions">
+                  {x.kind !== "other" ? (
+                    <button
+                      className="btn btn-primary btn-sm"
+                      disabled={busy === x.id || gone}
+                      onClick={async () => {
+                        if (await act("approveSuggestion", x, { overrides: e })) showToast(`Approved — ${suggestionSummary(x)}`);
+                      }}
+                    >Approve &amp; apply</button>
+                  ) : (
+                    <button className="btn btn-primary btn-sm" disabled={busy === x.id} onClick={async () => { if (await act("approveSuggestion", x)) showToast("Marked as done"); }}>
+                      Mark done
+                    </button>
+                  )}
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    disabled={busy === x.id}
+                    onClick={async () => {
+                      const reason = window.prompt("Reason for declining (optional — the user will see this):", "");
+                      if (reason === null) return;
+                      if (await act("rejectSuggestion", x, { reason })) showToast("Declined");
+                    }}
+                  >Decline</button>
+                </div>
+              </div>
+            )}
+            {x.status !== "pending" && (
+              <button className="btn-icon sm sugg-del" title="Remove from list" onClick={() => act("deleteSuggestion", x)}><Icon name="x" /></button>
+            )}
+          </div>
+        );
+      })}
     </>
   );
 }

@@ -2,6 +2,7 @@ import { Redis } from "@upstash/redis";
 import { BookmarksData, ActivityEntry } from "./types";
 import { defaultData } from "./defaultData";
 import { v4 as uuid } from "uuid";
+import { normalizeUrl } from "./url";
 const KEY = "bookmarks:shared";
 const PREV_KEY = "bookmarks:shared:prev";
 function getRedis() {
@@ -74,6 +75,10 @@ function moveItem<T>(list: T[], index: number, dir: number) {
   if (index < 0 || target < 0 || target >= list.length) return;
   [list[index], list[target]] = [list[target], list[index]];
 }
+/** " (suggested by x)" when an admin approved a user suggestion */
+function credit(body: Record<string, unknown>) {
+  return typeof body.suggestedBy === "string" && body.suggestedBy ? ` (suggested by ${body.suggestedBy})` : "";
+}
 type LinkRef = { folderId: string; linkId: string };
 function linkRefs(body: Record<string, unknown>): LinkRef[] {
   if (!Array.isArray(body.items)) throw new Error("Missing items");
@@ -105,7 +110,7 @@ export async function handleAction(
       if (data.settings?.lockAdding) requireAdmin(password);
       const folderId = String(body.folderId || "");
       const name = String(body.name || "").trim();
-      const url = String(body.url || "").trim();
+      const url = normalizeUrl(String(body.url || ""));
       if (!folderId || !name || !url) throw new Error("Missing fields");
       const folder = data.folders.find((f) => f.id === folderId);
       if (!folder) throw new Error("Folder not found");
@@ -123,7 +128,7 @@ export async function handleAction(
         createdAt: new Date().toISOString(),
         color: typeof body.color === "string" ? body.color : undefined,
       });
-      pushActivity(data, "add", `Added link “${name}”`);
+      pushActivity(data, "add", `Added link “${name}”${credit(body)}`);
       await saveBookmarks(data);
       return data;
     }
@@ -136,13 +141,13 @@ export async function handleAction(
       const link = folder.links.find((l) => l.id === linkId);
       if (!link) throw new Error("Link not found");
       if (typeof body.name === "string" && body.name.trim()) link.name = body.name.trim();
-      if (typeof body.url === "string" && body.url.trim()) link.url = body.url.trim();
+      if (typeof body.url === "string" && body.url.trim()) link.url = normalizeUrl(body.url);
       if (Array.isArray(body.tags)) link.tags = (body.tags as string[]).map(String);
       else if (typeof body.tags === "string")
         link.tags = String(body.tags).split(",").map((t) => t.trim()).filter(Boolean);
       if (typeof body.color === "string") link.color = body.color || undefined;
       link.updatedAt = new Date().toISOString();
-      pushActivity(data, "edit", `Edited link “${link.name}”`);
+      pushActivity(data, "edit", `Edited link “${link.name}”${credit(body)}`);
       await saveBookmarks(data);
       return data;
     }
@@ -154,7 +159,7 @@ export async function handleAction(
       if (!folder) throw new Error("Folder not found");
       const before = folder.links.find((l) => l.id === linkId);
       folder.links = folder.links.filter((l) => l.id !== linkId);
-      pushActivity(data, "delete", `Deleted link “${before?.name || linkId}”`);
+      pushActivity(data, "delete", `Deleted link “${before?.name || linkId}”${credit(body)}`);
       await saveBookmarks(data);
       return data;
     }

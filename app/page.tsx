@@ -4,6 +4,8 @@ import { BookmarksData, Folder, Link } from "@/lib/types";
 import ChatPanel from "./ChatPanel";
 import CommandPalette, { Icon, PaletteItem } from "./CommandPalette";
 import AdminPanel from "./AdminPanel";
+import SuggestModal, { SuggestStart, suggestionSummary } from "./SuggestModal";
+import { Suggestion } from "@/lib/types";
 
 const SYNC_MS = 3000;
 const ADMIN_PW_KEY = "adminPw";
@@ -61,6 +63,7 @@ export default function HomePage() {
   const [sortBy, setSortBy] = useState<"name" | "newest" | "clicks" | "manual">("manual");
   const [showCmd, setShowCmd] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [suggest, setSuggest] = useState<SuggestStart | null>(null);
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
   const [adminOpen, setAdminOpen] = useState(false);
@@ -106,6 +109,34 @@ export default function HomePage() {
     }
   }, [fFolderId, setSafeData]);
   useEffect(() => { load(); }, [load]);
+
+  // Tell people when an admin approves or declines one of their suggestions.
+  const suggestionStatus = useRef<Map<string, Suggestion["status"]> | null>(null);
+  useEffect(() => {
+    suggestionStatus.current = null;
+    if (!user) return;
+    const check = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const res = await fetch("/api/suggestions", { cache: "no-store" });
+        const json = await res.json();
+        if (!Array.isArray(json.suggestions)) return;
+        const list = json.suggestions as Suggestion[];
+        const before = suggestionStatus.current;
+        if (before) {
+          for (const x of list) {
+            if (before.get(x.id) === "pending" && x.status !== "pending") {
+              showToast(x.status === "approved" ? `✅ Approved: ${suggestionSummary(x)}` : `Declined: ${suggestionSummary(x)}`);
+            }
+          }
+        }
+        suggestionStatus.current = new Map(list.map((x) => [x.id, x.status]));
+      } catch {}
+    };
+    check();
+    const id = setInterval(check, 15000);
+    return () => clearInterval(id);
+  }, [user]);
 
   // Live sync: poll for a newer revision and swap it in without a reload.
   const revRef = useRef(0);
@@ -165,6 +196,7 @@ export default function HomePage() {
       if (e.key === "Escape") {
         setShowCmd(false);
         setModal(null);
+        setSuggest(null);
       }
     };
     window.addEventListener("keydown", handler);
@@ -416,6 +448,7 @@ export default function HomePage() {
       cmd("add", "Add website", "plus", () => { resetForm(); if (data?.folders?.[0]) setFFolderId(data.folders[0].id); setModal({ type: "addLink" }); }),
       cmd("folder", "New folder", "folder", () => { resetForm(); setModal({ type: "addFolder" }); }),
       cmd("random", "Random bookmark", "shuffle", randomBookmark),
+      cmd("suggest", "Suggest a change", "bulb", () => setSuggest({})),
       cmd("chat", chatOpen ? "Close chat" : "Open chat", "chat", () => setChatOpen((o) => !o)),
       cmd("theme", theme === "dark" ? "Switch to light mode" : "Switch to dark mode", "moon", () => setTheme(theme === "dark" ? "light" : "dark")),
       cmd("view", viewMode === "grid" ? "Show as list" : "Show as grid", "grid", () => setViewMode(viewMode === "grid" ? "list" : "grid")),
@@ -459,6 +492,7 @@ export default function HomePage() {
         onClose={() => setAdminOpen(false)}
         onLock={lockAdmin}
         showToast={showToast}
+        applyData={setSafeData}
       />
     )}
     <div className="app" data-theme={theme}>
@@ -484,6 +518,7 @@ export default function HomePage() {
           📁 New Folder
         </button>
         <button className="btn btn-secondary" onClick={randomBookmark}>🎲 Random</button>
+        <button className="btn btn-secondary" onClick={() => setSuggest({})}>💡 Suggest</button>
         <button className="btn btn-secondary" onClick={() => setShowCmd(true)} title="Ctrl+K">Ctrl K</button>
         <button className="btn btn-secondary" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
           {theme === "dark" ? "☀️" : "🌙"}
@@ -623,6 +658,9 @@ export default function HomePage() {
                             onClick={() => api("toggleFavorite", { folderId: folder.id, linkId: link.id })}
                           >★</button>
                           <button title="Copy URL" onClick={() => copyUrl(link.url)}>⎘</button>
+                          {!adminUnlocked && (
+                            <button title="Suggest a change" onClick={() => setSuggest({ kind: "editLink", folderId: folder.id, linkId: link.id })}>💡</button>
+                          )}
                           {adminUnlocked && (
                             <>
                               <button title="Edit" onClick={() => openEditLink(folder.id, link)}>✎</button>
@@ -880,6 +918,16 @@ export default function HomePage() {
             </form>
           </div>
         </div>
+      )}
+      {suggest && data && (
+        <SuggestModal
+          data={data}
+          user={user}
+          start={suggest}
+          onClose={() => setSuggest(null)}
+          onNeedLogin={() => { setSuggest(null); openLogin(); }}
+          showToast={showToast}
+        />
       )}
       <ChatPanel
         open={chatOpen}
