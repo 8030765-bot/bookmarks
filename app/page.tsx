@@ -34,8 +34,9 @@ import {
 import { NotificationPanel, WeeklyDigest, disablePush, enablePush, playPing } from "./components/Notifications";
 import { LinkRef, asMarkdown, isExpired, isNewSince, newOpId, normUrl, readLocal, safeHref, suggestionSummary, urlsIn, writeLocal } from "./components/ui";
 import {
-  CustomizeModal, DEFAULT_LOOK, LeaderboardModal, Look, OnlinePill, Palette, PollCards, SpinWheel, WhatsNew, applyLook, usePresence,
+  CustomizeModal, DEFAULT_LOOK, LeaderboardModal, Look, OnlinePill, Palette, PollCards, SpinWheel, WhatsNew, applyLook, applyPollVote, usePresence,
 } from "./components/Community";
+import { TodayStrip, sayThanks, suggestNote, useCommunityInfo } from "./components/Today";
 
 const ADMIN_PW_KEY = "adminPw";
 const CACHE_KEY = "cache:data";
@@ -380,6 +381,8 @@ export default function HomePage() {
   }, [serverRev, applyIfNewer]);
 
   const presence = usePresence(user);
+  const community = useCommunityInfo(user);
+  const myThanksSet = useMemo(() => new Set(community.info?.myThanks || []), [community.info?.myThanks]);
   const personal = usePersonal(user);
   const favoriteSet = useMemo(() => new Set(personal.favorites), [personal.favorites]);
 
@@ -1037,6 +1040,24 @@ export default function HomePage() {
     select: (linkId, shift) => toggleSelect(linkId, shift),
     prompt: (title, initial, onSave, opts) => setPrompt({ title, initial, onSave, ...opts }),
     toast: (msg) => showToast(msg),
+    thank: (l) => {
+      if (!user) { showToast("Log in to say thanks"); openLogin(); return; }
+      const info = community.info;
+      if (info) community.patch({ thanks: { ...info.thanks, [l.id]: (info.thanks[l.id] || 0) + 1 }, myThanks: [...info.myThanks, l.id] });
+      sayThanks(l.id).then(() => showToast(`Thanks sent to ${l.addedBy} 🙏`)).catch((e) => { showToast(e.message); community.reload(); });
+    },
+    suggestNote: (l) => {
+      if (!user) { showToast("Log in to add a note"); openLogin(); return; }
+      setPrompt({
+        title: `A note everyone will see on “${l.name}”`,
+        initial: "",
+        placeholder: "e.g. Needs a free account · Blocked on school Wi-Fi in the library",
+        onSave: (text) => {
+          if (!text.trim()) return;
+          suggestNote(l.id, text).then(() => showToast("Thanks! A moderator will check your note")).catch((e) => showToast(e.message));
+        },
+      });
+    },
     shareToChat: (l) => {
       if (!user) { showToast("Log in to chat"); openLogin(); return; }
       setChatTarget({ text: `${l.name} ${l.url}` });
@@ -1435,6 +1456,8 @@ export default function HomePage() {
     allRefs,
     folderById,
     lastOpened,
+    thanks: community.info?.thanks,
+    myThanks: myThanksSet,
   };
 
   if (loading) {
@@ -1606,20 +1629,31 @@ export default function HomePage() {
           </div>
         )}
 
+        {data && (
+          <TodayStrip
+            data={data}
+            allRefs={allRefs}
+            user={user}
+            community={community}
+            onOpenLink={openCard}
+            onOpenFolder={jumpToFolder}
+            onNeedLogin={() => { showToast("Log in to answer"); openLogin(); }}
+            onError={(m) => showToast(m)}
+          />
+        )}
+
         <PollCards
           polls={data?.polls || []}
           user={user}
+          myAnon={community.info?.myPolls}
           onVote={(pollId, option) => {
             const me = user?.toLowerCase();
-            if (me) setData((d) => d && {
-              ...d,
-              polls: (d.polls || []).map((p) => {
-                if (p.id !== pollId) return p;
-                const votes = { ...p.votes };
-                if (votes[me] === option) delete votes[me]; else votes[me] = option;
-                return { ...p, votes };
-              }),
-            });
+            const poll = data?.polls?.find((p) => p.id === pollId);
+            if (me && poll) {
+              const res = applyPollVote(poll, me, option, community.info?.myPolls);
+              setData((d) => d && { ...d, polls: (d.polls || []).map((p) => (p.id === pollId ? res.poll : p)) });
+              if (poll.anonymous) community.patch({ myPolls: { ...(community.info?.myPolls || {}), [pollId]: res.mine } });
+            }
             api("votePoll", { pollId, option }, { quiet: true }).then((ok) => { if (!ok) load(); });
           }}
           onNeedLogin={() => { showToast("Log in to vote"); openLogin(); }}

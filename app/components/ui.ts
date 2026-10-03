@@ -5,6 +5,8 @@ export function suggestionSummary(s: Suggestion) {
   if (s.kind === "addLink") return `Add “${s.name}”`;
   if (s.kind === "removeLink") return `Remove “${s.linkName}”`;
   if (s.kind === "editLink") return `Change “${s.linkName}”${s.name && s.name !== s.linkName ? ` → “${s.name}”` : ""}`;
+  if (s.kind === "newFolder") return `New folder: ${s.emoji || "📁"} ${s.name}`;
+  if (s.kind === "editFolder") return `Change folder “${s.linkName}”${s.name ? ` → “${s.name}”` : ""}${s.description ? " (description)" : ""}`;
   return s.note && s.note.length > 60 ? `${s.note.slice(0, 60)}…` : s.note || "Idea";
 }
 

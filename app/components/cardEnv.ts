@@ -36,6 +36,10 @@ export interface LinkCardActions {
   toast: (msg: string) => void;
   /** drop the link into a chat message */
   shareToChat?: (link: Link) => void;
+  /** say thanks to whoever added it */
+  thank?: (link: Link) => void;
+  /** suggest a short public note for a moderator to approve */
+  suggestNote?: (link: Link) => void;
 }
 
 /** Everything a card needs that's the same for every card on the page. */
@@ -64,6 +68,9 @@ export interface CardEnv {
   folderById: Map<string, Folder>;
   /** when each link was last opened on this device */
   lastOpened: Map<string, number>;
+  /** thank-you counts per link, and the ones you've thanked */
+  thanks?: Record<string, number>;
+  myThanks?: Set<string>;
 }
 
 export const CardContext = createContext<CardEnv | null>(null);

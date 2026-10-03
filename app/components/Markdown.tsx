@@ -3,13 +3,14 @@ import { Fragment, ReactNode } from "react";
 
 /**
  * A small, safe formatter for guides, bios and wiki pages. It builds React
- * elements (never raw HTML), and only http(s) links become clickable.
- * Supports: # headings, **bold**, *italic*, `code`, [links](https://…),
+ * elements (never raw HTML), and only http(s) links and links to pages on
+ * this site (/wiki/…) become clickable.
+ * Supports: # headings, **bold**, *italic*, `code`, [links](https://… or /path),
  * bare https:// links, - bullet and 1. numbered lists, > quotes, --- lines.
  */
 function inline(text: string, key: string): ReactNode[] {
   const out: ReactNode[] = [];
-  const re = /(\*\*[^*]+\*\*|__[^_]+__|\*[^*\s][^*]*\*|_[^_\s][^_]*_|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<>()]+)/g;
+  const re = /(\*\*[^*]+\*\*|__[^_]+__|\*[^*\s][^*]*\*|_[^_\s][^_]*_|`[^`]+`|\[[^\]]+\]\((?:https?:\/\/|\/(?![\/\\]))[^\s)]*\)|https?:\/\/[^\s<>()]+)/g;
   let last = 0;
   let m: RegExpExecArray | null;
   let i = 0;
@@ -20,8 +21,10 @@ function inline(text: string, key: string): ReactNode[] {
     if (t.startsWith("**") || t.startsWith("__")) out.push(<strong key={k}>{inline(t.slice(2, -2), k)}</strong>);
     else if (t.startsWith("`")) out.push(<code key={k}>{t.slice(1, -1)}</code>);
     else if (t.startsWith("[")) {
-      const mm = /^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/.exec(t)!;
-      out.push(<a key={k} href={mm[2]} target="_blank" rel="noopener noreferrer">{mm[1]}</a>);
+      const mm = /^\[([^\]]+)\]\(([^\s)]*)\)$/.exec(t)!;
+      // links to this site stay in the same tab
+      if (mm[2].startsWith("/")) out.push(<a key={k} href={mm[2]}>{mm[1]}</a>);
+      else out.push(<a key={k} href={mm[2]} target="_blank" rel="noopener noreferrer">{mm[1]}</a>);
     } else if (t.startsWith("http")) out.push(<a key={k} href={t} target="_blank" rel="noopener noreferrer">{t}</a>);
     else out.push(<em key={k}>{inline(t.slice(1, -1), k)}</em>);
     last = m.index + t.length;

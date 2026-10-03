@@ -13,6 +13,7 @@ export default function LinkDetails({ link }: { folder: Folder; link: Link }) {
   const pref = env.prefs[link.id] || {};
   const [note, setNote] = useState(pref.note || "");
   const agg = env.ratings[link.id];
+  const thanked = !!env.myThanks?.has(link.id);
 
   // links that share a tag or a website with this one
   const similar = useMemo(() => {
@@ -41,6 +42,13 @@ export default function LinkDetails({ link }: { folder: Folder; link: Link }) {
     <div className="card-details" onClick={(e) => e.stopPropagation()}>
       {link.notes && <p className="cd-desc">{link.notes}</p>}
       {link.tip && <p className="cd-tip">💡 {link.tip}</p>}
+      {link.communityNotes && link.communityNotes.length > 0 && (
+        <div className="cd-notes">
+          {link.communityNotes.map((n, i) => (
+            <p key={i} className="cd-cnote"><Icon name="users" /> <span>{n.text}</span> <span className="muted-inline">— {n.by}</span></p>
+          ))}
+        </div>
+      )}
       {labels.length > 0 && <div className="cd-labels">{labels.map((l) => <span key={l} className="label">{l}</span>)}</div>}
 
       <div className="cd-facts">
@@ -50,6 +58,7 @@ export default function LinkDetails({ link }: { folder: Folder; link: Link }) {
         {link.readMins ? <span>{link.readMins} min read</span> : null}
         {link.expiresAt && <span>{new Date(link.expiresAt) < new Date() ? "expired" : "hides"} {new Date(link.expiresAt).toLocaleDateString()}</span>}
         {(link.clicks || 0) > 0 && <span>{link.clicks} visits</span>}
+        {(env.thanks?.[link.id] || 0) > 0 && <span>🙏 {env.thanks![link.id]} thanks</span>}
       </div>
 
       {link.checklist && link.checklist.length > 0 && (
@@ -128,6 +137,16 @@ export default function LinkDetails({ link }: { folder: Folder; link: Link }) {
       )}
 
       <div className="cd-actions">
+        {actions.thank && link.addedBy && link.addedBy.toLowerCase() !== env.me?.toLowerCase() && (
+          <button className={`pick ${thanked ? "on" : ""}`} disabled={thanked} onClick={() => actions.thank!(link)} title={`Say thanks to ${link.addedBy}`}>
+            🙏 {thanked ? "Thanked" : "Say thanks"}
+          </button>
+        )}
+        {actions.suggestNote && (
+          <button className="pick" onClick={() => actions.suggestNote!(link)} title="Add a public tip, like “needs a login” — a moderator checks it first">
+            <Icon name="note" /> Add a note for everyone
+          </button>
+        )}
         <button className={`pick ${pref.later ? "on" : ""}`} onClick={() => actions.pref(link.id, { later: !pref.later })}><Icon name="clock" /> {pref.later ? "In Read later" : "Read later"}</button>
         <button className={`pick ${pref.done ? "on" : ""}`} onClick={() => actions.pref(link.id, { done: !pref.done })}><Icon name="check" /> {pref.done ? "Done" : "Mark done"}</button>
         <button className="pick" onClick={() => actions.prompt("Rename for yourself", pref.rename || link.name, (v) => actions.pref(link.id, { rename: v.trim() === link.name ? "" : v.trim() }), { placeholder: link.name })}>

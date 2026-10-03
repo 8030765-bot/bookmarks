@@ -192,45 +192,99 @@ export function SpinWheel({ refs, folders, onOpen, onClose }: {
 }
 
 /* ---------- polls ---------- */
-export function PollCards({ polls, user, onVote, onNeedLogin }: {
-  polls: Poll[]; user: string | null; onVote: (pollId: string, option: number) => void; onNeedLogin: () => void;
+/** Your answers on a poll (anonymous polls keep them on the server, sent only to you). */
+export function pollMine(p: Poll, me: string, anon: Record<string, number[]> = {}): number[] {
+  const v = p.anonymous ? anon[p.id] : me ? p.votes[me] : undefined;
+  return v === undefined || v === null ? [] : Array.isArray(v) ? v : [v];
+}
+export function pollCounts(p: Poll): number[] {
+  if (p.anonymous) return p.options.map((_, i) => p.counts?.[i] || 0);
+  const c = p.options.map(() => 0);
+  Object.values(p.votes).forEach((v) => (Array.isArray(v) ? v : [v]).forEach((i) => { if (c[i] !== undefined) c[i]++; }));
+  return c;
+}
+export const pollIsClosed = (p: Poll) => !!p.closed || (!!p.endsAt && Date.parse(p.endsAt) < Date.now());
+/** What a vote does, worked out the same way the server does it, so the screen updates instantly. */
+export function applyPollVote(p: Poll, me: string, option: number, anon: Record<string, number[]> = {}) {
+  const had = pollMine(p, me, anon);
+  const next = had.includes(option) ? had.filter((x) => x !== option) : p.multi ? [...had, option].sort((a, b) => a - b) : [option];
+  if (p.anonymous) {
+    const counts = pollCounts(p);
+    had.forEach((i) => { counts[i] = Math.max(0, counts[i] - 1); });
+    next.forEach((i) => { counts[i]++; });
+    return { poll: { ...p, counts }, mine: next };
+  }
+  const votes = { ...p.votes };
+  if (!next.length) delete votes[me];
+  else votes[me] = p.multi ? next : next[0];
+  return { poll: { ...p, votes }, mine: next };
+}
+function endsLabel(iso: string) {
+  const ms = Date.parse(iso) - Date.now();
+  if (ms <= 0) return "ended";
+  const h = Math.round(ms / 3600_000);
+  return h < 1 ? "ends soon" : h < 48 ? `ends in ${h}h` : `ends in ${Math.round(h / 24)}d`;
+}
+
+export function PollCards({ polls, user, myAnon = {}, onVote, onNeedLogin }: {
+  polls: Poll[]; user: string | null; myAnon?: Record<string, number[]>;
+  onVote: (pollId: string, option: number) => void; onNeedLogin: () => void;
 }) {
-  const visible = polls.filter((p) => !p.closed || Date.now() - new Date(p.createdAt).getTime() < 7 * 86400_000).slice(0, 3);
+  const visible = polls
+    .filter((p) => !pollIsClosed(p) || Date.now() - new Date(p.endsAt || p.createdAt).getTime() < 7 * 86400_000)
+    .sort((a, b) => Number(!!b.featured) - Number(!!a.featured))
+    .slice(0, 3);
   if (!visible.length) return null;
   const me = user?.toLowerCase() || "";
   return (
     <section className="polls">
       {visible.map((p) => {
-        const total = Object.keys(p.votes).length;
-        const mine = me ? p.votes[me] : undefined;
-        const showResults = mine !== undefined || p.closed || !user;
+        const closed = pollIsClosed(p);
+        const counts = pollCounts(p);
+        const answers = counts.reduce((a, b) => a + b, 0);
+        // single-choice: share of voters; multiple-choice: share of everyone who answered
+        const voters = p.anonymous ? answers : Object.keys(p.votes).length;
+        const total = p.multi && !p.anonymous ? voters : answers;
+        const mine = pollMine(p, me, myAnon);
+        const showResults = mine.length > 0 || closed || !user;
         return (
-          <div key={p.id} className={`poll ${p.closed ? "closed" : ""}`}>
+          <div key={p.id} className={`poll ${closed ? "closed" : ""} ${p.featured ? "featured" : ""}`}>
             <div className="poll-head">
-              <span className="poll-tag">{p.closed ? "Poll closed" : "Poll"}</span>
-              <span className="poll-meta">{total} vote{total === 1 ? "" : "s"}</span>
+              <span className="poll-tag">{closed ? "Poll closed" : p.featured ? "⭐ Poll of the week" : "Poll"}</span>
+              <span className="poll-meta">
+                {voters} {p.anonymous ? "answer" : "vote"}{voters === 1 ? "" : "s"}
+                {p.multi && " · pick any"}
+                {p.anonymous && " · anonymous"}
+                {p.endsAt && !closed && ` · ${endsLabel(p.endsAt)}`}
+              </span>
             </div>
             <h3>{p.question}</h3>
             <div className="poll-options">
               {p.options.map((opt, i) => {
-                const n = Object.values(p.votes).filter((v) => v === i).length;
-                const pct = total ? Math.round((n / total) * 100) : 0;
+                const pct = total ? Math.round((counts[i] / total) * 100) : 0;
+                const picked = mine.includes(i);
                 return (
                   <button
                     key={i}
-                    className={`poll-opt ${mine === i ? "mine" : ""}`}
-                    disabled={p.closed}
+                    className={`poll-opt ${picked ? "mine" : ""}`}
+                    disabled={closed}
+                    aria-pressed={picked}
                     onClick={() => (user ? onVote(p.id, i) : onNeedLogin())}
                   >
                     {showResults && <span className="poll-fill" style={{ width: `${pct}%` }} />}
-                    <span className="poll-label">{mine === i && <Icon name="check" />} {opt}</span>
+                    <span className="poll-label">{picked && <Icon name="check" />} {opt}</span>
                     {showResults && <span className="poll-pct">{pct}%</span>}
                   </button>
                 );
               })}
             </div>
-            {!user && !p.closed && <div className="poll-foot">Log in to vote</div>}
-            {mine !== undefined && !p.closed && <div className="poll-foot">Tap your answer again to take your vote back</div>}
+            {!user && !closed && <div className="poll-foot">Log in to vote</div>}
+            {mine.length > 0 && !closed && (
+              <div className="poll-foot">
+                {p.multi ? "Tap answers to add or remove them" : "Tap your answer again to take your vote back"}
+                {p.anonymous && " — nobody can see what you picked"}
+              </div>
+            )}
           </div>
         );
       })}

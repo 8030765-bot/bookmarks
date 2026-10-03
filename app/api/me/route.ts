@@ -18,6 +18,7 @@ import { Redis } from "@upstash/redis";
 import { followersKey } from "@/lib/store";
 import { listUsers } from "@/lib/auth";
 import { cookies } from "next/headers";
+import { getRole } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -41,8 +42,8 @@ export async function GET(req: NextRequest) {
     const [info, sessions, logins] = await Promise.all([accountInfo(user), listSessions(user), loginHistory(user)]);
     return NextResponse.json({ ...info, sessions, logins });
   }
-  const [data, following, push] = await Promise.all([getUserData(user), getFollowing(user), hasPush(user)]);
-  return NextResponse.json({ user, ...data, following, push, pushKey: pushConfigured() ? pushPublicKey() : null });
+  const [data, following, push, role] = await Promise.all([getUserData(user), getFollowing(user), hasPush(user), getRole(user)]);
+  return NextResponse.json({ user, role, ...data, following, push, pushKey: pushConfigured() ? pushPublicKey() : null });
 }
 
 export async function POST(req: NextRequest) {

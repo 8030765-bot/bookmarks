@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminSetPassword, deleteUser, listUsers, rebuildUserIndex } from "@/lib/auth";
 import { clearChat, getAllMessages, getBanned, setBanned } from "@/lib/chat";
-import { getBookmarks, withClicks } from "@/lib/store";
-import { approveSuggestion, deleteSuggestion, listSuggestions, rejectSuggestion } from "@/lib/suggestions";
+import { getBookmarks, setCommunityNote, withClicks } from "@/lib/store";
+import { approveSuggestion, deleteSuggestion, listSuggestions, rejectSuggestion, setStage } from "@/lib/suggestions";
+import { allFlair, pendingNotes, setFlair, takeNote } from "@/lib/community";
+import { notify } from "@/lib/userdata";
 import {
   Role, audit, checkAdmin, checkMod, checkOwner, checkPassword, getAuthContext, listAudit, listRoles, setRole,
 } from "@/lib/roles";
@@ -39,10 +41,11 @@ export async function POST(req: NextRequest) {
       case "overview": {
         checkMod(ctx, password);
         const isAdmin = ctx.role === "owner" || ctx.role === "admin" || !ctx.ownerExists;
-        const [users, messages, banned, suggestions, roles, auditLog] = await Promise.all([
+        const [users, messages, banned, suggestions, roles, auditLog, flair, notes] = await Promise.all([
           listUsers(), getAllMessages(), getBanned(), listSuggestions(), listRoles(), isAdmin ? listAudit() : Promise.resolve([]),
+          allFlair(), pendingNotes(),
         ]);
-        return NextResponse.json({ users, banned, messageCount: messages.length, suggestions, roles, audit: auditLog, me: ctx });
+        return NextResponse.json({ users, banned, messageCount: messages.length, suggestions, roles, audit: auditLog, me: ctx, flair, notes });
       }
       case "ban":
       case "unban":
@@ -111,6 +114,35 @@ export async function POST(req: NextRequest) {
         checkMod(ctx, password);
         await deleteSuggestion(String(body.id || ""));
         return NextResponse.json({ suggestions: await listSuggestions() });
+      case "setStage":
+        checkMod(ctx, password);
+        await setStage(String(body.id || ""), body.stage);
+        await log(`${body.id} → ${body.stage || "none"}`);
+        return NextResponse.json({ suggestions: await listSuggestions() });
+      case "setFlair": {
+        checkAdmin(ctx, password);
+        if (!username) throw new Error("Missing username");
+        if (!(await listUsers()).some((u) => u.username.toLowerCase() === username.toLowerCase())) throw new Error("No such account");
+        await setFlair(username, String(body.flair || ""));
+        await log(`${username}: ${body.flair || "(none)"}`);
+        return NextResponse.json({ flair: await allFlair() });
+      }
+      case "approveNote":
+      case "rejectNote": {
+        checkMod(ctx, password);
+        const note = await takeNote(String(body.id || ""));
+        if (note && action === "approveNote") {
+          await setCommunityNote(note.linkId, { text: typeof body.text === "string" && body.text.trim() ? body.text : note.text, by: note.by });
+          notify(note.by, { kind: "suggestion", text: `Your note on “${note.linkName}” is now showing`, link: `/#link-${note.linkId}` }).catch(() => {});
+        }
+        await log(note ? `${note.linkName}: ${note.text.slice(0, 80)}` : String(body.id || ""));
+        return NextResponse.json({ notes: await pendingNotes(), data: await withClicks(await getBookmarks()) });
+      }
+      case "removeNote":
+        checkMod(ctx, password);
+        await setCommunityNote(String(body.linkId || ""), null, Number(body.index));
+        await log(String(body.linkId || ""));
+        return NextResponse.json({ data: await withClicks(await getBookmarks()) });
       default:
         return NextResponse.json({ error: "Unknown action" }, { status: 400 });
     }

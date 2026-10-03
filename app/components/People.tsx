@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { makeQr } from "./qr";
 import { timeAgo } from "./ui";
 
@@ -28,6 +28,25 @@ export function Avatar({ name, profile, size = 28, online }: { name: string; pro
 }
 
 export const roleClass = (role?: string | null) => (role ? `role-name role-${role}` : "");
+
+/* ---------- flair: short titles admins give people ("Link hunter", "Helper of the month") ---------- */
+let flairMap: Record<string, string> = {};
+const flairListeners = new Set<() => void>();
+export function setFlairMap(map: Record<string, string>) {
+  flairMap = map || {};
+  flairListeners.forEach((f) => f());
+}
+export function useFlair(username: string) {
+  return useSyncExternalStore(
+    (cb) => { flairListeners.add(cb); return () => { flairListeners.delete(cb); }; },
+    () => flairMap[username.toLowerCase()],
+    () => undefined,
+  );
+}
+export function Flair({ username }: { username: string }) {
+  const f = useFlair(username);
+  return f ? <span className="flair">{f}</span> : null;
+}
 
 /* ---------- hover cards on usernames ---------- */
 interface CardData {
@@ -74,6 +93,7 @@ export function UserChip({ username, role, online, className = "", onOpen }: {
   const leave = () => { clearTimeout(timer.current); timer.current = setTimeout(() => setShow(false), 150); };
   useEffect(() => () => clearTimeout(timer.current), []);
   const r = card?.role ?? role;
+  const flair = useFlair(username);
   return (
     <span className="user-chip-wrap" onMouseEnter={enter} onMouseLeave={leave} onFocus={enter} onBlur={leave}>
       <button
@@ -83,6 +103,7 @@ export function UserChip({ username, role, online, className = "", onOpen }: {
         {online && <span className="mini-dot" aria-label="online" />}
         {card?.profile?.displayName || username}
       </button>
+      {flair && <span className="flair">{flair}</span>}
       {show && (
         <span className="hover-card" role="tooltip" onMouseEnter={() => clearTimeout(timer.current)} onMouseLeave={leave}>
           {!card ? (

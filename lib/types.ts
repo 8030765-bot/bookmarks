@@ -41,6 +41,8 @@ export interface Link {
   alsoIn?: string[];
   /** estimated minutes to read, from the page's word count */
   readMins?: number;
+  /** context added by members and approved by admins */
+  communityNotes?: { text: string; by: string; at: string }[];
 }
 
 export type LinkStatus = "works" | "login" | "slow" | "broken";
@@ -134,7 +136,7 @@ export interface Club {
   createdAt: string;
 }
 
-export type SuggestionKind = "addLink" | "editLink" | "removeLink" | "other";
+export type SuggestionKind = "addLink" | "editLink" | "removeLink" | "other" | "newFolder" | "editFolder";
 
 export interface Suggestion {
   id: string;
@@ -151,6 +153,14 @@ export interface Suggestion {
   note?: string;
   resolvedAt?: string;
   resolvedNote?: string;
+  /** folder suggestions */
+  emoji?: string;
+  description?: string;
+  /** lowercase usernames who upvoted it */
+  votes?: string[];
+  comments?: { id: string; user: string; text: string; at: string }[];
+  /** roadmap stage for site ideas (set by admins) */
+  stage?: "planned" | "in progress" | "done";
 }
 
 export interface SiteSettings {
@@ -174,16 +184,35 @@ export interface SiteSettings {
   chatLinkAllow?: string[];
   /** chat: longest message allowed */
   chatMaxLen?: number;
+  /** community: the person and folder on the homepage spotlight */
+  featuredUser?: string;
+  featuredFolderId?: string;
+  /** community: link of the day picked by an admin (otherwise picked automatically) */
+  linkOfDay?: { linkId: string; day: string };
+  /** community: this week's challenge */
+  challenge?: { title: string; text?: string; round: string; endsAt?: string };
+  /** community: the site's birthday (YYYY-MM-DD) for the yearly celebration */
+  siteBirthday?: string;
 }
 
 export interface Poll {
   id: string;
   question: string;
   options: string[];
-  /** lowercase username -> option index */
-  votes: Record<string, number>;
+  /** lowercase username -> option index (or indexes, for multiple-choice) — empty for anonymous polls */
+  votes: Record<string, number | number[]>;
   createdAt: string;
   closed?: boolean;
+  /** pick more than one answer */
+  multi?: boolean;
+  /** stops taking votes after this (ISO) */
+  endsAt?: string;
+  /** who voted for what isn't stored in the shared list, only the totals */
+  anonymous?: boolean;
+  /** totals for anonymous polls */
+  counts?: number[];
+  /** "poll of the week": shown first */
+  featured?: boolean;
 }
 
 export interface BookmarksData {

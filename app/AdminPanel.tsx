@@ -4,13 +4,14 @@ import { BookmarksData, ChatMessage, Folder, Link, Suggestion } from "@/lib/type
 import { Icon } from "./components/Icon";
 import { suggestionSummary } from "./SuggestModal";
 import Favicon from "./components/Favicon";
-import { parseBookmarksHtml } from "./components/Community";
+import { parseBookmarksHtml, pollCounts } from "./components/Community";
 
 type Role = "owner" | "admin" | "mod" | null;
-type Tab = "overview" | "suggestions" | "polls" | "links" | "folders" | "chat" | "users" | "roles" | "site" | "data" | "activity";
+type Tab = "overview" | "suggestions" | "community" | "polls" | "links" | "folders" | "chat" | "users" | "roles" | "site" | "data" | "activity";
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "overview", label: "Overview", icon: "chart" },
   { id: "suggestions", label: "Suggestions", icon: "bulb" },
+  { id: "community", label: "Community", icon: "trophy" },
   { id: "polls", label: "Polls", icon: "poll" },
   { id: "links", label: "Links", icon: "link" },
   { id: "folders", label: "Folders", icon: "folder" },
@@ -32,6 +33,8 @@ interface AdminInfo {
   roles: Record<string, Role>;
   audit: AuditEntry[];
   me: { user: string | null; role: Role; ownerExists: boolean };
+  flair?: Record<string, string>;
+  notes?: { id: string; linkId: string; linkName: string; text: string; by: string; at: string }[];
 }
 type LinkRow = { folder: Folder; link: Link };
 
@@ -131,11 +134,12 @@ export default function AdminPanel({
       <nav className="admin-tabs">
         {TABS.filter((t) => {
           if (t.id === "roles") return role === "owner";
-          if (role === "mod") return ["overview", "suggestions", "chat", "users"].includes(t.id);
+          if (role === "mod") return ["overview", "suggestions", "community", "chat", "users"].includes(t.id);
           return true;
         }).map((t) => (
           <button key={t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)} title={t.label}>
             {t.id === "suggestions" && pending > 0 && <span className="tab-badge">{pending}</span>}
+            {t.id === "community" && (info?.notes?.length || 0) > 0 && <span className="tab-badge">{info!.notes!.length}</span>}
             <Icon name={t.icon} />
             <span>{t.label}</span>
           </button>
@@ -147,6 +151,9 @@ export default function AdminPanel({
         )}
         {tab === "suggestions" && (
           <SuggestionsTab data={data} info={info} admin={admin} setInfo={setInfo} applyData={applyData} showToast={showToast} />
+        )}
+        {tab === "community" && (
+          <CommunityTab data={data} info={info} admin={admin} setInfo={setInfo} applyData={applyData} run={run} role={role} password={password} showToast={showToast} />
         )}
         {tab === "polls" && <PollsTab data={data} run={run} submitting={submitting} showToast={showToast} />}
         {tab === "links" && <LinksTab data={data} rows={allLinks} run={run} submitting={submitting} showToast={showToast} />}
@@ -275,6 +282,8 @@ const KIND_TEXT: Record<Suggestion["kind"], string> = {
   addLink: "Add website",
   editLink: "Change website",
   removeLink: "Remove website",
+  newFolder: "New folder",
+  editFolder: "Change folder",
   other: "Idea",
 };
 function SuggestionsTab({
@@ -345,7 +354,10 @@ function SuggestionsTab({
                 <div className="row-sub">
                   <span className={`pill ${x.status}`}>{x.status === "rejected" ? "declined" : x.status}</span>
                   {" "}{timeAgo(x.resolvedAt)}{x.resolvedNote && ` · “${x.resolvedNote}”`}
+                  {(x.votes?.length || 0) > 0 && ` · ▲ ${x.votes!.length}`}
+                  {(x.comments?.length || 0) > 0 && ` · 💬 ${x.comments!.length}`}
                 </div>
+                {x.kind === "other" && x.status !== "rejected" && <StagePicker x={x} act={act} />}
               </div>
             ) : (
               <div className="sugg-body">
@@ -370,6 +382,10 @@ function SuggestionsTab({
                 )}
                 {gone && <div className="sugg-warn">“{x.linkName}” no longer exists — decline or delete this one.</div>}
                 {x.note && <div className="sugg-note">“{x.note}”</div>}
+                {((x.votes?.length || 0) > 0 || (x.comments?.length || 0) > 0) && (
+                  <div className="row-sub">▲ {x.votes?.length || 0} upvotes · 💬 {x.comments?.length || 0} comments</div>
+                )}
+                {x.kind === "other" && <StagePicker x={x} act={act} />}
                 <div className="sugg-actions">
                   {x.kind !== "other" ? (
                     <button
@@ -410,6 +426,10 @@ function SuggestionsTab({
 function PollsTab({ data, run, submitting, showToast }: { data: BookmarksData; run: Api; submitting: boolean; showToast: (m: string) => void }) {
   const [question, setQuestion] = useState("");
   const [options, setOptions] = useState(["", ""]);
+  const [multi, setMulti] = useState(false);
+  const [anonymous, setAnonymous] = useState(false);
+  const [featured, setFeatured] = useState(false);
+  const [endsAt, setEndsAt] = useState("");
   const polls = data.polls || [];
   const filled = options.map((o) => o.trim()).filter(Boolean);
   return (
@@ -418,8 +438,10 @@ function PollsTab({ data, run, submitting, showToast }: { data: BookmarksData; r
         className="poll-form"
         onSubmit={async (e) => {
           e.preventDefault();
-          if (await run("createPoll", { question, options: filled })) {
-            setQuestion(""); setOptions(["", ""]); showToast("Poll posted for everyone");
+          const ends = endsAt ? new Date(endsAt).toISOString() : undefined;
+          if (await run("createPoll", { question, options: filled, multi, anonymous, featured, endsAt: ends })) {
+            setQuestion(""); setOptions(["", ""]); setMulti(false); setAnonymous(false); setFeatured(false); setEndsAt("");
+            showToast("Poll posted for everyone");
           }
         }}
       >
@@ -441,6 +463,12 @@ function PollsTab({ data, run, submitting, showToast }: { data: BookmarksData; r
             )}
           </div>
         ))}
+        <div className="poll-flags">
+          <label className="check-row"><input type="checkbox" checked={multi} onChange={(e) => setMulti(e.target.checked)} /> People can pick more than one</label>
+          <label className="check-row"><input type="checkbox" checked={anonymous} onChange={(e) => setAnonymous(e.target.checked)} /> Anonymous (nobody sees who picked what)</label>
+          <label className="check-row"><input type="checkbox" checked={featured} onChange={(e) => setFeatured(e.target.checked)} /> ⭐ Poll of the week</label>
+          <label className="check-row">Closes on <input type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} /></label>
+        </div>
         <div className="admin-toolbar end">
           {options.length < 6 && (
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => setOptions([...options, ""])}><Icon name="plus" /> Option</button>
@@ -451,16 +479,21 @@ function PollsTab({ data, run, submitting, showToast }: { data: BookmarksData; r
       <h3 className="admin-h">All polls</h3>
       {polls.length === 0 && <div className="admin-empty">No polls yet.</div>}
       {polls.map((p) => {
-        const total = Object.keys(p.votes).length;
+        const counts = pollCounts(p);
+        const total = p.anonymous || p.multi ? counts.reduce((a, b) => a + b, 0) : Object.keys(p.votes).length;
         return (
           <div key={p.id} className={`sugg-card ${p.closed ? "approved" : "pending"}`}>
             <div className="sugg-top">
-              <strong>{p.question}</strong>
-              <span className="row-sub inline">{total} votes · {timeAgo(p.createdAt)}</span>
+              <strong>{p.featured && "⭐ "}{p.question}</strong>
+              <span className="row-sub inline">
+                {total} {p.multi || p.anonymous ? "answers" : "votes"} · {timeAgo(p.createdAt)}
+                {p.multi && " · multi"}{p.anonymous && " · anonymous"}
+                {p.endsAt && ` · closes ${new Date(p.endsAt).toLocaleString()}`}
+              </span>
             </div>
             <div className="sugg-body">
               {p.options.map((o, i) => {
-                const n = Object.values(p.votes).filter((v) => v === i).length;
+                const n = counts[i];
                 return (
                   <div key={i} className="bar-row">
                     <span className="bar-label">{o}</span>
@@ -471,6 +504,7 @@ function PollsTab({ data, run, submitting, showToast }: { data: BookmarksData; r
               })}
               <div className="sugg-actions">
                 <button className="btn btn-secondary btn-sm" onClick={() => run("closePoll", { pollId: p.id })}>{p.closed ? "Reopen" : "Close voting"}</button>
+                <button className="btn btn-secondary btn-sm" onClick={() => run("closePoll", { pollId: p.id, featured: !p.featured })}>{p.featured ? "Unfeature" : "⭐ Feature"}</button>
                 <button className="btn btn-danger btn-sm" onClick={async () => { if (confirm("Delete this poll?")) await run("deletePoll", { pollId: p.id }); }}>Delete</button>
               </div>
             </div>
@@ -1117,5 +1151,191 @@ function Toggle({ label, hint, checked, onChange }: { label: string; hint?: stri
       <input type="checkbox" role="switch" checked={checked} onChange={(e) => onChange(e.target.checked)} />
       <span className="switch" aria-hidden="true" />
     </label>
+  );
+}
+
+/* ---------- roadmap stage for ideas ---------- */
+const STAGES = ["", "planned", "in progress", "done"] as const;
+function StagePicker({ x, act }: { x: Suggestion; act: (action: string, x: Suggestion, extra?: Record<string, unknown>) => Promise<boolean> }) {
+  return (
+    <div className="stage-pick">
+      <span className="row-sub inline">Roadmap:</span>
+      {STAGES.map((st) => (
+        <button key={st || "none"} className={`pick ${(x.stage || "") === st ? "on" : ""}`} onClick={() => act("setStage", x, { stage: st || null })}>
+          {st || "not on it"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ---------- Community: notes, flair, spotlight, challenge, events ---------- */
+interface EventRow { id: string; title: string; date: string; endDate?: string; description?: string }
+function CommunityTab({
+  data, info, admin, setInfo, applyData, run, role, password, showToast,
+}: {
+  data: BookmarksData; info: AdminInfo | null; admin: (a: string, p?: Record<string, any>) => Promise<any>;
+  setInfo: React.Dispatch<React.SetStateAction<AdminInfo | null>>; applyData: (d: BookmarksData) => void;
+  run: Api; role: Role; password: string; showToast: (m: string) => void;
+}) {
+  const isAdmin = role !== "mod";
+  const s = data.settings || {};
+  const [flairUser, setFlairUser] = useState("");
+  const [flairText, setFlairText] = useState("");
+  const [featuredUser, setFeaturedUser] = useState(s.featuredUser || "");
+  const [challengeTitle, setChallengeTitle] = useState(s.challenge?.title || "");
+  const [challengeText, setChallengeText] = useState(s.challenge?.text || "");
+  const [birthday, setBirthday] = useState(s.siteBirthday || "");
+  const [events, setEvents] = useState<EventRow[] | null>(null);
+  const [ev, setEv] = useState({ title: "", date: "", description: "" });
+  const allLinks = useMemo(() => data.folders.flatMap((f) => f.links.map((l) => ({ f, l }))), [data]);
+
+  const loadEvents = useCallback(() => {
+    fetch("/api/events", { cache: "no-store" }).then((r) => r.json()).then((j) => setEvents(j.events || [])).catch(() => setEvents([]));
+  }, []);
+  useEffect(() => { loadEvents(); }, [loadEvents]);
+
+  async function note(action: "approveNote" | "rejectNote", id: string) {
+    try {
+      const j = await admin(action, { id });
+      setInfo((i) => (i ? { ...i, notes: j.notes } : i));
+      if (j.data) applyData(j.data);
+      showToast(action === "approveNote" ? "Note is now showing on the link" : "Note removed");
+    } catch (e: any) { showToast(e.message); }
+  }
+  async function saveEvent(e: React.FormEvent) {
+    e.preventDefault();
+    const res = await fetch("/api/events", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...ev, date: ev.date ? new Date(ev.date).toISOString() : "", password }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) return showToast(j.error || "Couldn't save");
+    setEvents(j.events); setEv({ title: "", date: "", description: "" }); showToast("Event added");
+  }
+  async function deleteEvent(id: string) {
+    const res = await fetch("/api/events", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", id, password }) });
+    const j = await res.json().catch(() => ({}));
+    if (res.ok) setEvents(j.events); else showToast(j.error || "Couldn't delete");
+  }
+
+  return (
+    <>
+      <h3 className="admin-h">Notes waiting for a check {info?.notes?.length ? `(${info.notes.length})` : ""}</h3>
+      {!info?.notes?.length && <div className="admin-empty">No notes waiting.</div>}
+      {info?.notes?.map((n) => (
+        <div key={n.id} className="sugg-card pending">
+          <div className="sugg-top"><strong>{n.by}</strong> <span className="row-sub inline">on “{n.linkName}” · {timeAgo(n.at)}</span></div>
+          <div className="sugg-body">
+            <div className="sugg-note">“{n.text}”</div>
+            <div className="sugg-actions">
+              <button className="btn btn-primary btn-sm" onClick={() => note("approveNote", n.id)}>Show it</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => note("rejectNote", n.id)}>Decline</button>
+            </div>
+          </div>
+        </div>
+      ))}
+      {allLinks.some(({ l }) => l.communityNotes?.length) && (
+        <>
+          <h3 className="admin-h">Notes showing now</h3>
+          {allLinks.filter(({ l }) => l.communityNotes?.length).map(({ l }) => l.communityNotes!.map((n, i) => (
+            <div key={`${l.id}-${i}`} className="admin-row">
+              <div className="row-main"><div className="row-title">{l.name}</div><div className="row-sub">“{n.text}” — {n.by}</div></div>
+              <button className="btn-icon sm" title="Remove note" onClick={async () => {
+                try { const j = await admin("removeNote", { linkId: l.id, index: i }); if (j.data) applyData(j.data); } catch (e: any) { showToast(e.message); }
+              }}><Icon name="x" /></button>
+            </div>
+          )))}
+        </>
+      )}
+
+      <h3 className="admin-h">Events calendar</h3>
+      <form className="poll-form" onSubmit={saveEvent}>
+        <div className="status-row">
+          <input value={ev.title} onChange={(e) => setEv({ ...ev, title: e.target.value })} placeholder="e.g. Game jam week" maxLength={100} />
+          <input type="datetime-local" value={ev.date} onChange={(e) => setEv({ ...ev, date: e.target.value })} aria-label="When" />
+        </div>
+        <input value={ev.description} onChange={(e) => setEv({ ...ev, description: e.target.value })} placeholder="Short description (optional)" maxLength={500} />
+        <div className="admin-toolbar end"><button className="btn btn-primary btn-sm" disabled={!ev.title.trim() || !ev.date}>Add event</button></div>
+      </form>
+      {events?.map((e) => (
+        <div key={e.id} className="admin-row">
+          <div className="row-main"><div className="row-title">{e.title}</div><div className="row-sub">{new Date(e.date).toLocaleString()}{e.description && ` · ${e.description}`}</div></div>
+          <button className="btn-icon sm" title="Delete event" onClick={() => deleteEvent(e.id)}><Icon name="trash" /></button>
+        </div>
+      ))}
+
+      {isAdmin && (
+        <>
+          <h3 className="admin-h">Spotlight</h3>
+          <div className="form-group">
+            <label>Featured folder</label>
+            <select value={s.featuredFolderId || ""} onChange={(e) => run("setSettings", { settings: { featuredFolderId: e.target.value } })}>
+              <option value="">(none)</option>
+              {data.folders.map((f) => <option key={f.id} value={f.id}>{f.emoji} {f.name}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Featured person</label>
+            <div className="status-row">
+              <input value={featuredUser} onChange={(e) => setFeaturedUser(e.target.value)} placeholder="username" maxLength={20} />
+              <button className="btn btn-secondary btn-sm" onClick={() => run("setSettings", { settings: { featuredUser } })}>Save</button>
+            </div>
+          </div>
+          <div className="form-group">
+            <label>Link of the day <span className="muted-inline">— otherwise one is picked automatically</span></label>
+            <select
+              value={s.linkOfDay?.day === new Date().toISOString().slice(0, 10) ? s.linkOfDay.linkId : ""}
+              onChange={(e) => run("setSettings", { settings: { linkOfDay: e.target.value } })}
+            >
+              <option value="">(pick automatically)</option>
+              {allLinks.map(({ f, l }) => <option key={l.id} value={l.id}>{f.emoji} {l.name}</option>)}
+            </select>
+          </div>
+
+          <h3 className="admin-h">Challenge</h3>
+          <div className="form-group">
+            <input value={challengeTitle} onChange={(e) => setChallengeTitle(e.target.value)} placeholder="e.g. Find the best free typing game" maxLength={100} />
+            <input value={challengeText} onChange={(e) => setChallengeText(e.target.value)} placeholder="Rules or details (optional)" maxLength={300} />
+          </div>
+          <div className="admin-toolbar end">
+            {s.challenge && <button className="btn btn-secondary btn-sm" onClick={async () => { if (await run("setSettings", { settings: { challenge: null } })) { setChallengeTitle(""); setChallengeText(""); showToast("Challenge ended"); } }}>End challenge</button>}
+            <button className="btn btn-primary btn-sm" disabled={!challengeTitle.trim()} onClick={async () => {
+              const round = s.challenge?.title === challengeTitle.trim() ? s.challenge.round : new Date().toISOString().slice(0, 10);
+              if (await run("setSettings", { settings: { challenge: { title: challengeTitle, text: challengeText, round } } })) showToast("Challenge is live");
+            }}>{s.challenge ? "Update" : "Start challenge"}</button>
+          </div>
+
+          <h3 className="admin-h">Site birthday</h3>
+          <div className="status-row">
+            <input type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} />
+            <button className="btn btn-secondary btn-sm" onClick={() => run("setSettings", { settings: { siteBirthday: birthday } })}>Save</button>
+          </div>
+
+          <h3 className="admin-h">Flair</h3>
+          <p className="row-sub">A short title shown next to someone's name, like “Link hunter”.</p>
+          <div className="status-row">
+            <input value={flairUser} onChange={(e) => setFlairUser(e.target.value)} placeholder="username" list="flair-users" maxLength={20} />
+            <input value={flairText} onChange={(e) => setFlairText(e.target.value)} placeholder="Flair (empty to remove)" maxLength={24} />
+            <button className="btn btn-primary btn-sm" disabled={!flairUser.trim()} onClick={async () => {
+              try {
+                const j = await admin("setFlair", { username: flairUser.trim(), flair: flairText });
+                setInfo((i) => (i ? { ...i, flair: j.flair } : i));
+                setFlairUser(""); setFlairText(""); showToast("Flair saved");
+              } catch (e: any) { showToast(e.message); }
+            }}>Save</button>
+          </div>
+          <datalist id="flair-users">{info?.users.map((u) => <option key={u.username} value={u.username} />)}</datalist>
+          {Object.entries(info?.flair || {}).map(([u, f]) => (
+            <div key={u} className="admin-row">
+              <div className="row-main"><div className="row-title">{u}</div><div className="row-sub"><span className="flair">{f}</span></div></div>
+              <button className="btn-icon sm" title="Remove flair" onClick={async () => {
+                try { const j = await admin("setFlair", { username: u, flair: "" }); setInfo((i) => (i ? { ...i, flair: j.flair } : i)); } catch (e: any) { showToast(e.message); }
+              }}><Icon name="x" /></button>
+            </div>
+          ))}
+        </>
+      )}
+    </>
   );
 }

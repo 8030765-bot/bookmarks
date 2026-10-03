@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { BookmarksData, Suggestion, SuggestionKind } from "@/lib/types";
 import { suggestionSummary } from "./components/ui";
+import { useOnRevChange } from "./components/sync";
 
 export interface SuggestStart {
   kind?: SuggestionKind;
@@ -13,7 +14,9 @@ const KIND_LABELS: Record<SuggestionKind, string> = {
   addLink: "Add a website",
   editLink: "Change a website",
   removeLink: "Remove a website",
-  other: "Other idea",
+  newFolder: "New folder",
+  editFolder: "Change a folder",
+  other: "Idea for the site",
 };
 
 function timeAgo(iso?: string) {
@@ -49,6 +52,8 @@ export default function SuggestModal({
   const [url, setUrl] = useState("");
   const [folderId, setFolderId] = useState(start.folderId || data.folders[0]?.id || "");
   const [note, setNote] = useState("");
+  const [emoji, setEmoji] = useState("📁");
+  const [description, setDescription] = useState("");
   const [sending, setSending] = useState(false);
   const [mine, setMine] = useState<Suggestion[]>([]);
 
@@ -60,24 +65,25 @@ export default function SuggestModal({
     if (kind === "editLink" && targetLink) {
       setName(targetLink.name);
       setUrl(targetLink.url);
+    } else if (kind === "editFolder") {
+      const f = data.folders.find((x) => x.id === folderId);
+      setName(f?.name || "");
+      setDescription(f?.description || "");
     } else if (kind !== "editLink") {
       setName("");
       setUrl("");
+      setDescription("");
     }
     // only when the chosen link or kind changes, not on every keystroke
-  }, [kind, target]);
+  }, [kind, target, folderId]);
 
   const loadMine = useCallback(async () => {
     const res = await fetch("/api/suggestions", { cache: "no-store" }).catch(() => null);
     const json = await res?.json().catch(() => null);
     if (Array.isArray(json?.suggestions)) setMine(json.suggestions);
   }, []);
-  useEffect(() => {
-    if (!user) return;
-    loadMine();
-    const id = setInterval(loadMine, 5000);
-    return () => clearInterval(id);
-  }, [user, loadMine]);
+  useEffect(() => { if (user) loadMine(); }, [user, loadMine]);
+  useOnRevChange("suggestions", () => { if (user) loadMine(); });
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -88,6 +94,8 @@ export default function SuggestModal({
       if (kind === "addLink") Object.assign(body, { name, url, folderId });
       if (kind === "editLink") Object.assign(body, { folderId: targetFolderId, linkId: targetLinkId, name, url });
       if (kind === "removeLink") Object.assign(body, { folderId: targetFolderId, linkId: targetLinkId });
+      if (kind === "newFolder") Object.assign(body, { name, emoji, description });
+      if (kind === "editFolder") Object.assign(body, { folderId, name, description });
       const res = await fetch("/api/suggestions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -151,6 +159,40 @@ export default function SuggestModal({
                   <select value={folderId} onChange={(e) => setFolderId(e.target.value)}>
                     {data.folders.map((f) => <option key={f.id} value={f.id}>{f.emoji} {f.name}</option>)}
                   </select>
+                </div>
+              </>
+            )}
+
+            {kind === "newFolder" && (
+              <>
+                <div className="form-group">
+                  <label>Folder name</label>
+                  <div className="status-row">
+                    <input className="emoji-in" value={emoji} onChange={(e) => setEmoji(e.target.value)} maxLength={8} aria-label="Emoji" />
+                    <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Typing practice" required maxLength={60} />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label>What would go in it?</label>
+                  <input value={description} onChange={(e) => setDescription(e.target.value)} maxLength={300} placeholder="One line" />
+                </div>
+              </>
+            )}
+            {kind === "editFolder" && (
+              <>
+                <div className="form-group">
+                  <label>Which folder?</label>
+                  <select value={folderId} onChange={(e) => setFolderId(e.target.value)}>
+                    {data.folders.filter((f) => !f.rule).map((f) => <option key={f.id} value={f.id}>{f.emoji} {f.name}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>New name</label>
+                  <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} />
+                </div>
+                <div className="form-group">
+                  <label>New description</label>
+                  <input value={description} onChange={(e) => setDescription(e.target.value)} maxLength={300} />
                 </div>
               </>
             )}

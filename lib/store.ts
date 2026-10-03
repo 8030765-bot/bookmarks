@@ -254,6 +254,19 @@ function linkRefs(body: Record<string, unknown>): LinkRef[] {
 function authFrom(body: Record<string, unknown>): Partial<AuthContext> {
   return (body.__auth as Partial<AuthContext>) || {};
 }
+/** A moderator-approved note shown on a link ("this one needs a login", "blocked on school wifi"…). */
+export async function setCommunityNote(linkId: string, note: { text: string; by: string } | null, index?: number) {
+  const data = await getBookmarks();
+  const link = data.folders.flatMap((f) => f.links).find((l) => l.id === linkId);
+  if (!link) throw new Error("That link is gone");
+  const notes = link.communityNotes || [];
+  if (note) notes.unshift({ text: note.text.trim().slice(0, 280), by: note.by, at: new Date().toISOString() });
+  else if (typeof index === "number") notes.splice(index, 1);
+  link.communityNotes = notes.length ? notes.slice(0, 5) : undefined;
+  await saveBookmarks(data, { snapshot: false });
+  return link;
+}
+
 export async function handleAction(
   action: string,
   body: Record<string, unknown>
@@ -555,7 +568,18 @@ export async function handleAction(
         .filter(Boolean)
         .slice(0, 6);
       if (!question || options.length < 2) throw new Error("A poll needs a question and at least 2 options");
-      data.polls = [{ id: uuid(), question, options, votes: {}, createdAt: new Date().toISOString() }, ...(data.polls || [])].slice(0, 20);
+      const ends = typeof body.endsAt === "string" && Number.isFinite(Date.parse(body.endsAt)) ? new Date(body.endsAt).toISOString() : undefined;
+      const poll = {
+        id: uuid(), question, options, votes: {}, createdAt: new Date().toISOString(),
+        multi: body.multi === true || undefined,
+        endsAt: ends,
+        anonymous: body.anonymous === true || undefined,
+        counts: body.anonymous === true ? options.map(() => 0) : undefined,
+        featured: body.featured === true || undefined,
+      };
+      // only one "poll of the week" at a time
+      if (poll.featured) (data.polls || []).forEach((p) => { p.featured = undefined; });
+      data.polls = [poll, ...(data.polls || [])].slice(0, 20);
       pushActivity(data, "add", `New poll: “${question}”`);
       await saveBookmarks(data);
       return data;
@@ -565,11 +589,26 @@ export async function handleAction(
       if (!user) throw new Error("Log in to vote");
       const poll = (data.polls || []).find((p) => p.id === String(body.pollId || ""));
       if (!poll) throw new Error("Poll not found");
-      if (poll.closed) throw new Error("This poll is closed");
+      if (poll.closed || (poll.endsAt && Date.parse(poll.endsAt) < Date.now())) throw new Error("This poll is closed");
       const choice = Number(body.option);
       if (!Number.isInteger(choice) || choice < 0 || choice >= poll.options.length) throw new Error("Invalid option");
-      if (poll.votes[user] === choice) delete poll.votes[user]; // tap again to take your vote back
-      else poll.votes[user] = choice;
+      // your current answer(s): kept privately for anonymous polls, in the list otherwise
+      const redis = getRedis();
+      const anonKey = `pollvotes:${poll.id}`;
+      const before = poll.anonymous ? await redis.hget<number[]>(anonKey, user) : poll.votes[user];
+      const had: number[] = before === undefined || before === null ? [] : Array.isArray(before) ? before : [before];
+      let next: number[];
+      if (had.includes(choice)) next = had.filter((x) => x !== choice); // tap again to take your vote back
+      else next = poll.multi ? [...had, choice].sort((a, b) => a - b) : [choice];
+      if (poll.anonymous) {
+        const counts = poll.counts || poll.options.map(() => 0);
+        had.forEach((i) => { counts[i] = Math.max(0, (counts[i] || 0) - 1); });
+        next.forEach((i) => { counts[i] = (counts[i] || 0) + 1; });
+        poll.counts = counts;
+        if (next.length) await redis.hset(anonKey, { [user]: next });
+        else await redis.hdel(anonKey, user);
+      } else if (!next.length) delete poll.votes[user];
+      else poll.votes[user] = poll.multi ? next : next[0];
       await saveBookmarks(data, { snapshot: false });
       return data;
     }
@@ -581,7 +620,10 @@ export async function handleAction(
       else {
         const poll = (data.polls || []).find((p) => p.id === id);
         if (!poll) throw new Error("Poll not found");
-        poll.closed = !poll.closed;
+        if (body.featured !== undefined) {
+          (data.polls || []).forEach((p) => { p.featured = undefined; });
+          poll.featured = body.featured === true || undefined;
+        } else poll.closed = !poll.closed;
       }
       await saveBookmarks(data);
       return data;
@@ -676,6 +718,27 @@ export async function handleAction(
       if (typeof patch.chatMaxLen === "number") {
         s.chatMaxLen = Math.min(500, Math.max(50, Math.round(patch.chatMaxLen)));
       }
+      // community spotlight
+      if (typeof patch.featuredUser === "string") s.featuredUser = patch.featuredUser.trim().replace(/^@/, "").slice(0, 20) || undefined;
+      if (typeof patch.featuredFolderId === "string") {
+        s.featuredFolderId = data.folders.some((f) => f.id === patch.featuredFolderId) ? (patch.featuredFolderId as string) : undefined;
+      }
+      if (patch.linkOfDay !== undefined) {
+        const id = typeof patch.linkOfDay === "string" ? patch.linkOfDay : "";
+        s.linkOfDay = id && data.folders.some((f) => f.links.some((l) => l.id === id))
+          ? { linkId: id, day: new Date().toISOString().slice(0, 10) } : undefined;
+      }
+      if (patch.challenge !== undefined) {
+        const c = patch.challenge as Record<string, unknown> | null;
+        const title = c && typeof c.title === "string" ? c.title.trim().slice(0, 100) : "";
+        s.challenge = title ? {
+          title,
+          text: typeof c!.text === "string" ? c!.text.trim().slice(0, 300) || undefined : undefined,
+          round: typeof c!.round === "string" && c!.round.trim() ? c!.round.trim().slice(0, 40) : new Date().toISOString().slice(0, 10),
+          endsAt: typeof c!.endsAt === "string" && Number.isFinite(Date.parse(c!.endsAt)) ? new Date(c!.endsAt).toISOString() : undefined,
+        } : undefined;
+      }
+      if (typeof patch.siteBirthday === "string") s.siteBirthday = /^\d{4}-\d{2}-\d{2}$/.test(patch.siteBirthday) ? patch.siteBirthday : undefined;
       pushActivity(data, "settings", "Updated site settings");
       await saveBookmarks(data);
       return data;
