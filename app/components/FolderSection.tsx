@@ -239,6 +239,25 @@ export default function FolderSection({
             )}
           </div>
         ) : (
+          <>
+          {links.length > 20 && !f && (
+            // A–Z index for long folders: jump to the first website starting with a letter
+            <div className="az-index" aria-label="Jump to letter">
+              {Array.from(new Set(links.map((l) => (l.name.trim()[0] || "#").toUpperCase().replace(/[^A-Z]/, "#")))).sort().map((ch) => (
+                <button
+                  key={ch}
+                  onClick={(e) => {
+                    const section = (e.currentTarget as HTMLElement).closest(".folder-card");
+                    const card = Array.from(section?.querySelectorAll<HTMLElement>(".card[data-link-id]") || [])
+                      .find((c) => ((c.querySelector(".card-title")?.textContent || "").trim()[0] || "#").toUpperCase().replace(/[^A-Z]/, "#") === ch);
+                    card?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    card?.classList.add("flash-card");
+                    setTimeout(() => card?.classList.remove("flash-card"), 1200);
+                  }}
+                >{ch}</button>
+              ))}
+            </div>
+          )}
           <div className={`cards ${view === "list" ? "list" : ""}`}>
             {links.map((link) => (
               <LinkCard
@@ -278,6 +297,7 @@ export default function FolderSection({
               />
             ))}
           </div>
+          </>
         )
       )}
       {!collapsed && children && <div className="sub-folders">{children}</div>}

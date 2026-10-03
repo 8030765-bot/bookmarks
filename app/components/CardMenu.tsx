@@ -74,6 +74,7 @@ export default function CardMenu({ state, onClose }: { state: CardMenuState; onC
           <Icon name={pref.hidden ? "eye" : "eyeOff"} /> {pref.hidden ? "Unhide" : "Hide for me"}
         </button>
         <div className="menu-sep" />
+        <button onClick={copy(`${location.origin}${location.pathname}#link-${link.id}`, "Link to this card")}><Icon name="share" /> Copy link to this card</button>
         <button onClick={copy(asMarkdown(link), "Markdown link")}><Icon name="link" /> Copy as Markdown</button>
         <button onClick={copy(citeMLA(link), "MLA citation")}><Icon name="quote" /> Copy MLA citation</button>
         <button onClick={copy(citeAPA(link), "APA citation")}><Icon name="quote" /> Copy APA citation</button>

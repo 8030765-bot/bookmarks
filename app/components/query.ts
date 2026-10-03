@@ -84,6 +84,92 @@ export function parseQuery(raw: string): ParsedQuery {
   return q;
 }
 
+/* ---------- forgiving word matching ---------- */
+// words people use for the same thing
+const SYNONYMS: string[][] = [
+  ["math", "maths", "mathematics"], ["sci", "science"], ["vid", "video", "videos", "youtube"], ["game", "games", "gaming"],
+  ["calc", "calculator"], ["eng", "english"], ["hist", "history"], ["geo", "geography"], ["bio", "biology"], ["chem", "chemistry"],
+  ["phys", "physics"], ["prog", "programming", "coding", "code"], ["music", "songs", "song"], ["dict", "dictionary"],
+  ["pic", "pics", "picture", "pictures", "photo", "photos", "image", "images"], ["doc", "docs", "document", "documents"],
+  ["test", "quiz", "quizzes"], ["typing", "type", "keyboard"], ["art", "drawing", "draw", "paint"], ["read", "reading", "book", "books"],
+];
+const synonymMap = new Map<string, string[]>();
+SYNONYMS.forEach((group) => group.forEach((w) => synonymMap.set(w, group)));
+export function synonymsOf(word: string): string[] {
+  return synonymMap.get(word) || [word];
+}
+
+/** Typos between two words (a swapped pair of letters counts as one), stopping early once it's clearly too far. */
+export function editDistance(a: string, b: string, max = 2): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev2: number[] = [];
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) cur[j] = Math.min(cur[j], prev2[j - 2] + 1);
+      best = Math.min(best, cur[j]);
+    }
+    if (best > max) return max + 1;
+    prev2 = prev;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+const allowedTypos = (w: string) => (w.length >= 8 ? 2 : w.length >= 4 ? 1 : 0);
+
+/** The word, or a word that means the same ("maths" finds "math"). */
+export function exactMatch(hay: string, word: string): boolean {
+  if (hay.includes(word)) return true;
+  for (const syn of synonymsOf(word)) if (syn !== word && hay.includes(syn)) return true;
+  return false;
+}
+
+/** Like exactMatch, but also allows a small typo in a whole word ("desmso" finds "desmos"). */
+export function forgivingMatch(hay: string, word: string): boolean {
+  if (exactMatch(hay, word)) return true;
+  const typos = allowedTypos(word);
+  if (!typos) return false;
+  for (const tok of hay.split(/[^\p{L}\p{N}]+/u)) {
+    if (tok.length < 3) continue;
+    // compare against the start of longer words too ("calcul" vs "calculator")
+    const piece = tok.length > word.length + typos ? tok.slice(0, word.length) : tok;
+    if (editDistance(word, piece, typos) <= typos) return true;
+  }
+  return false;
+}
+
+/** How well a link matches the plain words: name hits count most. Higher is better. */
+export function relevance(q: ParsedQuery, link: Link): number {
+  const name = link.name.toLowerCase();
+  const tags = (link.tags || []).join(" ");
+  const host = link.url.toLowerCase();
+  let score = 0;
+  for (const w of [...q.words, ...q.phrases]) {
+    if (name === w) score += 12;
+    else if (name.startsWith(w)) score += 8;
+    else if (name.includes(w)) score += 6;
+    if (tags.includes(w)) score += 4;
+    if (host.includes(w)) score += 3;
+    if ((link.notes || "").toLowerCase().includes(w)) score += 1;
+  }
+  return score + Math.min(3, (link.clicks || 0) / 20);
+}
+
+/** The closest known word to something that matched nothing ("Did you mean …?"). */
+export function closestWord(word: string, vocabulary: Iterable<string>): string | null {
+  let best: string | null = null;
+  let bestD = 3;
+  for (const v of vocabulary) {
+    if (v === word || v.length < 3) continue;
+    const d = editDistance(word, v, 2);
+    if (d < bestD) { best = v; bestD = d; }
+  }
+  return best;
+}
+
 export interface MatchContext {
   prefs: Record<string, LinkPref>;
   favorites: Set<string>;

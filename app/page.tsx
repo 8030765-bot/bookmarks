@@ -8,7 +8,10 @@ import type { SuggestStart } from "./SuggestModal";
 import { Icon } from "./components/Icon";
 import FolderSection, { Drag, FolderMeta } from "./components/FolderSection";
 import { FolderInfo, FolderMenu, FolderMenuState, PickModal, TagManager, folderMarkdown } from "./components/FolderExtras";
-import { MatchContext, matchLink, parseQuery } from "./components/query";
+import { MatchContext, closestWord, exactMatch, forgivingMatch, matchLink, parseQuery, relevance } from "./components/query";
+import SearchBox from "./components/SearchBox";
+import ScrollMap from "./components/ScrollMap";
+import type { ChatMessage } from "@/lib/types";
 import { CardContext, CardEnv, LinkCardActions } from "./components/cardEnv";
 import CardMenu, { CardMenuState } from "./components/CardMenu";
 import SelectionBar from "./components/SelectionBar";
@@ -144,6 +147,8 @@ export default function HomePage() {
   const [pick, setPick] = useState<{ kind: "merge" | "split"; folder: Folder } | null>(null);
   const [chipDrag, setChipDrag] = useState<string | null>(null);
   const [startDismissed, setStartDismissed] = useState(true);
+  const [resultSort, setResultSort] = useState<"best" | "folder" | "newest" | "rating">("best");
+  const [chatHits, setChatHits] = useState<ChatMessage[]>([]);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [look, setLook] = useState<Look>(DEFAULT_LOOK);
   const [seenActivity, setSeenActivity] = useState<string | null>("");
@@ -396,6 +401,20 @@ export default function HomePage() {
     handledHash.current = true;
     const m = location.hash.match(/^#folder-(.+)$/);
     if (m && data.folders.some((f) => f.id === m[1])) setTimeout(() => jumpToFolder(m[1]), 150);
+    // #link-<id>: open that website's folder, scroll to the card and show its details
+    const lm = location.hash.match(/^#link-(.+)$/);
+    const target = lm ? data.folders.find((f) => f.links.some((l) => l.id === lm[1])) : undefined;
+    if (lm && target) {
+      toggleCollapsed(target.id, false);
+      setExpandedId(lm[1]);
+      setFocusedId(lm[1]);
+      setTimeout(() => {
+        const el = document.querySelector(`.card[data-link-id="${lm[1]}"]`);
+        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+        el?.classList.add("flash-card");
+        setTimeout(() => el?.classList.remove("flash-card"), 1500);
+      }, 250);
+    }
   }, [data]);
 
   // ---------- account + admin session ----------
@@ -542,15 +561,21 @@ export default function HomePage() {
     if (!adminUnlocked && isExpired(l)) return false;
     return true;
   }
-  function matches(l: Link, folder: Folder) {
+  function matchesWith(l: Link, folder: Folder, wordMatch: (hay: string, w: string) => boolean) {
     if (tagFilters.length) {
       const has = (t: string) => !!l.tags?.includes(t);
       if (tagMode === "all" ? !tagFilters.every(has) : !tagFilters.some(has)) return false;
     }
-    return matchLink(parsed, l, folder, matchCtx);
+    return matchLink(parsed, l, folder, matchCtx, wordMatch);
+  }
+  // exact words (and synonyms) first; only if nothing matches, allow small typos
+  const useFuzzy = parsed.words.length > 0 && !allRefs.some((r) => shown(r.link) && !r.folder.rule && matchesWith(r.link, r.folder, exactMatch));
+  function matches(l: Link, folder: Folder) {
+    return matchesWith(l, folder, useFuzzy ? forgivingMatch : exactMatch);
   }
   /** Your own sort for a folder wins, then the main sort, then the folder's default. */
   function effectiveSort(folder: Folder): string {
+    if (filtering && resultSort !== "folder") return resultSort === "best" && !parsed.words.length && !parsed.phrases.length ? "manual" : resultSort;
     return folderPrefs[folder.id]?.sort || (sort !== "manual" ? sort : folder.sort || "manual");
   }
   function sortRefs(list: LinkRef[], how: string): LinkRef[] {
@@ -561,6 +586,7 @@ export default function HomePage() {
     if (how === "likes") list = by((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
     if (how === "rating") list = by((a, b) => (aggRatings[b.id]?.avg || 0) - (aggRatings[a.id]?.avg || 0));
     if (how === "mine") list = by((a, b) => (personal.ratings[b.id] || 0) - (personal.ratings[a.id] || 0));
+    if (how === "best") list = by((a, b) => relevance(parsed, b) - relevance(parsed, a));
     // pinned links always lead their folder
     return [...list].sort((a, b) => Number(!!b.link.pinned) - Number(!!a.link.pinned));
   }
@@ -596,7 +622,14 @@ export default function HomePage() {
     }
     // pinned first, then your favorite folders, then the rest; archived ones last
     const rank = (f: Folder) => (f.archived ? 3 : f.pinned ? 0 : folderPrefs[f.id]?.fav ? 1 : 2);
-    return [...tops].sort((a, b) => rank(a) - rank(b));
+    tops = [...tops].sort((a, b) => rank(a) - rank(b));
+    if (filtering && resultSort === "best" && parsed.words.length) {
+      // the folder with the best hit comes first
+      const best = (f: Folder) => Math.max(0, ...[f, ...(childrenOf.get(f.id) || [])].flatMap((x) => x.links.filter((l) => shown(l) && matches(l, x)).map((l) => relevance(parsed, l))));
+      const scores = new Map(tops.map((f) => [f.id, best(f)]));
+      tops.sort((a, b) => (scores.get(b.id) || 0) - (scores.get(a.id) || 0));
+    }
+    return tops;
   })();
   const sortedFolders = topFolders.flatMap((f) => [f, ...(childrenOf.get(f.id) || [])]);
   const folderVisited = useMemo(() => {
@@ -646,6 +679,76 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [data, search, tagFilters, tagMode, sort, collapsed, showHidden, personal.links, personal.folders, personal.folderOrder, adminUnlocked, activeSpace, look.hideEmpty]
   );
+  // "Did you mean …?" when nothing matched
+  const didYouMean = useMemo(() => {
+    if (!filtering || !parsed.words.length) return null;
+    const vocab = new Set<string>();
+    allRefs.forEach(({ link, folder }) => {
+      `${link.name} ${folder.name} ${(link.tags || []).join(" ")}`.toLowerCase().split(/[^\p{L}\p{N}]+/u).forEach((w) => w.length > 2 && vocab.add(w));
+    });
+    let changed = false;
+    const fixed = search.trim().split(/\s+/).map((tok) => {
+      const lower = tok.toLowerCase();
+      if (!parsed.words.includes(lower) || vocab.has(lower)) return tok;
+      const c = closestWord(lower, vocab);
+      if (c) { changed = true; return c; }
+      return tok;
+    }).join(" ");
+    return changed ? fixed : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, allRefs, filtering]);
+
+  // the search box also looks through recent chat
+  useEffect(() => {
+    const words = parsed.words.concat(parsed.phrases);
+    if (!words.length || words.join("").length < 3) { setChatHits([]); return; }
+    let live = true;
+    const t = setTimeout(async () => {
+      try {
+        const j = await fetch("/api/chat", { cache: "no-store" }).then((r) => r.json());
+        if (!live || !Array.isArray(j.messages)) return;
+        setChatHits((j.messages as ChatMessage[]).filter((m) => words.every((w) => m.text.toLowerCase().includes(w))).slice(-5).reverse());
+      } catch {}
+    }, 450);
+    return () => { live = false; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
+
+  // keep ?q= in the address bar so a search can be shared (and survive a reload)
+  const urlSynced = useRef(false);
+  useEffect(() => {
+    if (!urlSynced.current) return;
+    const url = new URL(location.href);
+    if (search.trim()) url.searchParams.set("q", search.trim()); else url.searchParams.delete("q");
+    if (tagFilters.length) url.searchParams.set("tags", tagFilters.join(",")); else url.searchParams.delete("tags");
+    window.history.replaceState(null, "", url.toString());
+    try { sessionStorage.setItem("lastSearch", search); } catch {}
+  }, [search, tagFilters]);
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    let q0 = params.get("q");
+    if (q0 === null) { try { q0 = sessionStorage.getItem("lastSearch"); } catch {} }
+    if (q0) setSearch(q0);
+    const t0 = params.get("tags");
+    if (t0) { setTagFilters(t0.split(",").filter(Boolean)); setShowTags(true); }
+    urlSynced.current = true;
+  }, []);
+  function copySearchLink() {
+    navigator.clipboard.writeText(location.href).then(() => showToast("Link to this search copied")).catch(() => showToast(location.href));
+  }
+  function surpriseFolder() {
+    const pool = topFolders.filter((f) => f.links.length && !f.rule);
+    const f = pool[Math.floor(Math.random() * pool.length)];
+    if (f) { jumpToFolder(f.id); showToast(`🎲 ${f.emoji} ${f.name}`); }
+  }
+  function focusFirstResult() {
+    const first = visibleOrder[0];
+    if (!first) return;
+    searchRef.current?.blur();
+    setFocusedId(first);
+    requestAnimationFrame(() => document.querySelector(`.card[data-link-id="${first}"]`)?.scrollIntoView({ block: "center", behavior: look.motion ? "smooth" : "auto" }));
+  }
+
   const startFolder = data?.settings?.startFolderId ? folderById.get(data.settings.startFolderId) : undefined;
   const showStart = !!startFolder && !startDismissed && since === 0 && history.length < 3;
 
@@ -1047,11 +1150,12 @@ export default function HomePage() {
     if (modal || showCmd || suggest || prompt || cardMenu) return;
     const k = e.key.toLowerCase();
     // J / K walk through the cards; while one is picked, these keys act on it
-    if (k === "j" || k === "k") {
+    if (k === "j" || k === "k" || (focusedId && (e.key === "ArrowDown" || e.key === "ArrowUp"))) {
       e.preventDefault();
       if (!visibleOrder.length) return;
       const i = focusedId ? visibleOrder.indexOf(focusedId) : -1;
-      const next = visibleOrder[Math.max(0, Math.min(visibleOrder.length - 1, i < 0 ? 0 : i + (k === "j" ? 1 : -1)))];
+      const down = k === "j" || e.key === "ArrowDown";
+      const next = visibleOrder[Math.max(0, Math.min(visibleOrder.length - 1, i < 0 ? 0 : i + (down ? 1 : -1)))];
       setFocusedId(next);
       requestAnimationFrame(() => document.querySelector(`.card[data-link-id="${next}"]`)?.scrollIntoView({ block: "nearest", behavior: look.motion ? "smooth" : "auto" }));
       return;
@@ -1131,6 +1235,29 @@ export default function HomePage() {
       cmd("admin", adminUnlocked ? (adminOpen ? "Close admin panel" : "Open admin panel") : "Admin login", "lock", toggleAdmin),
       cmd("keys", "Keyboard shortcuts", "keyboard", () => setModal({ type: "shortcuts" }), "?"),
       cmd("collapse", "Collapse / expand all folders", "list", toggleAll, "X"),
+      cmd("surprise", "Surprise me — a random folder", "dice", surpriseFolder),
+      cmd("later", "Show my Read later list", "clock", () => setSearch("is:later")),
+      cmd("favs", "Show my favorites", "star", () => setSearch("is:fav")),
+      cmd("done", "Show what I haven't done yet", "check", () => setSearch("is:todo")),
+      cmd("newsince", "What's new since my last visit", "plus", () => setSearch("is:new")),
+      cmd("notes", "Websites I wrote notes on", "note", () => setSearch("is:note")),
+      cmd("tags", showTags ? "Hide tags" : "Show tags", "tag", () => { const v = !showTags; setShowTags(v); writeLocal("showTags", v); }),
+      cmd("descs", look.descriptions ? "Hide descriptions" : "Show descriptions", "info", () => changeLook({ ...look, descriptions: !look.descriptions })),
+      cmd("extra", look.specialFolders ? "Hide Recently added / Popular folders" : "Show Recently added / Popular folders", "chart", () => changeLook({ ...look, specialFolders: !look.specialFolders })),
+      cmd("empty", look.hideEmpty ? "Show empty folders" : "Hide empty folders", "folder", () => changeLook({ ...look, hideEmpty: !look.hideEmpty })),
+      cmd("motion", look.motion ? "Turn animations off" : "Turn animations on", "settings", () => changeLook({ ...look, motion: !look.motion })),
+      cmd("newtab", look.newTab ? "Open websites in this tab" : "Open websites in a new tab", "external", () => changeLook({ ...look, newTab: !look.newTab })),
+      ...(hiddenCount || showHidden ? [cmd("hidden", showHidden ? "Hide my hidden websites" : "Show my hidden websites", "eye", () => setShowHidden((x) => !x))] : []),
+      ...(personal.folderOrder.length ? [cmd("resetorder", "Reset my folder order", "reset", () => personal.setFolderOrder([]))] : []),
+      ...spaces.map((sp) => cmd(`space-${sp}`, `Space: ${sp}`, "grid", () => { setSpace(sp); writeLocal("space", sp); })),
+      ...(spaces.length ? [cmd("space-all", "Space: All", "grid", () => { setSpace(""); writeLocal("space", ""); })] : []),
+      ...personal.views.map((v) => cmd(`view-${v.id}`, `View: ${v.name}`, "search", () => applyView(v))),
+      ...(filtering ? [cmd("saveview", "Save this search as a view", "plus", saveCurrentView), cmd("copysearch", "Copy a link to this search", "share", copySearchLink)] : []),
+      ...(adminUnlocked ? [cmd("smart", "New smart folder", "bulb", () => openNewFolder(true)), cmd("managetags", "Manage tags", "tag", () => setModal({ type: "tags" })), cmd("undo", "Undo the last change", "undo", undo)] : []),
+      cmd("status", "Site status", "chart", () => { location.href = "/status"; }),
+      user
+        ? cmd("profile", "Edit my profile", "user", () => setModal({ type: "profileEdit" }))
+        : cmd("signup", "Create an account", "user", () => openLogin("signup")),
       user ? cmd("auth", `Log out (${user})`, "logout", handleLogout) : cmd("auth", "Log in or sign up", "user", () => openLogin()),
     ];
   }
@@ -1231,22 +1358,19 @@ export default function HomePage() {
             <span className="brand-mark">🔖</span>
             <span className="brand-name">{title}</span>
           </button>
-          <label className="top-search">
-            <Icon name="search" />
-            <input
-              ref={searchRef}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); openTopResult(); } }}
-              placeholder={`Search ${allRefs.length} websites…`}
-              aria-label="Search websites"
-            />
-            {search ? (
-              <button className="clear" onClick={() => { setSearch(""); searchRef.current?.focus(); }} aria-label="Clear search"><Icon name="x" /></button>
-            ) : (
-              <span className="kbd">/</span>
-            )}
-          </label>
+          <SearchBox
+            value={search}
+            onChange={setSearch}
+            inputRef={searchRef}
+            placeholder={`Search ${allRefs.length} websites…`}
+            refs={allRefs}
+            folders={sortedFolders}
+            tags={allTags}
+            onEnter={openTopResult}
+            onFocusResults={focusFirstResult}
+            onPickLink={(r) => trackAndOpen(r.folder, r.link, true)}
+            onPickFolder={(f) => { setSearch(""); jumpToFolder(f.id); }}
+          />
           <div className="top-actions">
             <button className="icon-btn" title="Spin the wheel (S)" onClick={() => setModal({ type: "spin" })}><Icon name="shuffle" /></button>
             <button className="icon-btn" title="Community (L)" onClick={() => setModal({ type: "leaderboard" })}><Icon name="trophy" /></button>
@@ -1477,15 +1601,37 @@ export default function HomePage() {
         )}
 
         {filtering ? (
+          <>
           <div className="results-bar">
             <span>
               <strong>{matchCount}</strong> {matchCount === 1 ? "website" : "websites"}
               {q && <> matching “{search.trim()}”</>}
               {tagFilters.length > 0 && <> tagged <strong>{tagFilters.map((t) => `#${t}`).join(tagMode === "all" ? " and " : " or ")}</strong></>}
-              {q && matchCount > 0 && <span className="enter-hint"> · press <span className="kbd">Enter</span> to open the first</span>}
+              {useFuzzy && matchCount > 0 && <span className="fuzzy-note"> · no exact matches, showing close ones</span>}
+              {q && matchCount > 0 && <span className="enter-hint"> · press <span className="kbd">Enter</span> to open the first, <span className="kbd">↓</span> to move into the results</span>}
             </span>
-            <button className="btn btn-secondary btn-sm" onClick={() => { setSearch(""); setTagFilters([]); }}>Clear</button>
+            <span className="results-tools">
+              <select value={resultSort} onChange={(e) => setResultSort(e.target.value as typeof resultSort)} aria-label="Sort results">
+                <option value="best">Best match</option>
+                <option value="newest">Newest</option>
+                <option value="rating">Top rated</option>
+                <option value="folder">Folder order</option>
+              </select>
+              <button className="btn-icon" title="Copy a link to this search" onClick={copySearchLink}><Icon name="share" /></button>
+              <button className="btn btn-secondary btn-sm" onClick={() => { setSearch(""); setTagFilters([]); }}>Clear</button>
+            </span>
           </div>
+          {chatHits.length > 0 && (
+            <div className="chat-hits">
+              <span className="nav-label">In chat</span>
+              {chatHits.slice(0, 3).map((m) => (
+                <button key={m.id} className="chat-hit" onClick={() => setChatOpen(true)} title="Open chat">
+                  <strong>{m.user}:</strong> {m.text.length > 80 ? `${m.text.slice(0, 80)}…` : m.text}
+                </button>
+              ))}
+            </div>
+          )}
+          </>
         ) : (
           <>
             <QuickTabs
@@ -1498,6 +1644,7 @@ export default function HomePage() {
           </>
         )}
 
+        {!filtering && <ScrollMap deps={`${topFolders.map((f) => f.id).join()}|${Object.keys(collapsed).length}`} onJump={jumpToFolder} />}
         <main className={`folders ${allRefs.length > 150 ? "big-list" : ""}`}>
           {sortedFolders.length === 0 && (
             <div className="empty-state">
@@ -1511,6 +1658,9 @@ export default function HomePage() {
             <div className="empty-state">
               <div className="empty-emoji">🔍</div>
               <h3>Nothing found</h3>
+              {didYouMean && (
+                <p>Did you mean <button className="link-btn" onClick={() => setSearch(didYouMean)}><strong>{didYouMean}</strong></button>?</p>
+              )}
               <p>No websites match that search. Know a good one?</p>
               <button className="btn btn-secondary" onClick={() => setSuggest({ kind: "addLink" })}><Icon name="bulb" /> Suggest a website</button>
             </div>
