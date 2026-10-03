@@ -46,6 +46,6 @@ export async function POST(req: NextRequest) {
     }
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Request failed";
-    return NextResponse.json({ error: message }, { status: message === "Wrong admin password" ? 403 : 400 });
+    return NextResponse.json({ error: message }, { status: (message === "Wrong admin password" || message.startsWith("Admin is disabled")) ? 403 : 400 });
   }
 }

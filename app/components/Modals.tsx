@@ -134,6 +134,8 @@ const SHORTCUTS: [string, string][] = [
   ["P", "Customize the look"],
   ["C", "Open or close chat"],
   ["G", "Grid / list view"],
+  ["X", "Collapse / expand all folders"],
+  ["Enter", "Open the top search result"],
   ["T", "Light / dark theme"],
   ["Esc", "Close / clear search"],
   ["?", "This list"],

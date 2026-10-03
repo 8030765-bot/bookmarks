@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BookmarksData, ChatMessage, Folder, Link, Suggestion } from "@/lib/types";
 import { Icon } from "./CommandPalette";
 import { suggestionSummary } from "./SuggestModal";
+import Favicon from "./components/Favicon";
 import { parseBookmarksHtml } from "./components/Community";
 
 type Tab = "overview" | "suggestions" | "polls" | "links" | "folders" | "chat" | "users" | "site" | "data" | "activity";
@@ -35,13 +36,6 @@ function timeAgo(iso?: string) {
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86400)}d ago`;
-}
-function favicon(url: string) {
-  try {
-    return `https://www.google.com/s2/favicons?domain=${new URL(url).hostname}&sz=32`;
-  } catch {
-    return "";
-  }
 }
 function normUrl(url: string) {
   return url.trim().toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/\/+$/, "");
@@ -429,6 +423,7 @@ function LinksTab({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<{ folderId: string; linkId: string; name: string; url: string; tags: string } | null>(null);
   const [moveTarget, setMoveTarget] = useState("");
+  const [bulkTag, setBulkTag] = useState("");
 
   const dupUrls = useMemo(() => {
     const counts = new Map<string, number>();
@@ -531,6 +526,26 @@ function LinksTab({
                 }
               }}
             >Move</button>
+            <input
+              className="bulk-tag"
+              value={bulkTag}
+              onChange={(e) => setBulkTag(e.target.value)}
+              placeholder="tag"
+              aria-label="Tag to add or remove"
+              maxLength={24}
+            />
+            <button
+              className="btn btn-secondary btn-sm"
+              disabled={!bulkTag.trim() || submitting}
+              title="Add this tag to the selected links"
+              onClick={async () => { if (await run("bulkTag", { items: selectedRefs, tag: bulkTag })) showToast(`Tagged ${selectedRefs.length} links #${bulkTag.trim().toLowerCase()}`); }}
+            >+ Tag</button>
+            <button
+              className="btn btn-secondary btn-sm"
+              disabled={!bulkTag.trim() || submitting}
+              title="Remove this tag from the selected links"
+              onClick={async () => { if (await run("bulkTag", { items: selectedRefs, tag: bulkTag, remove: true })) showToast(`Removed #${bulkTag.trim().toLowerCase()}`); }}
+            >− Tag</button>
             <button
               className="btn btn-danger btn-sm"
               disabled={submitting}
@@ -563,7 +578,7 @@ function LinksTab({
               ) : (
                 <>
                   <input type="checkbox" checked={selected.has(link.id)} onChange={() => toggle(link.id)} aria-label={`Select ${link.name}`} />
-                  <img src={favicon(link.url)} alt="" width={16} height={16} />
+                  <Favicon url={link.url} name={link.name} size={16} />
                   <div className="row-main">
                     <div className="row-title">
                       {link.favorite && "⭐ "}{link.name}

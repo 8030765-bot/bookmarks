@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 function errorResponse(e: unknown) {
   const message = e instanceof Error ? e.message : "Request failed";
   const status =
-    message === "Wrong admin password" || message.includes("muted") ? 403 : message.startsWith("Slow down") ? 429 : 400;
+    (message === "Wrong admin password" || message.startsWith("Admin is disabled")) || message.includes("muted") ? 403 : message.startsWith("Slow down") ? 429 : 400;
   return NextResponse.json({ error: message }, { status });
 }
 

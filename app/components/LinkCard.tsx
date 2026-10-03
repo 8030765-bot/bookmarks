@@ -1,23 +1,20 @@
 "use client";
 import { Folder, Link } from "@/lib/types";
 import { Icon } from "../CommandPalette";
-import { faviconUrl, hostOf, isNew, safeHref } from "./ui";
+import Favicon from "./Favicon";
+import { hostOf, isNew, safeHref } from "./ui";
 
+/** Highlights every search word that appears in the text. */
 export function Highlight({ text, query }: { text: string; query: string }) {
-  const q = query.trim();
-  if (!q) return <>{text}</>;
-  const i = text.toLowerCase().indexOf(q.toLowerCase());
-  if (i < 0) return <>{text}</>;
-  return (
-    <>
-      {text.slice(0, i)}
-      <mark>{text.slice(i, i + q.length)}</mark>
-      {text.slice(i + q.length)}
-    </>
-  );
+  const words = query.trim().split(/\s+/).filter(Boolean).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  if (!words.length) return <>{text}</>;
+  const parts = text.split(new RegExp(`(${words.join("|")})`, "gi"));
+  return <>{parts.map((p, i) => (i % 2 ? <mark key={i}>{p}</mark> : p))}</>;
 }
 
 export interface LinkCardActions {
+  /** open links in a new tab (user preference) */
+  newTab: boolean;
   open: (folder: Folder, link: Link) => void;
   star: (folder: Folder, link: Link) => void;
   copy: (link: Link) => void;
@@ -76,7 +73,7 @@ export default function LinkCard({
       <a
         className="card-main"
         href={href}
-        target="_blank"
+        target={actions.newTab ? "_blank" : undefined}
         rel="noopener noreferrer"
         onClick={() => actions.open(folder, link)}
         onAuxClick={(e) => { if (e.button === 1) actions.open(folder, link); }}
@@ -84,15 +81,7 @@ export default function LinkCard({
         title={link.notes || link.url}
       >
         <span className="card-icon">
-          <img
-            src={faviconUrl(link.url)}
-            alt=""
-            width={22}
-            height={22}
-            loading="lazy"
-            onError={(e) => { (e.target as HTMLImageElement).style.visibility = "hidden"; }}
-          />
-          <span className="card-letter">{link.name.charAt(0).toUpperCase()}</span>
+          <Favicon url={link.url} name={link.name} size={22} />
         </span>
         <span className="card-body">
           <span className="card-name">

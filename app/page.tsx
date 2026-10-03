@@ -9,7 +9,8 @@ import FolderSection, { Drag } from "./components/FolderSection";
 import { LinkCardActions } from "./components/LinkCard";
 import LinkModal, { LinkModalMode, LinkValues } from "./components/LinkModal";
 import { ConfirmModal, FolderModal, FolderValues, ShortcutsModal } from "./components/Modals";
-import { LinkRef, faviconUrl, isNew, readLocal, safeHref, writeLocal } from "./components/ui";
+import Favicon from "./components/Favicon";
+import { LinkRef, isNew, readLocal, safeHref, writeLocal } from "./components/ui";
 import {
   CustomizeModal, DEFAULT_LOOK, LeaderboardModal, Look, OnlinePill, Palette, PollCards, SpinWheel, WhatsNew, applyLook, usePresence,
 } from "./components/Community";
@@ -55,32 +56,54 @@ function diffLook(base: Look, next: Look): Partial<Look> {
   return Object.fromEntries(Object.entries(next).filter(([k, v]) => base[k as keyof Look] !== v)) as Partial<Look>;
 }
 
-function QuickRow({ title, icon, items, onOpen, showClicks }: {
-  title: string; icon: string; items: LinkRef[]; onOpen: (f: Folder, l: Link) => void; showClicks?: boolean;
+type QuickTab = "recent" | "starred" | "top" | "visited" | "new";
+const QUICK_TABS: { id: QuickTab; label: string; icon: string }[] = [
+  { id: "recent", label: "Recent", icon: "clock" },
+  { id: "starred", label: "Starred", icon: "star" },
+  { id: "top", label: "Top rated", icon: "heart" },
+  { id: "visited", label: "Most visited", icon: "chart" },
+  { id: "new", label: "New", icon: "plus" },
+];
+
+/** One compact row of shortcuts with tabs, instead of four stacked rows. */
+function QuickTabs({ lists, tab, setTab, onOpen, newTab }: {
+  lists: Record<QuickTab, LinkRef[]>; tab: QuickTab; setTab: (t: QuickTab) => void;
+  onOpen: (f: Folder, l: Link) => void; newTab: boolean;
 }) {
-  if (!items.length) return null;
+  const available = QUICK_TABS.filter((t) => lists[t.id].length > 0);
+  if (!available.length) return null;
+  const active = available.some((t) => t.id === tab) ? tab : available[0].id;
   return (
     <section className="quick">
-      <div className="section-label"><Icon name={icon} /> {title}</div>
+      <div className="quick-tabs" role="tablist">
+        {available.map((t) => (
+          <button key={t.id} role="tab" aria-selected={active === t.id} className={active === t.id ? "on" : ""} onClick={() => setTab(t.id)}>
+            <Icon name={t.icon} /> {t.label}
+          </button>
+        ))}
+      </div>
       <div className="quick-row">
-        {items.map(({ folder, link }) => (
+        {lists[active].map(({ folder, link }) => (
           <a
             key={link.id}
             className="quick-chip"
             href={safeHref(link.url)}
-            target="_blank"
+            target={newTab ? "_blank" : undefined}
             rel="noopener noreferrer"
             onClick={() => onOpen(folder, link)}
           >
-            <img src={faviconUrl(link.url, 32)} alt="" width={16} height={16} loading="lazy" />
+            <Favicon url={link.url} name={link.name} size={16} />
             {link.name}
-            {showClicks && <span className="quick-num">{link.clicks}</span>}
+            {active === "visited" && <span className="quick-num">{link.clicks}</span>}
+            {active === "top" && <span className="quick-num">♥ {link.likes?.length}</span>}
           </a>
         ))}
       </div>
     </section>
   );
 }
+
+type HistoryItem = { folderId: string; linkId: string; at: number };
 
 export default function HomePage() {
   const [data, setData] = useState<BookmarksData | null>(null);
@@ -110,6 +133,17 @@ export default function HomePage() {
   const [userMenu, setUserMenu] = useState(false);
   const [drag, setDrag] = useState<Drag>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [quickTab, setQuickTab] = useState<QuickTab>("recent");
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [showTags, setShowTags] = useState(false);
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const [offline, setOffline] = useState(false);
+  const [activeFolder, setActiveFolder] = useState<string | null>(null);
+  const [scrolled, setScrolled] = useState(false);
+  const [moreMenu, setMoreMenu] = useState(false);
+  const installPrompt = useRef<any>(null);
+  const [canInstall, setCanInstall] = useState(false);
+  const topbarRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>();
 
@@ -129,6 +163,41 @@ export default function HomePage() {
     setView(readLocal("view", "grid"));
     setSort(readLocal("sort", "manual"));
     setCollapsed(readLocal("collapsed", {}));
+    setQuickTab(readLocal("quickTab", "recent"));
+    setHistory(readLocal("history", []));
+    setShowTags(readLocal("showTags", false));
+    setDismissed(readLocal<string | null>("dismissedAnnouncement", null));
+  }, []);
+
+  // ---------- page chrome: scroll, sticky offsets, install, connection ----------
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 500);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  useEffect(() => {
+    // the folder chips stick right under the top bar, whose height changes on phones
+    const el = topbarRef.current;
+    if (!el) return;
+    const set = () => document.documentElement.style.setProperty("--topbar-h", `${el.offsetHeight}px`);
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [loading]);
+  useEffect(() => {
+    const onPrompt = (e: Event) => { e.preventDefault(); installPrompt.current = e; setCanInstall(true); };
+    const goOnline = () => setOffline(false);
+    const goOffline = () => setOffline(true);
+    window.addEventListener("beforeinstallprompt", onPrompt);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onPrompt);
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
   }, []);
   useEffect(() => { applyLook(look); lookRef.current = look; }, [look]);
   const savePref = <T,>(key: string, set: (v: T) => void) => (v: T) => { set(v); writeLocal(key, v); };
@@ -180,9 +249,12 @@ export default function HomePage() {
       if (document.visibilityState !== "visible") return;
       try {
         const res = await fetch(`/api/bookmarks?rev=${revRef.current}`, { cache: "no-store" });
-        if (res.ok && !stopped) applyIfNewer(await res.json());
+        if (stopped) return;
+        setOffline(!res.ok && res.status >= 500);
+        if (res.ok) applyIfNewer(await res.json());
       } catch {
         // offline for a moment — next tick retries
+        if (!stopped) setOffline(true);
       }
     };
     const id = setInterval(sync, SYNC_MS);
@@ -191,6 +263,32 @@ export default function HomePage() {
   }, [applyIfNewer]);
 
   const presence = usePresence(user);
+
+  // highlight the folder chip for whichever folder is on screen
+  const folderIds = (data?.folders || []).map((f) => f.id).join(",");
+  useEffect(() => {
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      // the folder being read = the last one whose header has passed under the sticky chips
+      const line = (document.querySelector(".folder-nav")?.getBoundingClientRect().bottom ?? 120) + 40;
+      let current: string | null = null;
+      document.querySelectorAll<HTMLElement>(".folder-card").forEach((el) => {
+        if (el.getBoundingClientRect().top <= line) current = el.id.replace("folder-", "");
+      });
+      setActiveFolder(window.scrollY < 50 ? null : current);
+    };
+    const onScroll = () => { if (!frame) frame = requestAnimationFrame(update); };
+    update();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => { window.removeEventListener("scroll", onScroll); cancelAnimationFrame(frame); };
+  }, [folderIds, loading]);
+  useEffect(() => {
+    // keep the highlighted chip visible inside the (horizontally scrolling) chip bar
+    const nav = document.querySelector<HTMLElement>(".folder-nav");
+    const chip = nav?.querySelector<HTMLElement>("button.on");
+    if (nav && chip) nav.scrollTo({ left: chip.offsetLeft - nav.clientWidth / 2 + chip.offsetWidth / 2, behavior: "smooth" });
+  }, [activeFolder]);
 
   // #folder-<id> deep links (from "copy link to folder")
   const handledHash = useRef(false);
@@ -286,20 +384,26 @@ export default function HomePage() {
   const latestActivity = data?.activity?.[0]?.id ?? null;
   const hasNews = !!latestActivity && seenActivity !== "" && seenActivity !== latestActivity;
   const recent = allRefs.filter((r) => isNew(r.link)).sort((a, b) => (b.link.createdAt || "").localeCompare(a.link.createdAt || "")).slice(0, 8);
+  const recentOpened: LinkRef[] = useMemo(() => {
+    const byId = new Map(allRefs.map((r) => [r.link.id, r]));
+    return history.map((h) => byId.get(h.linkId)).filter((r): r is LinkRef => !!r).slice(0, 10);
+  }, [history, allRefs]);
   const totalClicks = allRefs.reduce((n, r) => n + (r.link.clicks || 0), 0);
   const sortedFolders = useMemo(
     () => [...(data?.folders || [])].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned)),
     [data]
   );
   const q = search.trim().toLowerCase();
+  const words = q.split(/\s+/).filter(Boolean);
   const filtering = !!q || !!tagFilter;
 
   function visibleLinks(folder: Folder) {
-    const folderMatches = q && folder.name.toLowerCase().includes(q);
     let list = folder.links.filter((l) => {
       if (tagFilter && !l.tags?.includes(tagFilter)) return false;
-      if (!q || folderMatches) return true;
-      return [l.name, l.url, l.notes || "", ...(l.tags || [])].some((s) => s.toLowerCase().includes(q));
+      if (!words.length) return true;
+      // every word has to appear somewhere: name, address, notes, tags, folder or who added it
+      const haystack = [l.name, l.url, l.notes || "", folder.name, l.addedBy || "", ...(l.tags || [])].join(" ").toLowerCase();
+      return words.every((w) => haystack.includes(w));
     });
     if (sort === "name") list = [...list].sort((a, b) => a.name.localeCompare(b.name));
     if (sort === "newest") list = [...list].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
@@ -315,7 +419,15 @@ export default function HomePage() {
   const showAdmin = adminUnlocked && adminOpen && !!data;
 
   // ---------- actions ----------
+  function remember(folder: Folder, link: Link) {
+    setHistory((h) => {
+      const next = [{ folderId: folder.id, linkId: link.id, at: Date.now() }, ...h.filter((x) => x.linkId !== link.id)].slice(0, 20);
+      writeLocal("history", next);
+      return next;
+    });
+  }
   function trackAndOpen(folder: Folder, link: Link, openWindow = false) {
+    remember(folder, link);
     // clicks don't block the UI and don't show errors
     fetch("/api/bookmarks", {
       method: "POST",
@@ -323,7 +435,10 @@ export default function HomePage() {
       body: JSON.stringify({ action: "trackClick", folderId: folder.id, linkId: link.id }),
     }).then((r) => r.json()).then(applyIfNewer).catch(() => {});
     const href = safeHref(link.url);
-    if (openWindow && href) window.open(href, "_blank", "noopener,noreferrer");
+    if (openWindow && href) {
+      if (look.newTab) window.open(href, "_blank", "noopener,noreferrer");
+      else window.location.href = href;
+    }
   }
   function randomBookmark() {
     if (!allRefs.length) { showToast("No websites yet"); return; }
@@ -385,6 +500,7 @@ export default function HomePage() {
   }
 
   const cardActions: LinkCardActions = {
+    newTab: look.newTab,
     open: (f, l) => trackAndOpen(f, l),
     star: (f, l) => { api("toggleFavorite", { folderId: f.id, linkId: l.id }); },
     copy: (l) => navigator.clipboard.writeText(l.url).then(() => showToast("Link copied")).catch(() => showToast("Couldn't copy")),
@@ -420,6 +536,33 @@ export default function HomePage() {
     await api("moveFolderTo", { folderId, beforeFolderId, password: adminPassword });
   }
 
+  function toggleAll() {
+    const anyOpen = sortedFolders.some((f) => !collapsed[f.id]);
+    const next = Object.fromEntries(sortedFolders.map((f) => [f.id, anyOpen]));
+    setCollapsed(next);
+    writeLocal("collapsed", next);
+  }
+  function openAllIn(folder: Folder, links: Link[]) {
+    if (links.length > 5 && !confirm(`Open ${links.length} tabs at once?`)) return;
+    links.forEach((l) => { const h = safeHref(l.url); if (h) window.open(h, "_blank", "noopener,noreferrer"); });
+    showToast(`Opened ${links.length} tabs — allow pop-ups if some were blocked`);
+  }
+  function openTopResult() {
+    const first = folderViews.find((v) => v.links.length);
+    if (!first) return;
+    trackAndOpen(first.folder, first.links[0], true);
+    searchRef.current?.blur();
+  }
+  async function installApp() {
+    setMoreMenu(false);
+    const p = installPrompt.current;
+    if (!p) return;
+    p.prompt();
+    const choice = await p.userChoice.catch(() => null);
+    if (choice?.outcome === "accepted") showToast("Installed! Find it on your home screen");
+    installPrompt.current = null;
+    setCanInstall(false);
+  }
   function openWhatsNew() {
     setModal({ type: "whatsnew" });
     if (latestActivity) { setSeenActivity(latestActivity); writeLocal("seenActivity", latestActivity); }
@@ -516,6 +659,7 @@ export default function HomePage() {
       l: () => setModal({ type: "leaderboard" }),
       p: () => setModal({ type: "customize" }),
       w: openWhatsNew,
+      x: toggleAll,
     };
     if (run[k]) { e.preventDefault(); run[k](); }
   };
@@ -544,6 +688,7 @@ export default function HomePage() {
       cmd("view", view === "grid" ? "List view" : "Grid view", view === "grid" ? "list" : "grid", () => changeView(view === "grid" ? "list" : "grid"), "G"),
       cmd("admin", adminUnlocked ? (adminOpen ? "Close admin panel" : "Open admin panel") : "Admin login", "lock", toggleAdmin),
       cmd("keys", "Keyboard shortcuts", "keyboard", () => setModal({ type: "shortcuts" }), "?"),
+      cmd("collapse", "Collapse / expand all folders", "list", toggleAll, "X"),
       user ? cmd("auth", `Log out (${user})`, "logout", handleLogout) : cmd("auth", "Log in or sign up", "user", () => openLogin()),
     ];
   }
@@ -551,7 +696,7 @@ export default function HomePage() {
     id: `${folder.id}:${link.id}`,
     label: link.name,
     hint: folder.name,
-    icon: <img src={faviconUrl(link.url, 32)} alt="" width={16} height={16} />,
+    icon: <Favicon url={link.url} name={link.name} size={16} />,
     run: () => { setShowCmd(false); trackAndOpen(folder, link, true); },
   });
   const folderItem = (f: Folder): PaletteItem => ({
@@ -606,7 +751,12 @@ export default function HomePage() {
         />
       )}
 
-      <div className="topbar">
+      {offline && (
+        <div className="offline-bar" role="status">
+          <span className="offline-dot" /> You&apos;re offline — changes from others will appear when you reconnect.
+        </div>
+      )}
+      <div className="topbar" ref={topbarRef}>
         <div className="topbar-inner">
           <button className="brand" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} title="Back to top">
             <span className="brand-mark">🔖</span>
@@ -618,6 +768,7 @@ export default function HomePage() {
               ref={searchRef}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); openTopResult(); } }}
               placeholder={`Search ${allRefs.length} websites…`}
               aria-label="Search websites"
             />
@@ -628,15 +779,32 @@ export default function HomePage() {
             )}
           </label>
           <div className="top-actions">
-            <button className="icon-btn" title="Command menu (Ctrl K)" onClick={() => setShowCmd(true)}><Icon name="keyboard" /></button>
             <button className="icon-btn" title="Spin the wheel (S)" onClick={() => setModal({ type: "spin" })}><Icon name="shuffle" /></button>
             <button className="icon-btn" title="Community (L)" onClick={() => setModal({ type: "leaderboard" })}><Icon name="trophy" /></button>
             <button className={`icon-btn ${hasNews ? "dot" : ""}`} title="What's new (W)" onClick={openWhatsNew}><Icon name="bell" /></button>
-            <button className="icon-btn" title="Customize (P)" onClick={() => setModal({ type: "customize" })}><Icon name="palette" /></button>
-            <button className="icon-btn" title="Suggest a change" onClick={() => setSuggest({})}><Icon name="bulb" /></button>
-            <button className="icon-btn" title="Toggle theme (T)" onClick={() => changeTheme(theme === "dark" ? "light" : "dark")}>
-              <Icon name={theme === "dark" ? "sun" : "moon"} />
-            </button>
+            <div className="user-menu">
+              <button className={`icon-btn ${moreMenu ? "on" : ""}`} title="More" aria-expanded={moreMenu} onClick={() => setMoreMenu((o) => !o)}>
+                <Icon name="more" />
+              </button>
+              {moreMenu && (
+                <>
+                  <div className="menu-backdrop" onClick={() => setMoreMenu(false)} />
+                  <div className="menu">
+                    <button className="phone-only" onClick={() => { setMoreMenu(false); setModal({ type: "spin" }); }}><Icon name="shuffle" /> Spin the wheel</button>
+                    <button className="phone-only" onClick={() => { setMoreMenu(false); setModal({ type: "leaderboard" }); }}><Icon name="trophy" /> Community</button>
+                    <button onClick={() => { setMoreMenu(false); setShowCmd(true); }}><Icon name="search" /> Command menu <span className="kbd">Ctrl K</span></button>
+                    <button onClick={() => { setMoreMenu(false); setSuggest({}); }}><Icon name="bulb" /> Suggest a change</button>
+                    <button onClick={() => { setMoreMenu(false); setModal({ type: "customize" }); }}><Icon name="palette" /> Customize look <span className="kbd">P</span></button>
+                    <button onClick={() => { setMoreMenu(false); changeTheme(theme === "dark" ? "light" : "dark"); }}>
+                      <Icon name={theme === "dark" ? "sun" : "moon"} /> {theme === "dark" ? "Light mode" : "Dark mode"} <span className="kbd">T</span>
+                    </button>
+                    <button onClick={() => { setMoreMenu(false); toggleAll(); }}><Icon name="list" /> Collapse / expand all <span className="kbd">X</span></button>
+                    <button onClick={() => { setMoreMenu(false); setModal({ type: "shortcuts" }); }}><Icon name="keyboard" /> Keyboard shortcuts <span className="kbd">?</span></button>
+                    {canInstall && <button onClick={installApp}><Icon name="download" /> Install app</button>}
+                  </div>
+                </>
+              )}
+            </div>
             <button className={`icon-btn ${showAdmin ? "on" : ""} ${adminUnlocked ? "unlocked" : ""}`} title={adminUnlocked ? "Admin panel" : "Admin login"} onClick={toggleAdmin}>
               <Icon name="lock" />
             </button>
@@ -676,8 +844,15 @@ export default function HomePage() {
           </div>
         </header>
 
-        {data?.settings?.announcement && (
-          <div className="announcement"><Icon name="bulb" /> <span>{data.settings.announcement}</span></div>
+        {data?.settings?.announcement && dismissed !== data.settings.announcement && (
+          <div className="announcement">
+            <Icon name="bulb" /> <span>{data.settings.announcement}</span>
+            <button
+              className="announcement-x"
+              title="Hide until it changes"
+              onClick={() => { setDismissed(data.settings!.announcement!); writeLocal("dismissedAnnouncement", data.settings!.announcement); }}
+            ><Icon name="x" /></button>
+          </div>
         )}
 
         <PollCards
@@ -697,6 +872,16 @@ export default function HomePage() {
             )}
           </div>
           <div className="actions-right">
+            {allTags.length > 0 && (
+              <button
+                className={`btn btn-secondary btn-sm tags-toggle ${showTags || tagFilter ? "active" : ""}`}
+                onClick={() => { const v = !showTags; setShowTags(v); writeLocal("showTags", v); if (!v) setTagFilter(""); }}
+                title="Filter by tag"
+              ># Tags</button>
+            )}
+            <button className="btn btn-secondary btn-sm" onClick={toggleAll} title="Collapse or expand every folder (X)">
+              {sortedFolders.some((f) => !collapsed[f.id]) ? "Collapse all" : "Expand all"}
+            </button>
             <select value={sort} onChange={(e) => changeSort(e.target.value as Sort)} aria-label="Sort websites">
               <option value="manual">Manual order</option>
               <option value="name">Name A–Z</option>
@@ -712,19 +897,24 @@ export default function HomePage() {
         </div>
 
         {sortedFolders.length > 0 && (
-          <nav className="folder-nav" aria-label="Folders">
+          <nav className="folder-nav sticky" aria-label="Folders">
             {sortedFolders.map((f) => (
-              <button key={f.id} onClick={() => jumpToFolder(f.id)} style={f.color ? ({ "--folder-accent": f.color } as React.CSSProperties) : undefined}>
+              <button
+                key={f.id}
+                className={activeFolder === f.id ? "on" : ""}
+                onClick={() => jumpToFolder(f.id)}
+                style={f.color ? ({ "--folder-accent": f.color } as React.CSSProperties) : undefined}
+              >
                 <span>{f.emoji}</span> {f.name} <em>{f.links.length}</em>
               </button>
             ))}
           </nav>
         )}
-        {allTags.length > 0 && (
+        {allTags.length > 0 && (showTags || tagFilter) && (
           <div className="tag-bar">
             {allTags.slice(0, 16).map(([t, n]) => (
               <button key={t} className={tagFilter === t ? "on" : ""} onClick={() => setTagFilter(tagFilter === t ? "" : t)}>
-                #{t} <em>{n}</em>
+                #{t} <em>{n}/{allRefs.length}</em>
               </button>
             ))}
           </div>
@@ -736,15 +926,19 @@ export default function HomePage() {
               <strong>{matchCount}</strong> {matchCount === 1 ? "website" : "websites"}
               {q && <> matching “{search.trim()}”</>}
               {tagFilter && <> tagged <strong>#{tagFilter}</strong></>}
+              {q && matchCount > 0 && <span className="enter-hint"> · press <span className="kbd">Enter</span> to open the first</span>}
             </span>
             <button className="btn btn-secondary btn-sm" onClick={() => { setSearch(""); setTagFilter(""); }}>Clear</button>
           </div>
         ) : (
           <>
-            <QuickRow title="Starred" icon="star" items={favorites} onOpen={trackAndOpen} />
-            <QuickRow title="Top rated" icon="heart" items={topRated} onOpen={trackAndOpen} />
-            <QuickRow title="Most visited" icon="chart" items={mostVisited} onOpen={trackAndOpen} showClicks />
-            <QuickRow title="Recently added" icon="clock" items={recent} onOpen={trackAndOpen} />
+            <QuickTabs
+              lists={{ recent: recentOpened, starred: favorites, top: topRated, visited: mostVisited, new: recent }}
+              tab={quickTab}
+              setTab={(t) => { setQuickTab(t); writeLocal("quickTab", t); }}
+              onOpen={trackAndOpen}
+              newTab={look.newTab}
+            />
           </>
         )}
 
@@ -787,10 +981,7 @@ export default function HomePage() {
                 actions={cardActions}
                 onToggle={() => toggleCollapsed(folder.id)}
                 onAddHere={() => openAdd(folder.id)}
-                onOpenAll={() => {
-                  links.forEach((l) => { const h = safeHref(l.url); if (h) window.open(h, "_blank", "noopener,noreferrer"); });
-                  showToast(`Opened ${links.length} tabs — allow pop-ups if some were blocked`);
-                }}
+                onOpenAll={() => openAllIn(folder, links)}
                 onEditFolder={() => setModal({ type: "folder", folder })}
                 onDeleteFolder={() => setModal({ type: "deleteFolder", folder })}
                 onShareFolder={() => shareFolder(folder)}
@@ -937,6 +1128,11 @@ export default function HomePage() {
             { title: "Websites", queryOnly: true, items: allRefs.map(linkItem) },
           ]}
         />
+      )}
+      {scrolled && (
+        <button className="to-top" onClick={() => window.scrollTo({ top: 0, behavior: look.motion ? "smooth" : "auto" })} title="Back to top">
+          <Icon name="up" />
+        </button>
       )}
       {toast && (
         <div className="toast" role="status">

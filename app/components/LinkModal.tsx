@@ -2,7 +2,8 @@
 import { useMemo, useState } from "react";
 import { BookmarksData, Folder, Link } from "@/lib/types";
 import { Icon } from "../CommandPalette";
-import { COLORS, faviconUrl, hostOf, nameFromUrl, normUrl } from "./ui";
+import Favicon from "./Favicon";
+import { COLORS, hostOf, nameFromUrl, normUrl } from "./ui";
 
 export interface LinkValues {
   name: string;
@@ -109,7 +110,7 @@ export default function LinkModal({
             <label>Link</label>
             <div className="url-field">
               <span className="url-favicon">
-                {host ? <img src={faviconUrl(`https://${host}`, 32)} alt="" width={18} height={18} /> : <Icon name="link" />}
+                {host ? <Favicon key={host} url={`https://${host}`} name={host} size={18} /> : <Icon name="link" />}
               </span>
               <input
                 value={url}
@@ -224,8 +225,7 @@ export default function LinkModal({
             <div className="card static" style={color ? ({ "--card-accent": color } as React.CSSProperties) : undefined}>
               <span className="card-main">
                 <span className="card-icon">
-                  {host && <img src={faviconUrl(`https://${host}`)} alt="" width={22} height={22} />}
-                  <span className="card-letter">{(name || "?").charAt(0).toUpperCase()}</span>
+                  <Favicon key={host} url={host ? `https://${host}` : ""} name={name || "?"} size={22} />
                 </span>
                 <span className="card-body">
                   <span className="card-name">{name || "Website name"}{!editing && <span className="badge-new">New</span>}</span>

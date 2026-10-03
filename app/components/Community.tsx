@@ -2,7 +2,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityEntry, Contributor, Folder, Link, Poll } from "@/lib/types";
 import { Icon } from "../CommandPalette";
-import { COLORS, LinkRef, faviconUrl, timeAgo } from "./ui";
+import Favicon from "./Favicon";
+import { COLORS, LinkRef, timeAgo } from "./ui";
 
 /* ---------- presence ---------- */
 export function usePresence(user: string | null) {
@@ -166,7 +167,7 @@ export function SpinWheel({ refs, folders, onOpen, onClose }: {
           >
             {(reel.length ? reel : pool.slice(0, 1)).map((r, i) => (
               <div key={i} className="reel-item">
-                <img src={faviconUrl(r.link.url, 32)} alt="" width={20} height={20} />
+                <Favicon url={r.link.url} name={r.link.name} size={20} />
                 <span>{r.link.name}</span>
                 <em>{r.folder.emoji}</em>
               </div>
@@ -247,8 +248,8 @@ export const PALETTES: { id: Palette; label: string; swatch: [string, string] }[
   { id: "sunset", label: "Sunset", swatch: ["#170b0b", "#3d1d17"] },
   { id: "light", label: "Light", swatch: ["#f4f5f8", "#dcdfe6"] },
 ];
-export interface Look { palette: Palette; accent: string; density: "comfy" | "compact"; motion: boolean }
-export const DEFAULT_LOOK: Look = { palette: "black", accent: "", density: "comfy", motion: true };
+export interface Look { palette: Palette; accent: string; density: "comfy" | "compact"; motion: boolean; newTab: boolean }
+export const DEFAULT_LOOK: Look = { palette: "black", accent: "", density: "comfy", motion: true, newTab: true };
 
 export function applyLook(look: Look) {
   const root = document.documentElement;
@@ -294,6 +295,11 @@ export function CustomizeModal({ look, onChange, onClose }: { look: Look; onChan
         <label className="toggle-row compact">
           <div><strong>Compact cards</strong><span>Fit more websites on screen.</span></div>
           <input type="checkbox" role="switch" checked={look.density === "compact"} onChange={(e) => onChange({ ...look, density: e.target.checked ? "compact" : "comfy" })} />
+          <span className="switch" aria-hidden="true" />
+        </label>
+        <label className="toggle-row compact">
+          <div><strong>Open websites in a new tab</strong><span>Turn off to open them in this tab instead.</span></div>
+          <input type="checkbox" role="switch" checked={look.newTab} onChange={(e) => onChange({ ...look, newTab: e.target.checked })} />
           <span className="switch" aria-hidden="true" />
         </label>
         <label className="toggle-row compact">

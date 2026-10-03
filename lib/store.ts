@@ -87,8 +87,9 @@ function linkRefs(body: Record<string, unknown>): LinkRef[] {
 export function requireAdmin(password?: string) {
   const expected = process.env.ADMIN_PASSWORD || process.env.BOOKMARKS_ADMIN_PASSWORD || "";
   if (!expected) {
-    // If no password configured, allow (dev) — production should set ADMIN_PASSWORD
-    return;
+    // Fail closed: previews share the live database, so a deployment without a
+    // password must not hand admin to everyone.
+    throw new Error("Admin is disabled here — set ADMIN_PASSWORD for this environment in Vercel");
   }
   if (!password || password !== expected) {
     throw new Error("Wrong admin password");
@@ -407,6 +408,25 @@ export async function handleAction(
         removed += before - f.links.length;
       }
       pushActivity(data, "delete", `Deleted ${removed} links`);
+      await saveBookmarks(data);
+      return data;
+    }
+    case "bulkTag": {
+      requireAdmin(password);
+      const tag = String(body.tag || "").trim().toLowerCase().replace(/,/g, "").slice(0, 24);
+      if (!tag) throw new Error("Missing tag");
+      const remove = body.remove === true;
+      const ids = new Set(linkRefs(body).map((r) => r.linkId));
+      let changed = 0;
+      for (const f of data.folders) {
+        for (const l of f.links) {
+          if (!ids.has(l.id)) continue;
+          const tags = new Set(l.tags || []);
+          if (remove ? tags.delete(tag) : !tags.has(tag) && tags.add(tag)) changed++;
+          l.tags = Array.from(tags);
+        }
+      }
+      pushActivity(data, "edit", `${remove ? "Removed" : "Added"} tag #${tag} ${remove ? "from" : "on"} ${changed} links`);
       await saveBookmarks(data);
       return data;
     }

@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Request failed";
     const status =
-      message === "Wrong admin password"
+      (message === "Wrong admin password" || message.startsWith("Admin is disabled"))
         ? 403
         : message.startsWith("Log in")
           ? 401
