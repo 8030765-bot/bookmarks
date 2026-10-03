@@ -127,6 +127,7 @@ export async function handleAction(
         clicks: 0,
         createdAt: new Date().toISOString(),
         color: typeof body.color === "string" ? body.color : undefined,
+        notes: typeof body.notes === "string" && body.notes.trim() ? body.notes.trim().slice(0, 500) : undefined,
       });
       pushActivity(data, "add", `Added link “${name}”${credit(body)}`);
       await saveBookmarks(data);
@@ -146,6 +147,7 @@ export async function handleAction(
       else if (typeof body.tags === "string")
         link.tags = String(body.tags).split(",").map((t) => t.trim()).filter(Boolean);
       if (typeof body.color === "string") link.color = body.color || undefined;
+      if (typeof body.notes === "string") link.notes = body.notes.trim().slice(0, 500) || undefined;
       link.updatedAt = new Date().toISOString();
       pushActivity(data, "edit", `Edited link “${link.name}”${credit(body)}`);
       await saveBookmarks(data);
@@ -344,6 +346,31 @@ export async function handleAction(
         f.links = keep;
       }
       pushActivity(data, "move", `Moved ${moved} links to “${dst.name}”`);
+      await saveBookmarks(data);
+      return data;
+    }
+    case "moveLinkTo": {
+      // drag & drop: put a link into a folder, before another link (or at the end)
+      requireAdmin(password);
+      const { folder: src, index } = findLink(data, String(body.folderId || ""), String(body.linkId || ""));
+      const dst = data.folders.find((f) => f.id === String(body.targetFolderId || ""));
+      if (!dst) throw new Error("Folder not found");
+      const [link] = src.links.splice(index, 1);
+      const before = body.beforeLinkId ? dst.links.findIndex((l) => l.id === String(body.beforeLinkId)) : -1;
+      if (before < 0) dst.links.push(link);
+      else dst.links.splice(before, 0, link);
+      if (src !== dst) pushActivity(data, "move", `Moved “${link.name}” to “${dst.name}”`);
+      await saveBookmarks(data);
+      return data;
+    }
+    case "moveFolderTo": {
+      requireAdmin(password);
+      const from = data.folders.findIndex((f) => f.id === String(body.folderId || ""));
+      if (from < 0) throw new Error("Folder not found");
+      const [folder] = data.folders.splice(from, 1);
+      const before = body.beforeFolderId ? data.folders.findIndex((f) => f.id === String(body.beforeFolderId)) : -1;
+      if (before < 0) data.folders.push(folder);
+      else data.folders.splice(before, 0, folder);
       await saveBookmarks(data);
       return data;
     }
