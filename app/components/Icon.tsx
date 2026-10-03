@@ -55,6 +55,8 @@ export const ICON_PATHS: Record<string, string> = {
   poll: "M4 20V10M10 20V4M16 20v-7M22 20H2",
   reply: "M9 17 4 12l5-5M20 18v-2a4 4 0 0 0-4-4H4",
   bulb: "M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.2 1 2V17h6v-.3c0-.8.4-1.5 1-2A7 7 0 0 0 12 2z",
+  tools: "M14.7 6.3a4 4 0 0 0 5 5l-9.4 9.4a2.1 2.1 0 0 1-3-3zM6 3l3 3-1.5 1.5L4.5 4.5zM3 9l2-2",
+  popout: "M14 4h6v6M20 4l-8 8M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
 };
 
 export function Icon({ name }: { name: keyof typeof ICON_PATHS | string }) {

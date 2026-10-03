@@ -42,6 +42,7 @@ export function FolderMenu({
     copyLink: () => void;
     copyMarkdown: () => void;
     info: () => void;
+    note: () => void;
     edit: () => void;
     duplicate: () => void;
     merge: () => void;
@@ -82,6 +83,7 @@ export function FolderMenu({
         </div>
         <button onClick={run(actions.toggleView)}><Icon name={view === "grid" ? "list" : "grid"} /> Show as {view === "grid" ? "a list" : "a grid"}</button>
         <button onClick={run(actions.info)}><Icon name="info" /> About this folder</button>
+        <button onClick={run(actions.note)}><Icon name="note" /> {pref.note ? "Edit my note" : "Add a private note"}</button>
         <div className="menu-sep" />
         {linkCount > 0 && <button onClick={run(actions.random)}><Icon name="shuffle" /> Random website from here</button>}
         {linkCount > 0 && <button onClick={run(actions.openAll)}><Icon name="external" /> Open all</button>}

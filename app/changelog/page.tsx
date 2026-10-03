@@ -6,6 +6,20 @@ import { Icon } from "../components/Icon";
 /** Updates to the site itself (not the bookmarks — those are in "What's new"). Newest first. */
 const RELEASES: { date: string; title: string; items: string[] }[] = [
   {
+    date: "2026-10", title: "Tools",
+    items: [
+      "A tools drawer (press O): focus timer, stopwatch, world clock, countdowns, breathing and a metronome",
+      "Private notes, to-do list, habit tracker and flashcards that follow your account",
+      "Calculator with a scientific mode, percentages, unit converter, dice, random picker and team maker",
+      "Typing speed test with a leaderboard",
+      "Word counter, text case, dictionary, binary & Morse, password maker and emoji search",
+      "Colour picker, palette maker, sketchpad and pixel art",
+      "Word, quote and fact of the day",
+      "Pop any tool out into its own window; tools remember where you left off",
+      "Private sticky notes on folders",
+    ],
+  },
+  {
     date: "2026-10", title: "Community",
     items: [
       "A new Community page: link requests, Q&A with best answers, tips, shoutouts and a guestbook",

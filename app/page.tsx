@@ -37,6 +37,9 @@ import {
   CustomizeModal, DEFAULT_LOOK, LeaderboardModal, Look, OnlinePill, Palette, PollCards, SpinWheel, WhatsNew, applyLook, applyPollVote, usePresence,
 } from "./components/Community";
 import { TodayStrip, sayThanks, suggestNote, useCommunityInfo } from "./components/Today";
+import { useTimerAlarm } from "./components/tools/timerAlarm";
+
+const ToolsDrawer = dynamic(() => import("./components/tools/ToolsDrawer"), { ssr: false });
 
 const ADMIN_PW_KEY = "adminPw";
 const CACHE_KEY = "cache:data";
@@ -382,6 +385,11 @@ export default function HomePage() {
 
   const presence = usePresence(user);
   const community = useCommunityInfo(user);
+  // tools drawer (O), and the focus timer that rings even when it's closed
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [toolsTool, setToolsTool] = useState<string | null>(null);
+  const openTools = (tool: string | null = null) => { setToolsTool(tool); setToolsOpen(true); };
+  useTimerAlarm(useCallback((m: string) => showToast(m, undefined, 6000), [showToast]));
   const myThanksSet = useMemo(() => new Set(community.info?.myThanks || []), [community.info?.myThanks]);
   const personal = usePersonal(user);
   const favoriteSet = useMemo(() => new Set(personal.favorites), [personal.favorites]);
@@ -755,7 +763,19 @@ export default function HomePage() {
       if (since && isNewSince(l, since) && l.addedBy?.toLowerCase() !== meLower) unread++;
       if (personal.links[l.id]?.done) done++;
     }
-    return { updatedAt, visitedAt: folderVisited.get(folder.id), unread, done, fav: folderPrefs[folder.id]?.fav, follow: folderPrefs[folder.id]?.follow };
+    return {
+      updatedAt, visitedAt: folderVisited.get(folder.id), unread, done, fav: folderPrefs[folder.id]?.fav, follow: folderPrefs[folder.id]?.follow,
+      note: folderPrefs[folder.id]?.note, onNote: () => editFolderNote(folder),
+    };
+  }
+  function editFolderNote(folder: Folder) {
+    setPrompt({
+      title: `Your note on ${folder.emoji} ${folder.name}`,
+      initial: folderPrefs[folder.id]?.note || "",
+      multiline: true,
+      placeholder: "Only you can see this. Leave empty to remove it.",
+      onSave: (v) => { personal.setFolderPref(folder.id, { note: v.trim() }); showToast(v.trim() ? "Note saved" : "Note removed"); },
+    });
   }
   type FolderView = { folder: Folder; links: Link[]; shortcuts: LinkRef[] };
   const viewOf = (f: Folder): FolderView => ({ folder: f, links: visibleLinks(f), shortcuts: shortcutsFor(f) });
@@ -1331,8 +1351,11 @@ export default function HomePage() {
       if (/^[1-5]$/.test(k)) { e.preventDefault(); cardActions.rate(l.id, Number(k)); return; }
       if (cardKeys[k]) { e.preventDefault(); cardKeys[k](); return; }
     }
+    // Shift+T: straight to the focus timer
+    if (e.key === "T" && e.shiftKey) { e.preventDefault(); openTools("timer"); return; }
     const run: Record<string, () => void> = {
       "/": () => searchRef.current?.focus(),
+      o: () => openTools(),
       n: () => openAdd(),
       f: () => openNewFolder(),
       r: randomBookmark,
@@ -1531,6 +1554,7 @@ export default function HomePage() {
             onPickFolder={(f) => { setSearch(""); jumpToFolder(f.id); }}
           />
           <div className="top-actions">
+            <button className="icon-btn" title="Tools (O)" onClick={() => openTools()}><Icon name="tools" /></button>
             <button className="icon-btn" title="Spin the wheel (S)" onClick={() => setModal({ type: "spin" })}><Icon name="shuffle" /></button>
             <button className="icon-btn" title="Community (L)" onClick={() => setModal({ type: "leaderboard" })}><Icon name="trophy" /></button>
             {user && <NotificationBell notifications={personal.notifications} open={notifOpen} onOpen={() => setNotifOpen(true)} />}
@@ -1545,6 +1569,8 @@ export default function HomePage() {
                     <button className="phone-only" onClick={() => { setMoreMenu(false); setModal({ type: "spin" }); }}><Icon name="shuffle" /> Spin the wheel</button>
                     <button className="phone-only" onClick={() => { setMoreMenu(false); setModal({ type: "leaderboard" }); }}><Icon name="trophy" /> Community</button>
                     <button onClick={() => { setMoreMenu(false); setShowCmd(true); }}><Icon name="search" /> Command menu <span className="kbd">Ctrl K</span></button>
+                    <button onClick={() => { setMoreMenu(false); openTools(); }}><Icon name="tools" /> Tools <span className="kbd">O</span></button>
+                    <button onClick={() => { setMoreMenu(false); location.href = "/community"; }}><Icon name="users" /> Community page</button>
                     <button onClick={() => { setMoreMenu(false); setSuggest({}); }}><Icon name="bulb" /> Suggest a change</button>
                     {user && <button onClick={() => { setMoreMenu(false); setModal({ type: "profileEdit" }); }}><Icon name="user" /> Edit profile</button>}
                     <button onClick={() => { setMoreMenu(false); openWhatsNew(); }}><Icon name="chart" /> What&apos;s new {hasNews && <span className="dot-inline" />}<span className="kbd">W</span></button>
@@ -1998,6 +2024,7 @@ export default function HomePage() {
           onClose={() => setModal(null)}
         />
       )}
+      <ToolsDrawer open={toolsOpen} user={user} openTool={toolsTool} onClose={() => { setToolsOpen(false); setToolsTool(null); }} />
       {folderMenu && (() => {
         const fm = folderMenu.folder;
         const pref = folderPrefs[fm.id] || {};
@@ -2029,6 +2056,7 @@ export default function HomePage() {
               copyLink: () => shareFolder(fm),
               copyMarkdown: () => navigator.clipboard.writeText(folderMarkdown(fm)).then(() => showToast("Copied as a Markdown list")).catch(() => showToast("Couldn't copy")),
               info: () => setFolderInfoId(fm.id),
+              note: () => editFolderNote(fm),
               edit: () => setModal({ type: "folder", folder: fm }),
               duplicate: () => folderApi("duplicateFolder", { folderId: fm.id }, `Copied ${fm.name}`),
               merge: () => setPick({ kind: "merge", folder: fm }),

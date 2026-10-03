@@ -19,6 +19,9 @@ export interface FolderMeta {
   done: number;
   fav?: boolean;
   follow?: boolean;
+  /** your private sticky note on the folder */
+  note?: string;
+  onNote?: () => void;
 }
 
 export type Drag = { kind: "link"; folderId: string; linkId: string } | { kind: "folder"; folderId: string } | null;
@@ -218,6 +221,11 @@ export default function FolderSection({
             </span>
           )}
         </div>
+      )}
+      {meta.note && !collapsed && (
+        <button className="fh-note" onClick={meta.onNote} title="Your private note — only you see it. Click to edit.">
+          <Icon name="note" /> <span>{meta.note}</span>
+        </button>
       )}
       {filterOpen && !collapsed && (
         <div className="fh-filter">

@@ -270,6 +270,8 @@ const SHORTCUTS: [string, string][] = [
   ["X", "Collapse / expand all folders"],
   ["Enter", "Open the top search result"],
   ["T", "Light / dark theme"],
+  ["O", "Tools drawer"],
+  ["Shift T", "Focus timer"],
   ["Esc", "Close / clear search"],
   ["?", "This list"],
   ["Ctrl V", "Paste a link anywhere to add it"],

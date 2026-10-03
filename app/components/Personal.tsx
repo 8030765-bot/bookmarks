@@ -15,7 +15,7 @@ export interface PrivateLink { id: string; name: string; url: string; createdAt:
 /** Your own extras on a shared link (private note, read later, done…). */
 export interface LinkPref { note?: string; later?: boolean; done?: boolean; rename?: string; hidden?: boolean; checks?: number[] }
 /** Your own settings for a shared folder. */
-export interface FolderPref { hidden?: boolean; fav?: boolean; follow?: boolean; sort?: string }
+export interface FolderPref { hidden?: boolean; fav?: boolean; follow?: boolean; sort?: string; note?: string }
 /** A saved search + tag filter. */
 export interface SavedView { id: string; name: string; q: string; tags: string[]; tagMode: "any" | "all"; sort?: string }
 export interface Personal {

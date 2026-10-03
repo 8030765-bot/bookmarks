@@ -67,6 +67,7 @@ export interface FolderPref {
   fav?: boolean; // a favourite folder
   follow?: boolean; // get told about new links
   sort?: string; // your own order of links
+  note?: string; // a private sticky note on the folder
 }
 /** A search + filters you saved to reopen in one click. */
 export interface SavedView {
@@ -109,6 +110,7 @@ export async function setFolderPref(username: string, folderId: string, patch: R
   const next: FolderPref = { ...(data.folders[folderId] || {}) };
   for (const k of ["hidden", "fav", "follow"] as const) if (typeof patch[k] === "boolean") next[k] = patch[k] as boolean;
   if (typeof patch.sort === "string") next.sort = FOLDER_SORTS.includes(patch.sort) ? patch.sort : undefined;
+  if (typeof patch.note === "string") next.note = patch.note.trim().slice(0, 500) || undefined;
   (Object.keys(next) as (keyof FolderPref)[]).forEach((k) => { if (!next[k]) delete next[k]; });
   if (Object.keys(next).length) data.folders[folderId] = next;
   else delete data.folders[folderId];

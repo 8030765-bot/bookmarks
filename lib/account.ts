@@ -5,6 +5,7 @@ import { deleteSocial, fansKey, followingKey, renameSocial } from "./social";
 import { followersKey, getBookmarks, saveBookmarks } from "./store";
 import { deleteUserData, getUserData, renameUserData } from "./userdata";
 import { deletePushSubs } from "./push";
+import { deleteToolData, getToolData, removeTyping, renameToolData } from "./tools";
 
 /**
  * Account-wide changes that touch several stores at once: changing your
@@ -20,6 +21,8 @@ export async function renameAccount(oldName: string, newName: string, password: 
   if (a !== b) {
     await renameUserData(oldName, moved.username);
     await renameSocial(oldName, moved.username);
+    await renameToolData(oldName, moved.username);
+    await removeTyping(oldName);
     const role = await getRole(oldName);
     if (role) { await setRole(moved.username, role); await setRole(oldName, null); }
     const ud = await getUserData(moved.username);
@@ -42,6 +45,11 @@ export async function renameAccount(oldName: string, newName: string, password: 
   }
   for (const p of data.polls || []) {
     if (a in p.votes && a !== b) { p.votes[b] = p.votes[a]; delete p.votes[a]; touched = true; }
+    // anonymous answers are kept apart from the list
+    if (p.anonymous && a !== b) {
+      const v = await redis.hget(`pollvotes:${p.id}`, a);
+      if (v !== null && v !== undefined) { await redis.hset(`pollvotes:${p.id}`, { [b]: v }); await redis.hdel(`pollvotes:${p.id}`, a); }
+    }
   }
   if (touched) await saveBookmarks(data, { snapshot: false });
   return moved.username;
@@ -57,6 +65,8 @@ export async function deleteAccount(username: string, password: string) {
   await setRole(username, null);
   await redis.srem(BANNED_KEY, username.toLowerCase());
   await deleteUserData(username);
+  await deleteToolData(username);
+  await removeTyping(username);
   await deletePushSubs(username);
   await deleteUser(username);
 }
@@ -64,9 +74,9 @@ export async function deleteAccount(username: string, password: string) {
 /** Everything the site stores about you, as one JSON file. */
 export async function exportAccount(username: string) {
   const redis = Redis.fromEnv();
-  const [info, data, sessions, logins, following, fans] = await Promise.all([
+  const [info, data, sessions, logins, following, fans, tools] = await Promise.all([
     accountInfo(username), getUserData(username), listSessions(username), loginHistory(username),
-    redis.smembers(followingKey(username)), redis.smembers(fansKey(username)),
+    redis.smembers(followingKey(username)), redis.smembers(fansKey(username)), getToolData(username),
   ]);
   return {
     exportedAt: new Date().toISOString(),
@@ -82,6 +92,7 @@ export async function exportAccount(username: string) {
     settings: data.settings,
     blocked: data.blocked,
     notifications: data.notifications,
+    tools,
     following,
     followers: fans,
     activeLogins: sessions,
