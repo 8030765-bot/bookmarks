@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCurrentUser } from "@/lib/auth";
+import { changePassword, getCurrentUser, regenerateRecoveryCode } from "@/lib/auth";
 import { normalizeUrl } from "@/lib/url";
 import {
   addMyStuff, getUserData, markNotificationsRead, recordAggregateRating, removeMyStuff,
@@ -44,6 +44,11 @@ export async function POST(req: NextRequest) {
       case "readNotifications":
         await markNotificationsRead(user);
         return NextResponse.json({ ok: true });
+      case "changePassword":
+        await changePassword(user, String(body.oldPassword || ""), String(body.newPassword || ""));
+        return NextResponse.json({ ok: true });
+      case "newRecoveryCode":
+        return NextResponse.json({ recoveryCode: await regenerateRecoveryCode(user) });
       default:
         return NextResponse.json({ error: "Unknown action" }, { status: 400 });
     }

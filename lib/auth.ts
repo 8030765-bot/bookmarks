@@ -14,6 +14,13 @@ interface StoredUser {
   username: string;
   passwordHash: string;
   createdAt: string;
+  /** hash of a one-time recovery code, for forgotten-password resets */
+  recoveryHash?: string;
+}
+
+function genRecoveryCode(): string {
+  // 12 hex chars, shown in groups of 4 — easy to write down
+  return randomBytes(6).toString("hex");
 }
 
 function getRedis() {
@@ -64,18 +71,20 @@ export function setSessionCookie(token: string) {
   });
 }
 
-export async function signup(username: string, password: string): Promise<Session> {
+export async function signup(username: string, password: string): Promise<Session & { recoveryCode: string }> {
   validateCredentials(username, password);
+  const recoveryCode = genRecoveryCode();
   const user: StoredUser = {
     username,
     passwordHash: hashPassword(password),
     createdAt: new Date().toISOString(),
+    recoveryHash: hashPassword(recoveryCode),
   };
   // nx: only create if the username isn't taken (case-insensitive)
   const created = await getRedis().set(userKey(username), user, { nx: true });
   if (!created) throw new Error("That username is already taken");
   await getRedis().sadd(USER_INDEX, username.toLowerCase());
-  return { token: await createSession(username), username };
+  return { token: await createSession(username), username, recoveryCode };
 }
 
 export async function login(username: string, password: string): Promise<Session> {
@@ -93,6 +102,60 @@ export async function login(username: string, password: string): Promise<Session
   // backfill: accounts created before the index existed get added on next login
   await redis.sadd(USER_INDEX, user.username.toLowerCase());
   return { token: await createSession(user.username), username: user.username };
+}
+
+/** Reset a forgotten password using the one-time recovery code. Returns a fresh code. */
+export async function resetWithCode(username: string, code: string, newPassword: string): Promise<{ recoveryCode: string }> {
+  if (newPassword.length < 6 || newPassword.length > 100) throw new Error("Password must be at least 6 characters");
+  const redis = getRedis();
+  const failKey = `reset_fail:${username.toLowerCase()}`;
+  if (((await redis.get<number>(failKey)) || 0) >= 8) throw new Error("Too many attempts — try again in 15 minutes");
+  const user = await redis.get<StoredUser>(userKey(username));
+  const clean = code.trim().replace(/\s+/g, "").toLowerCase();
+  if (!user || !user.recoveryHash || !verifyPassword(clean, user.recoveryHash)) {
+    await redis.incr(failKey);
+    await redis.expire(failKey, 15 * 60);
+    throw new Error("Wrong username or recovery code");
+  }
+  const recoveryCode = genRecoveryCode();
+  user.passwordHash = hashPassword(newPassword);
+  user.recoveryHash = hashPassword(recoveryCode);
+  await redis.set(userKey(user.username), user);
+  await redis.del(failKey, `login_fail:${user.username.toLowerCase()}`);
+  return { recoveryCode };
+}
+
+/** Logged-in password change (needs the current password). */
+export async function changePassword(username: string, oldPassword: string, newPassword: string): Promise<void> {
+  if (newPassword.length < 6 || newPassword.length > 100) throw new Error("New password must be at least 6 characters");
+  const redis = getRedis();
+  const user = await redis.get<StoredUser>(userKey(username));
+  if (!user || !verifyPassword(oldPassword, user.passwordHash)) throw new Error("Current password is wrong");
+  user.passwordHash = hashPassword(newPassword);
+  await redis.set(userKey(user.username), user);
+}
+
+/** Generate a fresh recovery code for a logged-in account (e.g. old accounts that never had one). */
+export async function regenerateRecoveryCode(username: string): Promise<string> {
+  const redis = getRedis();
+  const user = await redis.get<StoredUser>(userKey(username));
+  if (!user) throw new Error("No such account");
+  const recoveryCode = genRecoveryCode();
+  user.recoveryHash = hashPassword(recoveryCode);
+  await redis.set(userKey(user.username), user);
+  return recoveryCode;
+}
+
+/** Admin reset: set a temporary password and return it to hand to the user. */
+export async function adminSetPassword(username: string): Promise<{ username: string; tempPassword: string }> {
+  const redis = getRedis();
+  const user = await redis.get<StoredUser>(userKey(username));
+  if (!user) throw new Error("No such account");
+  const tempPassword = `reset-${randomBytes(3).toString("hex")}`;
+  user.passwordHash = hashPassword(tempPassword);
+  await redis.set(userKey(user.username), user);
+  await redis.del(`login_fail:${user.username.toLowerCase()}`);
+  return { username: user.username, tempPassword };
 }
 
 export async function logout(): Promise<void> {

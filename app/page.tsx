@@ -36,6 +36,7 @@ type Modal =
   | { type: "spin" }
   | { type: "whatsnew" }
   | { type: "profileEdit" }
+  | { type: "recovery"; code: string; context: "signup" | "reset" }
   | null;
 interface Toast {
   msg: string;
@@ -137,8 +138,9 @@ export default function HomePage() {
   const [profileView, setProfileView] = useState<string | null>(null);
   const [aggRatings, setAggRatings] = useState<Record<string, { avg: number; count: number }>>({});
   const [ownerExists, setOwnerExists] = useState(true);
-  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [authMode, setAuthMode] = useState<"login" | "signup" | "reset">("login");
   const [fUsername, setFUsername] = useState("");
+  const [fCode, setFCode] = useState("");
   const [fPassword, setFPassword] = useState("");
   const [userMenu, setUserMenu] = useState(false);
   const [drag, setDrag] = useState<Drag>(null);
@@ -663,10 +665,35 @@ export default function HomePage() {
       setOwnerExists((o) => o || json.role === "owner");
       if (json.role) { setAdminUnlocked(true); setAdminPassword(""); }
       setFUsername(""); setFPassword("");
-      setModal(null);
+      if (authMode === "signup" && json.recoveryCode) {
+        setModal({ type: "recovery", code: json.recoveryCode, context: "signup" });
+      } else {
+        setModal(null);
+      }
       showToast(authMode === "signup" ? `Welcome, ${json.user}!` : `Logged in as ${json.user}`);
     } catch (err: any) {
       showToast(err.message || "Could not log in");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+  async function handleReset(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reset", username: fUsername, code: fCode, newPassword: fPassword }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Could not reset");
+      setFCode(""); setFPassword("");
+      showToast("Password reset — log in with your new password");
+      setAuthMode("login");
+      if (json.recoveryCode) setModal({ type: "recovery", code: json.recoveryCode, context: "reset" });
+    } catch (err: any) {
+      showToast(err.message || "Could not reset");
     } finally {
       setSubmitting(false);
     }
@@ -682,8 +709,8 @@ export default function HomePage() {
     if (role) { setRole(null); setAdminUnlocked(false); setAdminPassword(""); setAdminOpen(false); }
     showToast("Logged out");
   }
-  function openLogin(mode: "login" | "signup" = "login") {
-    setFPassword("");
+  function openLogin(mode: "login" | "signup" | "reset" = "login") {
+    setFPassword(""); setFCode("");
     setAuthMode(mode);
     setModal({ type: "login" });
   }
@@ -1143,36 +1170,81 @@ export default function HomePage() {
       {modal?.type === "login" && (
         <div className="modal-overlay" onClick={() => !submitting && setModal(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>{authMode === "login" ? "Welcome back" : "Create an account"}</h2>
-            <div className="auth-tabs">
-              <button type="button" className={authMode === "login" ? "on" : ""} onClick={() => setAuthMode("login")}>Log in</button>
-              <button type="button" className={authMode === "signup" ? "on" : ""} onClick={() => setAuthMode("signup")}>Sign up</button>
+            <h2>{authMode === "reset" ? "Reset password" : authMode === "login" ? "Welcome back" : "Create an account"}</h2>
+            {authMode !== "reset" && (
+              <div className="auth-tabs">
+                <button type="button" className={authMode === "login" ? "on" : ""} onClick={() => setAuthMode("login")}>Log in</button>
+                <button type="button" className={authMode === "signup" ? "on" : ""} onClick={() => setAuthMode("signup")}>Sign up</button>
+              </div>
+            )}
+            {authMode === "reset" ? (
+              <form onSubmit={handleReset}>
+                <p className="modal-text">Enter the recovery code you saved when you signed up. No code? Ask an admin to reset your password.</p>
+                <div className="form-group">
+                  <label>Username</label>
+                  <input value={fUsername} onChange={(e) => setFUsername(e.target.value)} required autoFocus autoComplete="username" maxLength={20} />
+                </div>
+                <div className="form-group">
+                  <label>Recovery code</label>
+                  <input value={fCode} onChange={(e) => setFCode(e.target.value)} required placeholder="e.g. a1b2 c3d4 e5f6" autoComplete="one-time-code" />
+                </div>
+                <div className="form-group">
+                  <label>New password</label>
+                  <input type="password" value={fPassword} onChange={(e) => setFPassword(e.target.value)} required minLength={6} autoComplete="new-password" />
+                </div>
+                <div className="modal-actions">
+                  <button type="button" className="btn btn-secondary" onClick={() => setAuthMode("login")}>Back</button>
+                  <button type="submit" className="btn btn-primary" disabled={submitting}>{submitting ? "…" : "Reset password"}</button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={handleAuth}>
+                <div className="form-group">
+                  <label>Username</label>
+                  <input value={fUsername} onChange={(e) => setFUsername(e.target.value)} required autoFocus autoComplete="username" maxLength={20} />
+                  {authMode === "signup" && <div className="hint">3–20 letters, numbers or _. This is the name others see.</div>}
+                </div>
+                <div className="form-group">
+                  <label>Password</label>
+                  <input
+                    type="password"
+                    value={fPassword}
+                    onChange={(e) => setFPassword(e.target.value)}
+                    required
+                    minLength={6}
+                    autoComplete={authMode === "signup" ? "new-password" : "current-password"}
+                  />
+                  {authMode === "signup"
+                    ? <div className="hint">At least 6 characters. Don&apos;t reuse a password from another site.</div>
+                    : <button type="button" className="link-btn forgot" onClick={() => { setFPassword(""); setFCode(""); setAuthMode("reset"); }}>Forgot password?</button>}
+                </div>
+                <div className="modal-actions">
+                  <button type="button" className="btn btn-secondary" onClick={() => setModal(null)}>Cancel</button>
+                  <button type="submit" className="btn btn-primary" disabled={submitting}>
+                    {submitting ? "…" : authMode === "login" ? "Log in" : "Create account"}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+      {modal?.type === "recovery" && (
+        <div className="modal-overlay" onClick={() => setModal(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>🔑 Save your recovery code</h2>
+            <p className="modal-text">
+              {modal.context === "signup"
+                ? "This is the only way to get back into your account if you forget your password. Write it down or screenshot it — it won't be shown again."
+                : "Here's your new recovery code — save this one and discard the old."}
+            </p>
+            <div className="recovery-code">
+              {modal.code.replace(/(.{4})/g, "$1 ").trim()}
             </div>
-            <form onSubmit={handleAuth}>
-              <div className="form-group">
-                <label>Username</label>
-                <input value={fUsername} onChange={(e) => setFUsername(e.target.value)} required autoFocus autoComplete="username" maxLength={20} />
-                {authMode === "signup" && <div className="hint">3–20 letters, numbers or _. This is the name others see.</div>}
-              </div>
-              <div className="form-group">
-                <label>Password</label>
-                <input
-                  type="password"
-                  value={fPassword}
-                  onChange={(e) => setFPassword(e.target.value)}
-                  required
-                  minLength={6}
-                  autoComplete={authMode === "signup" ? "new-password" : "current-password"}
-                />
-                {authMode === "signup" && <div className="hint">At least 6 characters. Don&apos;t reuse a password from another site.</div>}
-              </div>
-              <div className="modal-actions">
-                <button type="button" className="btn btn-secondary" onClick={() => setModal(null)}>Cancel</button>
-                <button type="submit" className="btn btn-primary" disabled={submitting}>
-                  {submitting ? "…" : authMode === "login" ? "Log in" : "Create account"}
-                </button>
-              </div>
-            </form>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => navigator.clipboard.writeText(modal.code).then(() => showToast("Recovery code copied")).catch(() => {})}>Copy</button>
+              <button className="btn btn-primary" onClick={() => setModal(null)}>I&apos;ve saved it</button>
+            </div>
           </div>
         </div>
       )}

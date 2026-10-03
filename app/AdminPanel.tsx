@@ -883,6 +883,15 @@ function UsersTab({
                   {isBanned ? "Unmute" : "Mute"}
                 </button>
                 <button
+                  className="btn btn-secondary btn-sm"
+                  title="Set a temporary password to give them"
+                  onClick={async () => {
+                    if (!confirm(`Reset ${u.username}'s password? You'll get a temporary password to give them.`)) return;
+                    try { const j = await admin("resetPassword", { username: u.username }); window.prompt(`Temporary password for ${u.username} — copy and give it to them:`, j.tempPassword); }
+                    catch (e: any) { showToast(e.message); }
+                  }}
+                >Reset pw</button>
+                <button
                   className="btn-icon sm danger"
                   title="Delete account"
                   onClick={() => { if (confirm(`Delete ${u.username}'s account? They'll be logged out.`)) act("deleteUser", u.username, `Deleted ${u.username}`); }}

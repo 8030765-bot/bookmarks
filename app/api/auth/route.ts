@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { login, logout, setSessionCookie, signup } from "@/lib/auth";
+import { login, logout, resetWithCode, setSessionCookie, signup } from "@/lib/auth";
 import { getAuthContext, getRole, ownerExists } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +23,13 @@ export async function POST(req: NextRequest) {
       await logout();
       return NextResponse.json({ user: null });
     }
+    if (action === "reset") {
+      const code = String(body.code || "");
+      const newPassword = String(body.newPassword || "");
+      if (!username || !code || !newPassword) return NextResponse.json({ error: "Fill in every field" }, { status: 400 });
+      const { recoveryCode } = await resetWithCode(username, code, newPassword);
+      return NextResponse.json({ ok: true, recoveryCode });
+    }
     if (action !== "signup" && action !== "login") {
       return NextResponse.json({ error: "Unknown action" }, { status: 400 });
     }
@@ -33,7 +40,9 @@ export async function POST(req: NextRequest) {
     setSessionCookie(session.token);
     // include role + ownerExists so the client unlocks admin immediately (no refresh needed)
     const [role, hasOwner] = await Promise.all([getRole(session.username), ownerExists()]);
-    return NextResponse.json({ user: session.username, role, ownerExists: hasOwner });
+    // signup includes the one-time recovery code so the client can show it
+    const recoveryCode = action === "signup" ? (session as { recoveryCode?: string }).recoveryCode : undefined;
+    return NextResponse.json({ user: session.username, role, ownerExists: hasOwner, recoveryCode });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Request failed";
     const status = message.startsWith("Wrong") ? 401 : message.startsWith("Too many") ? 429 : 400;
