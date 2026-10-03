@@ -20,6 +20,7 @@ function getRedis() {
   return Redis.fromEnv();
 }
 
+const USER_INDEX = "users:index";
 const userKey = (username: string) => `users:${username.toLowerCase()}`;
 const sessionKey = (token: string) => `sessions:${token}`;
 
@@ -73,6 +74,7 @@ export async function signup(username: string, password: string): Promise<Sessio
   // nx: only create if the username isn't taken (case-insensitive)
   const created = await getRedis().set(userKey(username), user, { nx: true });
   if (!created) throw new Error("That username is already taken");
+  await getRedis().sadd(USER_INDEX, username.toLowerCase());
   return { token: await createSession(username), username };
 }
 
@@ -101,6 +103,27 @@ export async function logout(): Promise<void> {
 export async function getCurrentUser(): Promise<string | null> {
   const token = cookies().get(SESSION_COOKIE)?.value;
   if (!token || !/^[a-f0-9]{64}$/.test(token)) return null;
-  const session = await getRedis().get<{ username: string }>(sessionKey(token));
-  return session?.username ?? null;
+  const redis = getRedis();
+  const session = await redis.get<{ username: string }>(sessionKey(token));
+  if (!session?.username) return null;
+  // account may have been deleted by an admin
+  const exists = await redis.exists(userKey(session.username));
+  return exists ? session.username : null;
+}
+
+export async function listUsers(): Promise<{ username: string; createdAt: string }[]> {
+  const redis = getRedis();
+  const names = await redis.smembers(USER_INDEX);
+  if (!names.length) return [];
+  const users = await redis.mget<(StoredUser | null)[]>(...names.map(userKey));
+  return users
+    .filter((u): u is StoredUser => !!u)
+    .map((u) => ({ username: u.username, createdAt: u.createdAt }))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export async function deleteUser(username: string): Promise<void> {
+  const redis = getRedis();
+  await redis.del(userKey(username));
+  await redis.srem(USER_INDEX, username.toLowerCase());
 }

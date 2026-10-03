@@ -3,6 +3,10 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { BookmarksData, Folder, Link } from "@/lib/types";
 import ChatPanel from "./ChatPanel";
 import CommandPalette, { Icon, PaletteItem } from "./CommandPalette";
+import AdminPanel from "./AdminPanel";
+
+const SYNC_MS = 3000;
+const ADMIN_PW_KEY = "adminPw";
 function faviconUrl(url: string) {
   try {
     const host = new URL(url).hostname;
@@ -25,6 +29,8 @@ function ensureData(raw: unknown): BookmarksData {
     return { folders: [], activity: [], settings: { theme: "dark", viewMode: "grid", sortBy: "manual" } };
   }
   return {
+    rev: d.rev,
+    updatedAt: d.updatedAt,
     folders: d.folders.map((f) => ({ ...f, links: Array.isArray(f.links) ? f.links : [] })),
     activity: Array.isArray(d.activity) ? d.activity : [],
     settings: d.settings || { theme: "dark", viewMode: "grid", sortBy: "manual" },
@@ -37,7 +43,6 @@ type Modal =
   | { type: "editFolder"; folder: Folder }
   | { type: "delete"; kind: "link" | "folder"; folderId: string; linkId?: string; label: string }
   | { type: "adminLogin" }
-  | { type: "admin" }
   | { type: "moveLink"; folderId: string; link: Link }
   | { type: "login" }
   | null;
@@ -58,6 +63,7 @@ export default function HomePage() {
   const [chatOpen, setChatOpen] = useState(false);
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
+  const [adminOpen, setAdminOpen] = useState(false);
   const [fName, setFName] = useState("");
   const [fUrl, setFUrl] = useState("");
   const [fNotes, setFNotes] = useState("");
@@ -66,7 +72,6 @@ export default function HomePage() {
   const [fEmoji, setFEmoji] = useState("📁");
   const [fColor, setFColor] = useState("");
   const [fPassword, setFPassword] = useState("");
-  const [fAnnounce, setFAnnounce] = useState("");
   const [user, setUser] = useState<string | null>(null);
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [fUsername, setFUsername] = useState("");
@@ -101,6 +106,47 @@ export default function HomePage() {
     }
   }, [fFolderId, setSafeData]);
   useEffect(() => { load(); }, [load]);
+
+  // Live sync: poll for a newer revision and swap it in without a reload.
+  const revRef = useRef(0);
+  useEffect(() => { revRef.current = data?.rev ?? 0; }, [data]);
+  useEffect(() => {
+    let stopped = false;
+    const sync = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const res = await fetch(`/api/bookmarks?rev=${revRef.current}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const json = await res.json();
+        // ignore stale responses that raced with our own saves
+        if (!stopped && !json.unchanged && Array.isArray(json.folders) && (json.rev ?? 0) > revRef.current) {
+          setSafeData(json);
+        }
+      } catch {
+        // offline for a moment — next tick retries
+      }
+    };
+    const id = setInterval(sync, SYNC_MS);
+    document.addEventListener("visibilitychange", sync);
+    return () => { stopped = true; clearInterval(id); document.removeEventListener("visibilitychange", sync); };
+  }, [setSafeData]);
+
+  // stay unlocked across reloads in this tab
+  useEffect(() => {
+    let saved: string | null = null;
+    try { saved = sessionStorage.getItem(ADMIN_PW_KEY); } catch {}
+    if (saved === null) return;
+    fetch("/api/bookmarks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "verifyAdmin", password: saved }),
+    })
+      .then((r) => {
+        if (r.ok) { setAdminUnlocked(true); setAdminPassword(saved!); setAdminOpen(true); }
+        else { try { sessionStorage.removeItem(ADMIN_PW_KEY); } catch {} }
+      })
+      .catch(() => {});
+  }, []);
   useEffect(() => {
     fetch("/api/auth", { cache: "no-store" })
       .then((r) => r.json())
@@ -202,6 +248,7 @@ export default function HomePage() {
     e.preventDefault();
     if (!fName.trim() || !fUrl.trim() || !fFolderId) return;
     const ok = await api("addLink", {
+      password: adminUnlocked ? adminPassword : undefined,
       folderId: fFolderId,
       name: fName,
       url: fUrl,
@@ -214,7 +261,7 @@ export default function HomePage() {
   async function handleAddFolder(e: React.FormEvent) {
     e.preventDefault();
     if (!fName.trim()) return;
-    const ok = await api("addFolder", { name: fName, emoji: fEmoji || "📁", color: fColor || undefined });
+    const ok = await api("addFolder", { name: fName, emoji: fEmoji || "📁", color: fColor || undefined, password: adminUnlocked ? adminPassword : undefined });
     if (ok) { resetForm(); setModal(null); showToast("Folder created!"); }
   }
   async function handleEditLink(e: React.FormEvent) {
@@ -262,11 +309,25 @@ export default function HomePage() {
     if (ok) {
       setAdminUnlocked(true);
       setAdminPassword(fPassword);
+      try { sessionStorage.setItem(ADMIN_PW_KEY, fPassword); } catch {}
       setFPassword("");
-      setModal({ type: "admin" });
+      setModal(null);
+      setAdminOpen(true);
       showToast("Admin unlocked");
     }
   }
+  function lockAdmin() {
+    setAdminUnlocked(false);
+    setAdminPassword("");
+    setAdminOpen(false);
+    try { sessionStorage.removeItem(ADMIN_PW_KEY); } catch {}
+    showToast("Admin locked");
+  }
+  function toggleAdmin() {
+    if (adminUnlocked) setAdminOpen((o) => !o);
+    else { setFPassword(""); setModal({ type: "adminLogin" }); }
+  }
+  const addingLocked = !!data?.settings?.lockAdding && !adminUnlocked;
   async function handleAuth(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
@@ -334,44 +395,6 @@ export default function HomePage() {
   function copyUrl(url: string) {
     navigator.clipboard.writeText(url).then(() => showToast("URL copied!"));
   }
-  function exportJson() {
-    if (!data) return;
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `bookmarks-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    showToast("Exported JSON");
-  }
-  function exportHtml() {
-    if (!data) return;
-    let html = `<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<TITLE>Bookmarks</TITLE>\n<H1>Bookmarks</H1>\n<DL><p>\n`;
-    for (const f of data.folders) {
-      html += `  <DT><H3>${f.emoji} ${f.name}</H3>\n  <DL><p>\n`;
-      for (const l of f.links) {
-        html += `    <DT><A HREF="${l.url}">${l.name}</A>\n`;
-      }
-      html += `  </DL><p>\n`;
-    }
-    html += `</DL><p>\n`;
-    const blob = new Blob([html], { type: "text/html" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `bookmarks-${new Date().toISOString().slice(0, 10)}.html`;
-    a.click();
-    showToast("Exported HTML");
-  }
-  async function importJson(file: File) {
-    try {
-      const text = await file.text();
-      const payload = JSON.parse(text);
-      if (!payload.folders) throw new Error("Invalid file");
-      const ok = await api("importData", { payload, password: adminUnlocked ? adminPassword : fPassword });
-      if (ok) { setModal(null); showToast("Imported!"); }
-    } catch {
-      showToast("Invalid JSON file");
-    }
-  }
   function randomBookmark() {
     if (!data?.folders) return;
     const all: { folderId: string; link: Link }[] = [];
@@ -396,7 +419,7 @@ export default function HomePage() {
       cmd("chat", chatOpen ? "Close chat" : "Open chat", "chat", () => setChatOpen((o) => !o)),
       cmd("theme", theme === "dark" ? "Switch to light mode" : "Switch to dark mode", "moon", () => setTheme(theme === "dark" ? "light" : "dark")),
       cmd("view", viewMode === "grid" ? "Show as list" : "Show as grid", "grid", () => setViewMode(viewMode === "grid" ? "list" : "grid")),
-      cmd("admin", "Admin menu", "lock", () => setModal(adminUnlocked ? { type: "admin" } : { type: "adminLogin" })),
+      cmd("admin", adminUnlocked ? (adminOpen ? "Close admin panel" : "Open admin panel") : "Admin login", "lock", toggleAdmin),
       user
         ? cmd("auth", `Log out (${user})`, "logout", handleLogout)
         : cmd("auth", "Log in or sign up", "user", openLogin),
@@ -424,11 +447,24 @@ export default function HomePage() {
       </div>
     );
   }
+  const showAdmin = adminUnlocked && adminOpen && !!data;
   return (
+    <div className={`shell ${showAdmin ? "with-admin" : ""}`}>
+    {showAdmin && (
+      <AdminPanel
+        data={data!}
+        password={adminPassword}
+        api={api}
+        submitting={submitting}
+        onClose={() => setAdminOpen(false)}
+        onLock={lockAdmin}
+        showToast={showToast}
+      />
+    )}
     <div className="app" data-theme={theme}>
       <header className="header">
-        <h1>Made by Theo 7A</h1>
-        <p>Shared school bookmarks — everyone sees the same list</p>
+        <h1>{data?.settings?.title || "Made by Theo 7A"}</h1>
+        <p>{data?.settings?.subtitle || "Shared school bookmarks — everyone sees the same list"}</p>
         <div className="badge">● Live · changes sync for all visitors</div>
       </header>
       {data?.settings?.announcement && (
@@ -441,10 +477,10 @@ export default function HomePage() {
         <div className="stat-chip"><strong>{favorites.length}</strong> starred</div>
       </div>
       <div className="toolbar">
-        <button className="btn btn-primary" onClick={() => { resetForm(); if (data?.folders?.[0]) setFFolderId(data.folders[0].id); setModal({ type: "addLink" }); }} disabled={!data?.folders?.length}>
+        <button className="btn btn-primary" onClick={() => { resetForm(); if (data?.folders?.[0]) setFFolderId(data.folders[0].id); setModal({ type: "addLink" }); }} disabled={!data?.folders?.length || addingLocked} title={addingLocked ? "Adding is locked by an admin" : undefined}>
           ＋ Add Website
         </button>
-        <button className="btn btn-secondary" onClick={() => { resetForm(); setModal({ type: "addFolder" }); }}>
+        <button className="btn btn-secondary" onClick={() => { resetForm(); setModal({ type: "addFolder" }); }} disabled={addingLocked} title={addingLocked ? "Adding is locked by an admin" : undefined}>
           📁 New Folder
         </button>
         <button className="btn btn-secondary" onClick={randomBookmark}>🎲 Random</button>
@@ -455,10 +491,7 @@ export default function HomePage() {
         <button className="btn btn-secondary" onClick={() => setViewMode(viewMode === "grid" ? "list" : "grid")}>
           {viewMode === "grid" ? "☰ List" : "▦ Grid"}
         </button>
-        <button
-          className="btn btn-secondary"
-          onClick={() => setModal(adminUnlocked ? { type: "admin" } : { type: "adminLogin" })}
-        >
+        <button className={`btn btn-secondary ${showAdmin ? "active" : ""}`} onClick={toggleAdmin}>
           🔐 Admin
         </button>
         {user ? (
@@ -812,99 +845,6 @@ export default function HomePage() {
           </div>
         </div>
       )}
-      {modal?.type === "admin" && adminUnlocked && (
-        <div className="modal-overlay" onClick={() => !submitting && setModal(null)}>
-          <div className="modal wide" onClick={(e) => e.stopPropagation()}>
-            <h2>🔐 Admin Menu</h2>
-            <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: "1rem" }}>
-              Unlocked · edits, deletes, import/export, and site settings
-            </p>
-            <div className="admin-grid">
-              <button className="admin-card" onClick={exportJson}><div className="icon">📦</div>Export JSON</button>
-              <button className="admin-card" onClick={exportHtml}><div className="icon">🌐</div>Export HTML</button>
-              <label className="admin-card" style={{ cursor: "pointer" }}>
-                <div className="icon">📥</div>Import JSON
-                <input type="file" accept=".json,application/json" hidden onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) importJson(file);
-                }} />
-              </label>
-              <button className="admin-card" onClick={() => {
-                setFAnnounce(data?.settings?.announcement || "");
-              }}><div className="icon">📢</div>Announcement</button>
-              <button className="admin-card" onClick={async () => {
-                if (!confirm("Reset to default bookmarks?")) return;
-                const ok = await api("reset", { password: adminPassword });
-                if (ok) showToast("Reset to defaults");
-              }}><div className="icon">↩️</div>Reset defaults</button>
-              <button className="admin-card" onClick={async () => {
-                if (!confirm("Delete ALL folders and links? This cannot be undone.")) return;
-                const ok = await api("clearAll", { password: adminPassword });
-                if (ok) showToast("Everything cleared");
-              }}><div className="icon">💥</div>Clear all</button>
-              <button className="admin-card" onClick={() => {
-                setAdminUnlocked(false);
-                setAdminPassword("");
-                setModal(null);
-                showToast("Admin locked");
-              }}><div className="icon">🔒</div>Lock admin</button>
-            </div>
-            <div className="admin-section">
-              <h3>Site announcement</h3>
-              <div className="form-group">
-                <input
-                  value={fAnnounce}
-                  onChange={(e) => setFAnnounce(e.target.value)}
-                  placeholder="Banner text shown at the top…"
-                />
-              </div>
-              <button
-                className="btn btn-primary btn-sm"
-                disabled={submitting}
-                onClick={async () => {
-                  const ok = await api("setAnnouncement", { text: fAnnounce, password: adminPassword });
-                  if (ok) showToast("Announcement updated");
-                }}
-              >Save announcement</button>
-            </div>
-            <div className="admin-section">
-              <h3>Pin / unpin folders</h3>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
-                {data?.folders?.map((f) => (
-                  <button
-                    key={f.id}
-                    className="btn btn-sm btn-secondary"
-                    onClick={async () => {
-                      await api("editFolder", {
-                        folderId: f.id,
-                        pinned: !f.pinned,
-                        password: adminPassword,
-                      });
-                    }}
-                  >
-                    {f.emoji} {f.name} {f.pinned ? "📌" : ""}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="admin-section">
-              <h3>Recent activity</h3>
-              <div className="activity-list">
-                {(data?.activity || []).slice(0, 20).map((a) => (
-                  <div key={a.id} className="activity-item">
-                    <span>{a.detail}</span>
-                    <span className="time">{timeAgo(a.at)}</span>
-                  </div>
-                ))}
-                {!data?.activity?.length && <div style={{ color: "var(--text-muted)" }}>No activity yet</div>}
-              </div>
-            </div>
-            <div className="modal-actions">
-              <button type="button" className="btn btn-secondary" onClick={() => setModal(null)}>Close</button>
-            </div>
-          </div>
-        </div>
-      )}
       {modal?.type === "login" && (
         <div className="modal-overlay" onClick={() => !submitting && setModal(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -944,6 +884,7 @@ export default function HomePage() {
       <ChatPanel
         open={chatOpen}
         setOpen={setChatOpen}
+        chatEnabled={data?.settings?.chatEnabled !== false}
         user={user}
         adminPassword={adminUnlocked ? adminPassword : null}
         onNeedLogin={openLogin}
@@ -983,6 +924,7 @@ export default function HomePage() {
         );
       })()}
       {toast && <div className="toast">{toast}</div>}
+    </div>
     </div>
   );
 }

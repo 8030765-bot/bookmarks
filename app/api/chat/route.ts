@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { deleteMessage, getMessages, postMessage } from "@/lib/chat";
-import { requireAdmin } from "@/lib/store";
+import { getBookmarks, requireAdmin } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
 function errorResponse(e: unknown) {
   const message = e instanceof Error ? e.message : "Request failed";
   const status =
-    message === "Wrong admin password" ? 403 : message.startsWith("Slow down") ? 429 : 400;
+    message === "Wrong admin password" || message.includes("muted") ? 403 : message.startsWith("Slow down") ? 429 : 400;
   return NextResponse.json({ error: message }, { status });
 }
 
@@ -24,6 +24,10 @@ export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: "Log in to chat" }, { status: 401 });
+    const { settings } = await getBookmarks();
+    if (settings?.chatEnabled === false) {
+      return NextResponse.json({ error: "Chat is turned off" }, { status: 403 });
+    }
     const body = await req.json();
     await postMessage(user, String(body.text || ""));
     return NextResponse.json({ messages: await getMessages() });

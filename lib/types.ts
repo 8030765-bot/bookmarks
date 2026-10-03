@@ -39,12 +39,21 @@ export interface ChatMessage {
 
 export interface SiteSettings {
   announcement?: string;
+  title?: string;
+  subtitle?: string;
+  /** when true, only admins can add links/folders */
+  lockAdding?: boolean;
+  /** defaults to true */
+  chatEnabled?: boolean;
   theme?: "dark" | "light" | "auto";
   viewMode?: "grid" | "list";
   sortBy?: "name" | "newest" | "clicks" | "manual";
 }
 
 export interface BookmarksData {
+  /** bumped on every save so clients can cheaply check for changes */
+  rev?: number;
+  updatedAt?: string;
   folders: Folder[];
   activity?: ActivityEntry[];
   settings?: SiteSettings;

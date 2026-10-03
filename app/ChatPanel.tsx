@@ -17,6 +17,7 @@ function timeLabel(iso: string) {
 export default function ChatPanel({
   open,
   setOpen,
+  chatEnabled,
   user,
   adminPassword,
   onNeedLogin,
@@ -24,6 +25,7 @@ export default function ChatPanel({
 }: {
   open: boolean;
   setOpen: (fn: (open: boolean) => boolean) => void;
+  chatEnabled: boolean;
   user: string | null;
   adminPassword: string | null;
   onNeedLogin: () => void;
@@ -135,7 +137,9 @@ export default function ChatPanel({
               </div>
             ))}
           </div>
-          {user ? (
+          {!chatEnabled ? (
+            <div className="chat-form chat-off">Chat has been turned off by an admin.</div>
+          ) : user ? (
             <form className="chat-form" onSubmit={send}>
               <input
                 value={text}
