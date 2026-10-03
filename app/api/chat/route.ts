@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { deleteMessage, getMessages, postMessage, toggleReaction } from "@/lib/chat";
-import { getBookmarks, requireAdmin } from "@/lib/store";
+import { getBookmarks } from "@/lib/store";
+import { audit, checkMod, getAuthContext, isAuthError } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
 
 function errorResponse(e: unknown) {
   const message = e instanceof Error ? e.message : "Request failed";
   const status =
-    (message === "Wrong admin password" || message.startsWith("Admin is disabled")) || message.includes("muted") ? 403 : message.startsWith("Slow down") ? 429 : 400;
+    isAuthError(message) || message.includes("muted") ? 403 : message.startsWith("Slow down") ? 429 : 400;
   return NextResponse.json({ error: message }, { status });
 }
 
@@ -43,8 +44,10 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   try {
     const body = await req.json();
-    requireAdmin(typeof body.password === "string" ? body.password : undefined);
+    const ctx = await getAuthContext();
+    checkMod(ctx, typeof body.password === "string" ? body.password : undefined);
     await deleteMessage(String(body.id || ""));
+    await audit(ctx, "deleteMessage", String(body.id || "")).catch(() => {});
     return NextResponse.json({ messages: await getMessages() });
   } catch (e) {
     return errorResponse(e);

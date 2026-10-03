@@ -104,8 +104,11 @@ async function getOne(id: string): Promise<Suggestion> {
   return s;
 }
 
-/** Applies the change (with optional admin tweaks) and marks it approved. */
-export async function approveSuggestion(id: string, password: string, overrides: Record<string, unknown> = {}) {
+/**
+ * Applies the change (with optional admin tweaks) and marks it approved.
+ * `auth` is the approving admin (password and/or server-built context), passed through to the bookmark action.
+ */
+export async function approveSuggestion(id: string, auth: { password?: string; __auth: unknown }, overrides: Record<string, unknown> = {}) {
   const s = await getOne(id);
   const name = clean(overrides.name, 100) || s.name;
   const urlRaw = clean(overrides.url, 2000) || s.url;
@@ -113,11 +116,11 @@ export async function approveSuggestion(id: string, password: string, overrides:
   const folderId = clean(overrides.folderId, 100) || s.folderId;
 
   if (s.kind === "addLink") {
-    await handleAction("addLink", { password, folderId, name, url, suggestedBy: s.user });
+    await handleAction("addLink", { ...auth, folderId, name, url, suggestedBy: s.user });
   } else if (s.kind === "editLink") {
-    await handleAction("editLink", { password, folderId: s.folderId, linkId: s.linkId, name, url, suggestedBy: s.user });
+    await handleAction("editLink", { ...auth, folderId: s.folderId, linkId: s.linkId, name, url, suggestedBy: s.user });
   } else if (s.kind === "removeLink") {
-    await handleAction("deleteLink", { password, folderId: s.folderId, linkId: s.linkId, suggestedBy: s.user });
+    await handleAction("deleteLink", { ...auth, folderId: s.folderId, linkId: s.linkId, suggestedBy: s.user });
   }
   const done: Suggestion = { ...s, status: "approved", resolvedAt: new Date().toISOString() };
   await getRedis().hset(KEY, { [id]: done });

@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getBookmarks, handleAction } from "@/lib/store";
-import { getCurrentUser } from "@/lib/auth";
-
-// actions that need to know who is asking
-const USER_ACTIONS = new Set(["addLink", "toggleLike", "votePoll"]);
+import { audit, getAuthContext, isAuthError } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
+
+// everyday actions that don't belong in the admin audit log
+const NOT_AUDITED = new Set(["trackClick", "toggleFavorite", "toggleLike", "votePoll", "verifyAdmin", "addLink", "addFolder"]);
 
 export async function GET(req: NextRequest) {
   try {
@@ -29,24 +29,29 @@ export async function POST(req: NextRequest) {
     if (!action) {
       return NextResponse.json({ error: "Missing action" }, { status: 400 });
     }
-    // never trust a client-supplied identity
+    // never trust a client-supplied identity — rebuild it from the session
     delete body.__user;
-    if (USER_ACTIONS.has(action)) body.__user = (await getCurrentUser()) || undefined;
+    delete body.__auth;
+    const ctx = await getAuthContext();
+    body.__auth = ctx;
     // handleAction ALWAYS returns full BookmarksData with folders array
     const data = await handleAction(action, body);
+    if (!NOT_AUDITED.has(action)) {
+      const detail = data.activity?.[0]?.detail;
+      await audit(ctx, action, detail).catch(() => {});
+    }
     return NextResponse.json(data);
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Request failed";
-    const status =
-      (message === "Wrong admin password" || message.startsWith("Admin is disabled"))
-        ? 403
-        : message.startsWith("Log in")
-          ? 401
-          : message.includes("closed") || message.startsWith("A poll") || message.startsWith("No web links")
-            ? 400
-        : message === "Unknown action" || message.startsWith("Missing") || message.includes("not found") || message.includes("Invalid")
+    const status = isAuthError(message)
+      ? 403
+      : message.startsWith("Log in")
+        ? 401
+        : message.includes("closed") || message.startsWith("A poll") || message.startsWith("No web links")
           ? 400
-          : 500;
+          : message === "Unknown action" || message.startsWith("Missing") || message.includes("not found") || message.includes("Invalid")
+            ? 400
+            : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

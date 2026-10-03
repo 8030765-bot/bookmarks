@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCurrentUser, login, logout, setSessionCookie, signup } from "@/lib/auth";
+import { login, logout, setSessionCookie, signup } from "@/lib/auth";
+import { getAuthContext } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    return NextResponse.json({ user: await getCurrentUser() });
+    const { user, role, ownerExists } = await getAuthContext();
+    return NextResponse.json({ user, role, ownerExists });
   } catch {
-    return NextResponse.json({ user: null });
+    return NextResponse.json({ user: null, role: null, ownerExists: false });
   }
 }
 

@@ -44,6 +44,7 @@ export default function ChatPanel({
   user,
   online,
   adminPassword,
+  canModerate,
   onNeedLogin,
   showToast,
 }: {
@@ -53,6 +54,7 @@ export default function ChatPanel({
   user: string | null;
   online: string[];
   adminPassword: string | null;
+  canModerate: boolean;
   onNeedLogin: () => void;
   showToast: (msg: string) => void;
 }) {
@@ -144,7 +146,7 @@ export default function ChatPanel({
   }
 
   async function remove(id: string) {
-    if (!adminPassword || !confirm("Delete this message for everyone?")) return;
+    if (!canModerate || !confirm("Delete this message for everyone?")) return;
     const res = await fetch("/api/chat", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
@@ -203,7 +205,7 @@ export default function ChatPanel({
                     <div className="msg-tools">
                       <button title="React" onClick={(e) => { e.stopPropagation(); setPicker(picker === m.id ? null : m.id); }}>😊</button>
                       <button title="Reply" onClick={() => { setReplyTo(m); inputRef.current?.focus(); }}><Icon name="reply" /></button>
-                      {adminPassword && <button title="Delete" className="danger" onClick={() => remove(m.id)}><Icon name="trash" /></button>}
+                      {canModerate && <button title="Delete" className="danger" onClick={() => remove(m.id)}><Icon name="trash" /></button>}
                     </div>
                   </div>
                   {picker === m.id && (

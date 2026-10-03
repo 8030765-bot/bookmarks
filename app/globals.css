@@ -626,3 +626,5 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
 .menu .phone-only{display:none}
 @media (max-width:760px){.actions-right{flex-wrap:nowrap}.actions-right select{min-width:0;flex:1 1}}
 @media (max-width:420px){.menu .phone-only{display:flex}}
+
+.pill.role-owner{background:rgba(255,184,77,.18);color:var(--warning)}.pill.role-admin{background:var(--accent-dim);color:var(--accent)}.pill.role-mod{background:var(--success-dim);color:var(--success)}.pill.role-user,.pill.role-password{background:var(--surface-hover);color:var(--text-muted)}

@@ -1,44 +1,95 @@
 import { NextRequest, NextResponse } from "next/server";
 import { deleteUser, listUsers } from "@/lib/auth";
 import { clearChat, getBanned, getMessages, setBanned } from "@/lib/chat";
-import { getBookmarks, requireAdmin } from "@/lib/store";
+import { getBookmarks } from "@/lib/store";
 import { approveSuggestion, deleteSuggestion, listSuggestions, rejectSuggestion } from "@/lib/suggestions";
+import {
+  Role, audit, checkAdmin, checkMod, checkOwner, checkPassword, getAuthContext, isAuthError, listAudit, listRoles, setRole,
+} from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
 
-// Admin-only actions for accounts, chat moderation and suggestions.
+// Accounts, roles, chat moderation, suggestions and the audit log.
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    requireAdmin(typeof body.password === "string" ? body.password : undefined);
+    const action = String(body.action || "");
+    const password = typeof body.password === "string" ? body.password : undefined;
+    const ctx = await getAuthContext();
     const username = String(body.username || "");
-    switch (String(body.action || "")) {
+    const log = (detail?: string) => audit(ctx, action, detail).catch(() => {});
+
+    // one-time setup: a logged-in account proves it knows ADMIN_PASSWORD and becomes the owner
+    if (action === "claimOwner") {
+      if (!ctx.user) throw new Error("Log in to your account first");
+      if (ctx.ownerExists) throw new Error("This site already has an owner");
+      checkPassword(password);
+      await setRole(ctx.user, "owner");
+      await audit({ ...ctx, role: "owner" }, "claimOwner", `${ctx.user} became the owner`);
+      return NextResponse.json({ role: "owner" });
+    }
+
+    switch (action) {
       case "overview": {
-        const [users, messages, banned, suggestions] = await Promise.all([
-          listUsers(), getMessages(), getBanned(), listSuggestions(),
+        checkMod(ctx, password);
+        const isAdmin = ctx.role === "owner" || ctx.role === "admin" || !ctx.ownerExists;
+        const [users, messages, banned, suggestions, roles, auditLog] = await Promise.all([
+          listUsers(), getMessages(), getBanned(), listSuggestions(), listRoles(), isAdmin ? listAudit() : Promise.resolve([]),
         ]);
-        return NextResponse.json({ users, banned, messageCount: messages.length, suggestions });
+        return NextResponse.json({ users, banned, messageCount: messages.length, suggestions, roles, audit: auditLog, me: ctx });
       }
       case "ban":
       case "unban":
+        checkMod(ctx, password);
         if (!username) throw new Error("Missing username");
-        await setBanned(username, body.action === "ban");
+        await setBanned(username, action === "ban");
+        await log(username);
         return NextResponse.json({ banned: await getBanned() });
       case "deleteUser":
+        checkAdmin(ctx, password);
         if (!username) throw new Error("Missing username");
+        if ((await listRoles())[username.toLowerCase()] === "owner") throw new Error("The owner account can't be deleted");
         await deleteUser(username);
         await setBanned(username, false);
+        await setRole(username, null);
+        await log(username);
         return NextResponse.json({ users: await listUsers() });
+      case "setRole": {
+        checkOwner(ctx);
+        if (!username) throw new Error("Missing username");
+        if (username.toLowerCase() === ctx.user?.toLowerCase()) throw new Error("You can't change your own role");
+        const role = body.role === "admin" || body.role === "mod" ? (body.role as Role) : null;
+        if (!(await listUsers()).some((u) => u.username.toLowerCase() === username.toLowerCase())) throw new Error("No such account");
+        await setRole(username, role);
+        await log(`${username} → ${role || "member"}`);
+        return NextResponse.json({ roles: await listRoles() });
+      }
+      case "transferOwner": {
+        checkOwner(ctx);
+        if (!username || username.toLowerCase() === ctx.user?.toLowerCase()) throw new Error("Pick another account");
+        if (!(await listUsers()).some((u) => u.username.toLowerCase() === username.toLowerCase())) throw new Error("No such account");
+        await setRole(username, "owner");
+        await setRole(ctx.user!, "admin");
+        await log(`ownership → ${username}`);
+        return NextResponse.json({ roles: await listRoles() });
+      }
       case "clearChat":
+        checkAdmin(ctx, password);
         await clearChat();
+        await log();
         return NextResponse.json({ messages: [] });
       case "approveSuggestion":
-        await approveSuggestion(String(body.id || ""), body.password, body.overrides || {});
+        checkAdmin(ctx, password);
+        await approveSuggestion(String(body.id || ""), { password, __auth: ctx }, body.overrides || {});
+        await log(String(body.id || ""));
         return NextResponse.json({ suggestions: await listSuggestions(), data: await getBookmarks() });
       case "rejectSuggestion":
+        checkMod(ctx, password);
         await rejectSuggestion(String(body.id || ""), body.reason);
+        await log(String(body.id || ""));
         return NextResponse.json({ suggestions: await listSuggestions() });
       case "deleteSuggestion":
+        checkMod(ctx, password);
         await deleteSuggestion(String(body.id || ""));
         return NextResponse.json({ suggestions: await listSuggestions() });
       default:
@@ -46,6 +97,6 @@ export async function POST(req: NextRequest) {
     }
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Request failed";
-    return NextResponse.json({ error: message }, { status: (message === "Wrong admin password" || message.startsWith("Admin is disabled")) ? 403 : 400 });
+    return NextResponse.json({ error: message }, { status: isAuthError(message) ? 403 : message.startsWith("Log in") ? 401 : 400 });
   }
 }

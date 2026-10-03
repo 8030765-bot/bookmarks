@@ -127,6 +127,8 @@ export default function HomePage() {
   const [adminPassword, setAdminPassword] = useState("");
   const [adminOpen, setAdminOpen] = useState(false);
   const [user, setUser] = useState<string | null>(null);
+  const [role, setRole] = useState<"owner" | "admin" | "mod" | null>(null);
+  const [ownerExists, setOwnerExists] = useState(true);
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [fUsername, setFUsername] = useState("");
   const [fPassword, setFPassword] = useState("");
@@ -301,7 +303,12 @@ export default function HomePage() {
 
   // ---------- account + admin session ----------
   useEffect(() => {
-    fetch("/api/auth", { cache: "no-store" }).then((r) => r.json()).then((j) => setUser(j.user || null)).catch(() => {});
+    fetch("/api/auth", { cache: "no-store" }).then((r) => r.json()).then((j) => {
+      setUser(j.user || null);
+      setRole(j.role || null);
+      setOwnerExists(!!j.ownerExists);
+      if (j.role === "owner" || j.role === "admin") { setAdminUnlocked(true); setAdminPassword(""); }
+    }).catch(() => {});
     let saved: string | null = null;
     try { saved = sessionStorage.getItem(ADMIN_PW_KEY); } catch {}
     if (saved === null) return;
@@ -585,7 +592,31 @@ export default function HomePage() {
       showToast("Admin unlocked");
     }
   }
+  async function claimOwner() {
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "claimOwner", password: fPassword }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Could not set up owner");
+      setRole("owner");
+      setOwnerExists(true);
+      setAdminUnlocked(true);
+      setAdminPassword("");
+      try { sessionStorage.removeItem(ADMIN_PW_KEY); } catch {}
+      setFPassword("");
+      setModal(null);
+      setAdminOpen(true);
+      showToast("You're the owner now — the shared password is retired");
+    } catch (err: any) {
+      showToast(err.message);
+    }
+  }
   function lockAdmin() {
+    // role-holders are always admins; this just closes the panel for them
+    if (role === "owner" || role === "admin") { setAdminOpen(false); return; }
     setAdminUnlocked(false);
     setAdminPassword("");
     setAdminOpen(false);
@@ -608,6 +639,9 @@ export default function HomePage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Could not log in");
       setUser(json.user);
+      setRole(json.role || null);
+      setOwnerExists((o) => o || json.role === "owner");
+      if (json.role === "owner" || json.role === "admin") { setAdminUnlocked(true); setAdminPassword(""); }
       setFUsername(""); setFPassword("");
       setModal(null);
       showToast(authMode === "signup" ? `Welcome, ${json.user}!` : `Logged in as ${json.user}`);
@@ -625,6 +659,7 @@ export default function HomePage() {
       body: JSON.stringify({ action: "logout" }),
     }).catch(() => {});
     setUser(null);
+    if (role) { setRole(null); setAdminUnlocked(false); setAdminPassword(""); setAdminOpen(false); }
     showToast("Logged out");
   }
   function openLogin(mode: "login" | "signup" = "login") {
@@ -742,6 +777,7 @@ export default function HomePage() {
         <AdminPanel
           data={data!}
           password={adminPassword}
+          role={role}
           api={async (action, payload) => !!(await api(action, payload))}
           submitting={submitting}
           onClose={() => setAdminOpen(false)}
@@ -1039,18 +1075,42 @@ export default function HomePage() {
       {modal?.type === "adminLogin" && (
         <div className="modal-overlay" onClick={() => !submitting && setModal(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Admin login</h2>
-            <p className="modal-text">Admins can edit, delete, reorder and moderate.</p>
-            <form onSubmit={handleAdminLogin}>
-              <div className="form-group">
-                <label>Admin password</label>
-                <input type="password" value={fPassword} onChange={(e) => setFPassword(e.target.value)} required autoFocus />
-              </div>
-              <div className="modal-actions">
-                <button type="button" className="btn btn-secondary" onClick={() => setModal(null)}>Cancel</button>
-                <button type="submit" className="btn btn-primary" disabled={submitting}>Unlock</button>
-              </div>
-            </form>
+            {ownerExists ? (
+              <>
+                <h2>Admins only</h2>
+                <p className="modal-text">
+                  {user
+                    ? "This account isn't an admin. Ask the site owner to give you access."
+                    : "Log in with your admin account to manage the site."}
+                </p>
+                <div className="modal-actions">
+                  <button className="btn btn-secondary" onClick={() => setModal(null)}>Close</button>
+                  {!user && <button className="btn btn-primary" onClick={() => openLogin()}>Log in</button>}
+                </div>
+              </>
+            ) : (
+              <>
+                <h2>Set up admin</h2>
+                <p className="modal-text">
+                  First time here? Enter the admin password to unlock admin now. To stop sharing the password, log in to your account and
+                  <strong> become the owner</strong> — after that, only accounts you choose are admins.
+                </p>
+                <form onSubmit={handleAdminLogin}>
+                  <div className="form-group">
+                    <label>Admin password</label>
+                    <input type="password" value={fPassword} onChange={(e) => setFPassword(e.target.value)} required autoFocus />
+                  </div>
+                  <div className="modal-actions">
+                    {user ? (
+                      <button type="button" className="btn btn-secondary" onClick={claimOwner} disabled={!fPassword || submitting}>Become owner ({user})</button>
+                    ) : (
+                      <button type="button" className="btn btn-secondary" onClick={() => openLogin()}>Log in first</button>
+                    )}
+                    <button type="submit" className="btn btn-primary" disabled={submitting}>Unlock</button>
+                  </div>
+                </form>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -1107,6 +1167,7 @@ export default function HomePage() {
         user={user}
         online={presence.users}
         adminPassword={adminUnlocked ? adminPassword : null}
+        canModerate={adminUnlocked}
         onNeedLogin={() => openLogin()}
         showToast={showToast}
       />

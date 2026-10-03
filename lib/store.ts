@@ -3,6 +3,7 @@ import { BookmarksData, ActivityEntry, Folder } from "./types";
 import { defaultData } from "./defaultData";
 import { v4 as uuid } from "uuid";
 import { normalizeUrl } from "./url";
+import { AuthContext, checkAdmin } from "./roles";
 const KEY = "bookmarks:shared";
 const PREV_KEY = "bookmarks:shared:prev";
 function getRedis() {
@@ -84,16 +85,9 @@ function linkRefs(body: Record<string, unknown>): LinkRef[] {
   if (!Array.isArray(body.items)) throw new Error("Missing items");
   return (body.items as LinkRef[]).map((r) => ({ folderId: String(r.folderId), linkId: String(r.linkId) }));
 }
-export function requireAdmin(password?: string) {
-  const expected = process.env.ADMIN_PASSWORD || process.env.BOOKMARKS_ADMIN_PASSWORD || "";
-  if (!expected) {
-    // Fail closed: previews share the live database, so a deployment without a
-    // password must not hand admin to everyone.
-    throw new Error("Admin is disabled here — set ADMIN_PASSWORD for this environment in Vercel");
-  }
-  if (!password || password !== expected) {
-    throw new Error("Wrong admin password");
-  }
+/** Context the API route attaches to every action (never trusted from the client). */
+function authFrom(body: Record<string, unknown>): Partial<AuthContext> {
+  return (body.__auth as Partial<AuthContext>) || {};
 }
 export async function handleAction(
   action: string,
@@ -101,6 +95,9 @@ export async function handleAction(
 ): Promise<BookmarksData> {
   const data = await getBookmarks();
   const password = typeof body.password === "string" ? body.password : undefined;
+  // role-aware admin check: admin accounts pass; the shared password only until an owner exists
+  const requireAdmin = (pw?: string) => checkAdmin(authFrom(body), pw);
+  const me = authFrom(body).user || undefined;
   switch (action) {
     case "verifyAdmin": {
       requireAdmin(password);
@@ -120,7 +117,7 @@ export async function handleAction(
         : typeof body.tags === "string"
           ? String(body.tags).split(",").map((t) => t.trim()).filter(Boolean)
           : [];
-      const user = typeof body.__user === "string" ? body.__user : undefined;
+      const user = me;
       const addedBy = typeof body.suggestedBy === "string" && body.suggestedBy ? body.suggestedBy : user;
       folder.links.push({
         addedBy,
@@ -247,7 +244,7 @@ export async function handleAction(
       return data;
     }
     case "toggleLike": {
-      const user = typeof body.__user === "string" ? body.__user.toLowerCase() : "";
+      const user = me?.toLowerCase() || "";
       if (!user) throw new Error("Log in to like websites");
       const { link } = findLink(data, String(body.folderId || ""), String(body.linkId || ""));
       const likes = new Set(link.likes || []);
@@ -271,7 +268,7 @@ export async function handleAction(
       return data;
     }
     case "votePoll": {
-      const user = typeof body.__user === "string" ? body.__user.toLowerCase() : "";
+      const user = me?.toLowerCase() || "";
       if (!user) throw new Error("Log in to vote");
       const poll = (data.polls || []).find((p) => p.id === String(body.pollId || ""));
       if (!poll) throw new Error("Poll not found");

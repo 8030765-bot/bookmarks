@@ -6,7 +6,8 @@ import { suggestionSummary } from "./SuggestModal";
 import Favicon from "./components/Favicon";
 import { parseBookmarksHtml } from "./components/Community";
 
-type Tab = "overview" | "suggestions" | "polls" | "links" | "folders" | "chat" | "users" | "site" | "data" | "activity";
+type Role = "owner" | "admin" | "mod" | null;
+type Tab = "overview" | "suggestions" | "polls" | "links" | "folders" | "chat" | "users" | "roles" | "site" | "data" | "activity";
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "overview", label: "Overview", icon: "chart" },
   { id: "suggestions", label: "Suggestions", icon: "bulb" },
@@ -15,17 +16,22 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "folders", label: "Folders", icon: "folder" },
   { id: "chat", label: "Chat", icon: "chat" },
   { id: "users", label: "Users", icon: "users" },
+  { id: "roles", label: "Access", icon: "lock" },
   { id: "site", label: "Site", icon: "settings" },
   { id: "data", label: "Data", icon: "database" },
   { id: "activity", label: "Activity", icon: "clock" },
 ];
 
 type Api = (action: string, payload?: Record<string, any>) => Promise<boolean>;
+interface AuditEntry { at: string; actor: string; role: string; action: string; detail?: string }
 interface AdminInfo {
   users: { username: string; createdAt: string }[];
   banned: string[];
   messageCount: number;
   suggestions: Suggestion[];
+  roles: Record<string, Role>;
+  audit: AuditEntry[];
+  me: { user: string | null; role: Role; ownerExists: boolean };
 }
 type LinkRow = { folder: Folder; link: Link };
 
@@ -50,10 +56,12 @@ export default function AdminPanel({
   onLock,
   showToast,
   applyData,
+  role,
 }: {
   data: BookmarksData;
   password: string;
   api: Api;
+  role: Role;
   submitting: boolean;
   onClose: () => void;
   onLock: () => void;
@@ -109,7 +117,7 @@ export default function AdminPanel({
     <aside className="admin-panel" aria-label="Admin panel">
       <div className="admin-head">
         <div>
-          <div className="admin-title">Admin</div>
+          <div className="admin-title">{role ? role[0].toUpperCase() + role.slice(1) : "Admin"}</div>
           <div className="admin-sub">
             <span className="live-dot" /> Live · rev {data.rev ?? 0}
             {data.updatedAt && <> · saved {timeAgo(data.updatedAt)}</>}
@@ -121,7 +129,11 @@ export default function AdminPanel({
         </div>
       </div>
       <nav className="admin-tabs">
-        {TABS.map((t) => (
+        {TABS.filter((t) => {
+          if (t.id === "roles") return role === "owner";
+          if (role === "mod") return ["overview", "suggestions", "chat", "users"].includes(t.id);
+          return true;
+        }).map((t) => (
           <button key={t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)} title={t.label}>
             {t.id === "suggestions" && pending > 0 && <span className="tab-badge">{pending}</span>}
             <Icon name={t.icon} />
@@ -143,11 +155,68 @@ export default function AdminPanel({
           <ChatTab data={data} password={password} run={run} admin={admin} info={info} refreshInfo={refreshInfo} showToast={showToast} />
         )}
         {tab === "users" && <UsersTab admin={admin} info={info} refreshInfo={refreshInfo} showToast={showToast} />}
+        {tab === "roles" && <RolesTab admin={admin} info={info} refreshInfo={refreshInfo} showToast={showToast} />}
         {tab === "site" && <SiteTab data={data} run={run} submitting={submitting} showToast={showToast} />}
         {tab === "data" && <DataTab data={data} run={run} showToast={showToast} />}
-        {tab === "activity" && <ActivityTab data={data} />}
+        {tab === "activity" && <ActivityTab data={data} audit={info?.audit} />}
       </div>
     </aside>
+  );
+}
+
+/* ---------- Access / roles (owner only) ---------- */
+const ROLE_LABELS: Record<string, string> = { owner: "Owner", admin: "Admin", mod: "Moderator" };
+function RolesTab({ admin, info, refreshInfo, showToast }: { admin: (a: string, p?: Record<string, any>) => Promise<any>; info: AdminInfo | null; refreshInfo: () => void; showToast: (m: string) => void }) {
+  const [q, setQ] = useState("");
+  if (!info) return <div className="admin-empty">Loading…</div>;
+  const me = info.me.user?.toLowerCase();
+  const act = async (action: string, username: string, extra: Record<string, any>, done: string) => {
+    try { await admin(action, { username, ...extra }); refreshInfo(); showToast(done); }
+    catch (e: any) { showToast(e.message); }
+  };
+  const users = info.users.filter((u) => u.username.toLowerCase().includes(q.toLowerCase()));
+  const roleOf = (name: string): Role => info.roles[name.toLowerCase()] || null;
+  return (
+    <>
+      <p className="modal-text">Give trusted classmates access. <strong>Admins</strong> can do everything except manage access. <strong>Moderators</strong> only handle chat, suggestions and users.</p>
+      <div className="admin-toolbar"><input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${info.users.length} accounts…`} /></div>
+      <div className="admin-list">
+        {users.length === 0 && <div className="admin-empty">No accounts.</div>}
+        {users.map((u) => {
+          const r = roleOf(u.username);
+          const isMe = u.username.toLowerCase() === me;
+          return (
+            <div key={u.username} className="admin-row">
+              <span className="avatar">{u.username[0]?.toUpperCase()}</span>
+              <div className="row-main">
+                <div className="row-title">{u.username}{isMe && <em> (you)</em>}{r && <span className={`pill role-${r}`}>{ROLE_LABELS[r]}</span>}</div>
+                <div className="row-sub">joined {timeAgo(u.createdAt)}</div>
+              </div>
+              {r === "owner" ? (
+                <span className="row-sub">owner</span>
+              ) : isMe ? (
+                <span className="row-sub">—</span>
+              ) : (
+                <div className="row-actions">
+                  <select
+                    value={r || ""}
+                    onChange={(e) => act("setRole", u.username, { role: e.target.value || null }, `${u.username} is now ${e.target.value ? ROLE_LABELS[e.target.value] : "a member"}`)}
+                    aria-label={`Role for ${u.username}`}
+                  >
+                    <option value="">Member</option>
+                    <option value="mod">Moderator</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                  {r === "admin" && (
+                    <button className="btn btn-secondary btn-sm" title="Hand over ownership" onClick={() => { if (confirm(`Make ${u.username} the OWNER? You become an admin and can't undo this yourself.`)) act("transferOwner", u.username, {}, `${u.username} is now the owner`); }}>Make owner</button>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </>
   );
 }
 
@@ -959,7 +1028,38 @@ function DataTab({ data, run, showToast }: { data: BookmarksData; run: Api; show
 }
 
 /* ---------- Activity ---------- */
-function ActivityTab({ data }: { data: BookmarksData }) {
+function ActivityTab({ data, audit }: { data: BookmarksData; audit?: AuditEntry[] }) {
+  const [view, setView] = useState<"activity" | "audit">("activity");
+  if (audit && audit.length > 0) {
+    return (
+      <>
+        <div className="seg">
+          <button className={view === "activity" ? "on" : ""} onClick={() => setView("activity")}>Everyone</button>
+          <button className={view === "audit" ? "on" : ""} onClick={() => setView("audit")}>Admin log <span>{audit.length}</span></button>
+        </div>
+        {view === "audit" ? <AuditList items={audit} /> : <ActivityInner data={data} />}
+      </>
+    );
+  }
+  return <ActivityInner data={data} />;
+}
+function AuditList({ items }: { items: AuditEntry[] }) {
+  return (
+    <div className="admin-list">
+      {items.map((a, i) => (
+        <div key={i} className="admin-row">
+          <span className="avatar sm">{(a.actor[0] || "?").toUpperCase()}</span>
+          <div className="row-main">
+            <div className="row-title">{a.actor} <span className={`pill role-${a.role}`}>{a.role}</span></div>
+            <div className="row-sub">{a.action}{a.detail ? ` · ${a.detail}` : ""}</div>
+          </div>
+          <span className="row-sub">{timeAgo(a.at)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+function ActivityInner({ data }: { data: BookmarksData }) {
   const [type, setType] = useState("all");
   const items = data.activity || [];
   const types = Array.from(new Set(items.map((a) => a.action)));
