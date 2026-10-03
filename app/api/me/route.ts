@@ -8,7 +8,9 @@ import { normalizeUrl } from "@/lib/url";
 import { errorResponse } from "@/lib/http";
 import { rateLimit } from "@/lib/ratelimit";
 import { follow, getFollowing, giveKudos, setHideOnline } from "@/lib/social";
+import { addPushSub, hasPush, pushConfigured, pushPublicKey, removePushSub } from "@/lib/push";
 import {
+  clearNotifications, setDnd, setNotifyPrefs,
   addMyStuff, getUserData, importMyStuff, markNotificationsRead, moveMyStuff, recordAggregateRating, removeMyStuff, renameMyStuffFolder,
   deleteView, saveSettings, saveView, setBlocked, setFolderOrder, setFolderPref, setLinkPref, setProfile, setRating, toggleFavorite,
 } from "@/lib/userdata";
@@ -39,8 +41,8 @@ export async function GET(req: NextRequest) {
     const [info, sessions, logins] = await Promise.all([accountInfo(user), listSessions(user), loginHistory(user)]);
     return NextResponse.json({ ...info, sessions, logins });
   }
-  const [data, following] = await Promise.all([getUserData(user), getFollowing(user)]);
-  return NextResponse.json({ user, ...data, following });
+  const [data, following, push] = await Promise.all([getUserData(user), getFollowing(user), hasPush(user)]);
+  return NextResponse.json({ user, ...data, following, push, pushKey: pushConfigured() ? pushPublicKey() : null });
 }
 
 export async function POST(req: NextRequest) {
@@ -117,8 +119,20 @@ export async function POST(req: NextRequest) {
       case "linkPref":
         return NextResponse.json({ links: await setLinkPref(user, String(body.linkId || ""), (body.patch || {}) as Record<string, unknown>) });
       case "readNotifications":
-        await markNotificationsRead(user);
-        return NextResponse.json({ ok: true });
+        return NextResponse.json({ ok: true, notifications: await markNotificationsRead(user, typeof body.id === "string" ? body.id : undefined) });
+      case "clearNotifications":
+        return NextResponse.json({ notifications: await clearNotifications(user, typeof body.id === "string" ? body.id : undefined) });
+      case "notifyPrefs":
+        return NextResponse.json({ notifyPrefs: await setNotifyPrefs(user, (body.prefs || {}) as Record<string, unknown>) });
+      case "dnd":
+        return NextResponse.json({ dndUntil: await setDnd(user, typeof body.until === "string" ? body.until : null) });
+      case "pushSubscribe":
+        if (!pushConfigured()) throw new Error("Push notifications aren't set up on this site yet");
+        await addPushSub(user, body.subscription);
+        return NextResponse.json({ push: true });
+      case "pushUnsubscribe":
+        await removePushSub(user, String(body.endpoint || ""));
+        return NextResponse.json({ push: await hasPush(user) });
 
       /* ---------- people ---------- */
       case "follow": {

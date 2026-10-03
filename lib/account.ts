@@ -4,6 +4,7 @@ import { getRole, setRole } from "./roles";
 import { deleteSocial, fansKey, followingKey, renameSocial } from "./social";
 import { followersKey, getBookmarks, saveBookmarks } from "./store";
 import { deleteUserData, getUserData, renameUserData } from "./userdata";
+import { deletePushSubs } from "./push";
 
 /**
  * Account-wide changes that touch several stores at once: changing your
@@ -56,6 +57,7 @@ export async function deleteAccount(username: string, password: string) {
   await setRole(username, null);
   await redis.srem(BANNED_KEY, username.toLowerCase());
   await deleteUserData(username);
+  await deletePushSubs(username);
   await deleteUser(username);
 }
 

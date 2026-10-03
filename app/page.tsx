@@ -28,8 +28,9 @@ const LinkModal = dynamic(() => import("./components/LinkModal"), { ssr: false }
 import { ConfirmModal, FolderModal, FolderValues, PromptModal, ShortcutsModal } from "./components/Modals";
 import Favicon from "./components/Favicon";
 import {
-  NotificationBell, NotificationPanel, ProfileCard, ProfileModal, usePersonal,
+  NotificationBell, ProfileCard, ProfileModal, usePersonal,
 } from "./components/Personal";
+import { NotificationPanel, WeeklyDigest, disablePush, enablePush, playPing } from "./components/Notifications";
 import { LinkRef, asMarkdown, isExpired, isNewSince, newOpId, readLocal, safeHref, suggestionSummary, urlsIn, writeLocal } from "./components/ui";
 import {
   CustomizeModal, DEFAULT_LOOK, LeaderboardModal, Look, OnlinePill, Palette, PollCards, SpinWheel, WhatsNew, applyLook, usePresence,
@@ -140,6 +141,10 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
+  // every pop-up this visit, so a missed one can be read later
+  const [toastLog, setToastLog] = useState<{ msg: string; at: number }[]>([]);
+  const [digestOpen, setDigestOpen] = useState(false);
+  const [pingOn, setPingOn] = useState(true);
   const [modal, setModal] = useState<Modal>(null);
   const [submitting, setSubmitting] = useState(false);
   const [search, setSearch] = useState("");
@@ -212,6 +217,7 @@ export default function HomePage() {
     clearTimeout(toastTimer.current);
     setToast({ msg, action });
     toastTimer.current = setTimeout(() => setToast(null), ms ?? (action ? 6000 : 2800));
+    setToastLog((log) => [{ msg, at: Date.now() }, ...log].slice(0, 30));
   }, []);
   const setSafeData = useCallback((raw: unknown) => setData(ensureData(raw)), []);
 
@@ -407,6 +413,21 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [look, view, sort, collapsed, quickTab, showTags, space, folderViewPrefs, startView]);
   useEffect(() => { if (!user) syncedFor.current = null; }, [user]);
+
+  // unread count in the tab title and on the installed app's icon
+  const unreadCount = personal.notifications.filter((n) => !n.read).length;
+  useEffect(() => {
+    const base = document.title.replace(/^\(\d+\+?\) /, "");
+    document.title = unreadCount ? `(${unreadCount > 99 ? "99+" : unreadCount}) ${base}` : base;
+    const nav = navigator as Navigator & { setAppBadge?: (n?: number) => Promise<void>; clearAppBadge?: () => Promise<void> };
+    if (unreadCount) nav.setAppBadge?.(unreadCount).catch(() => {});
+    else nav.clearAppBadge?.().catch(() => {});
+  }, [unreadCount]);
+  useEffect(() => { setPingOn(readLocal("pingSound", true)); }, []);
+  const quietNow = !!personal.dndUntil && Date.parse(personal.dndUntil) > Date.now();
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get("chat") === "open") setChatOpen(true);
+  }, []);
 
   // ?edit=profile (from your profile page) opens the profile editor
   useEffect(() => {
@@ -804,6 +825,19 @@ export default function HomePage() {
   }, []);
   function copySearchLink() {
     navigator.clipboard.writeText(location.href).then(() => showToast("Link to this search copied")).catch(() => showToast(location.href));
+  }
+  function openCard(linkId: string) {
+    const target = data?.folders.find((f) => f.links.some((l) => l.id === linkId));
+    if (!target) return;
+    toggleCollapsed(target.id, false);
+    setExpandedId(linkId);
+    setFocusedId(linkId);
+    setTimeout(() => {
+      const el = document.querySelector(`.card[data-link-id="${linkId}"]`);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      el?.classList.add("flash-card");
+      setTimeout(() => el?.classList.remove("flash-card"), 1500);
+    }, 200);
   }
   function surpriseFolder() {
     const pool = topFolders.filter((f) => f.links.length && !f.rule);
@@ -1454,7 +1488,7 @@ export default function HomePage() {
           <div className="top-actions">
             <button className="icon-btn" title="Spin the wheel (S)" onClick={() => setModal({ type: "spin" })}><Icon name="shuffle" /></button>
             <button className="icon-btn" title="Community (L)" onClick={() => setModal({ type: "leaderboard" })}><Icon name="trophy" /></button>
-            {user && <NotificationBell notifications={personal.notifications} open={notifOpen} onOpen={() => { setNotifOpen(true); personal.markRead(); }} />}
+            {user && <NotificationBell notifications={personal.notifications} open={notifOpen} onOpen={() => setNotifOpen(true)} />}
             <div className="user-menu">
               <button className={`icon-btn ${moreMenu ? "on" : ""}`} title="More" aria-expanded={moreMenu} onClick={() => setMoreMenu((o) => !o)}>
                 <Icon name="more" />
@@ -2172,7 +2206,36 @@ export default function HomePage() {
         />
       )}
       {notifOpen && (
-        <NotificationPanel notifications={personal.notifications} onClose={() => setNotifOpen(false)} onOpenChat={() => { setNotifOpen(false); setChatOpen(true); }} />
+        <NotificationPanel
+          notifications={personal.notifications}
+          toasts={toastLog}
+          settings={{ prefs: personal.notifyPrefs, dndUntil: personal.dndUntil, sound: pingOn, push: personal.push, pushAvailable: !!personal.pushKey }}
+          onOpen={(n) => {
+            setNotifOpen(false);
+            if (["mention", "reply", "dm"].includes(n.kind) || n.link?.includes("chat=open")) { setChatOpen(true); return; }
+            const m = n.link?.match(/#(link|folder)-(.+)$/);
+            if (m && m[1] === "folder") jumpToFolder(m[2]);
+            else if (m) openCard(m[2]);
+            else if (n.from) setProfileView(n.from);
+          }}
+          onReadOne={(id) => personal.markRead(id || undefined)}
+          onRemove={(id) => personal.removeNotification(id)}
+          onClearAll={() => personal.removeNotification()}
+          onPrefs={personal.setNotifyPrefs}
+          onDnd={personal.setDnd}
+          onSound={(on) => { setPingOn(on); writeLocal("pingSound", on); if (on) playPing(); }}
+          onPush={async (on) => {
+            try {
+              if (on) { await enablePush(personal.pushKey!); personal.setPushOn(true); showToast("Notifications turned on for this device"); }
+              else { await disablePush(); personal.setPushOn(false); showToast("Notifications turned off for this device"); }
+            } catch (e: any) { showToast(e.message || "Couldn't change notifications"); }
+          }}
+          onDigest={() => { setNotifOpen(false); setDigestOpen(true); }}
+          onClose={() => setNotifOpen(false)}
+        />
+      )}
+      {digestOpen && data && (
+        <WeeklyDigest data={data} ratings={aggRatings} onOpenLink={(f, l) => { const r = allRefs.find((x) => x.link.id === l); if (r) trackAndOpen(r.folder, r.link); }} onClose={() => setDigestOpen(false)} />
       )}
       {modal?.type === "profileEdit" && (
         <ProfileModal
@@ -2219,6 +2282,8 @@ export default function HomePage() {
         showToast={showToast}
         blocked={personal.blocked}
         onBlock={(u) => { personal.block(u, true); showToast(`Hid messages from ${u}`); }}
+        quiet={quietNow}
+        onMention={() => { if (pingOn) playPing(); }}
       />
       {showCmd && (
         <CommandPalette

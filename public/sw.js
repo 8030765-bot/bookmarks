@@ -24,6 +24,43 @@ self.addEventListener("message", (event) => {
   if (event.data === "skipWaiting") self.skipWaiting();
 });
 
+// push notifications (likes, mentions, new links in things you follow)
+self.addEventListener("push", (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch { data = { body: event.data && event.data.text() }; }
+  const title = data.title || "Theo's Bookmarks";
+  event.waitUntil((async () => {
+    await self.registration.showNotification(title, {
+      body: data.body || "",
+      icon: "/icon.svg",
+      badge: "/icon.svg",
+      tag: data.tag || undefined,
+      renotify: !!data.tag,
+      data: { url: data.url || "/" },
+    });
+    if (self.navigator && self.navigator.setAppBadge) {
+      const shown = await self.registration.getNotifications();
+      self.navigator.setAppBadge(shown.length).catch(() => {});
+    }
+  })());
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = new URL((event.notification.data && event.notification.data.url) || "/", self.location.origin).href;
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const w of windows) {
+      if (new URL(w.url).origin === self.location.origin) {
+        await w.focus();
+        if ("navigate" in w) await w.navigate(url).catch(() => {});
+        return;
+      }
+    }
+    await self.clients.openWindow(url);
+  })());
+});
+
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;

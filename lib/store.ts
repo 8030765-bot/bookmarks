@@ -6,6 +6,7 @@ import { normalizeUrl } from "./url";
 import { AuthContext, checkAdmin } from "./roles";
 import { notify } from "./userdata";
 import { REV_KEYS } from "./revs";
+import { fansKey } from "./social";
 const KEY = "bookmarks:shared";
 const PREV_KEY = "bookmarks:shared:prev";
 // visit counts live in their own hash (HINCRBY) so a click never rewrites the whole list
@@ -166,12 +167,29 @@ function pushActivity(data: BookmarksData, action: string, detail: string, extra
 
 /* ---------- following a folder ---------- */
 export const followersKey = (folderId: string) => `followers:${folderId}`;
-/** Tell everyone following a folder that something new arrived (never the person who added it). */
-async function notifyFollowers(folder: Folder, text: string, except?: string) {
+/**
+ * Tell everyone following the folder — and everyone following the person
+ * who added it — that something new arrived (never the person who added it).
+ */
+async function notifyFollowers(folder: Folder, text: string, except: string | undefined, link: string, personText?: string) {
   try {
-    const followers = await getRedis().smembers(followersKey(folder.id));
+    const redis = getRedis();
     const skip = except?.toLowerCase();
-    await Promise.all(followers.filter((u) => u !== skip).slice(0, 200).map((u) => notify(u, { kind: "follow", text, from: except })));
+    const [folderFans, personFans] = await Promise.all([
+      redis.smembers(followersKey(folder.id)),
+      skip ? redis.smembers(fansKey(skip)) : Promise.resolve([] as string[]),
+    ]);
+    const told = new Set<string>();
+    for (const u of folderFans) {
+      if (u === skip || told.has(u)) continue;
+      told.add(u);
+      await notify(u, { kind: "follow", text, from: except, link });
+    }
+    for (const u of personFans) {
+      if (u === skip || told.has(u) || told.size > 200) continue;
+      told.add(u);
+      await notify(u, { kind: "follow", text: personText || text, from: except, link });
+    }
   } catch {
     // a missed heads-up isn't worth failing the save over
   }
@@ -286,7 +304,8 @@ export async function handleAction(
       folder.links.push(link);
       log("add", `Added link “${name}”${credit(body)}`, folder.id);
       await saveBookmarks(data);
-      await notifyFollowers(folder, `New in ${folder.emoji} ${folder.name}: “${name}”`, addedBy);
+      await notifyFollowers(folder, `New in ${folder.emoji} ${folder.name}: “${name}”`, addedBy, `/#link-${link.id}`,
+        `${addedBy} added “${name}” to ${folder.emoji} ${folder.name}`);
       return data;
     }
     case "addLinks": {
@@ -311,7 +330,8 @@ export async function handleAction(
       if (!added) throw new Error("No new links to add (they may already be on the site)");
       log("add", `Added ${added} links to “${folder.name}”`, folder.id);
       await saveBookmarks(data);
-      await notifyFollowers(folder, `${added} new links in ${folder.emoji} ${folder.name}`, me);
+      await notifyFollowers(folder, `${added} new links in ${folder.emoji} ${folder.name}`, me, `/#folder-${folder.id}`,
+        `${me} added ${added} links to ${folder.emoji} ${folder.name}`);
       return data;
     }
     case "editLink": {
@@ -518,7 +538,7 @@ export async function handleAction(
       await saveBookmarks(data, { snapshot: false });
       // tell the person who added it (not yourself)
       if (adding && link.addedBy && link.addedBy.toLowerCase() !== user) {
-        notify(link.addedBy, { kind: "like", from: me, text: `${me} liked your link “${link.name}”` }).catch(() => {});
+        notify(link.addedBy, { kind: "like", from: me, text: `${me} liked your link “${link.name}”`, link: `/#link-${link.id}` }).catch(() => {});
       }
       return data;
     }

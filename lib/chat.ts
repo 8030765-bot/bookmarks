@@ -57,7 +57,7 @@ export async function postMessage(username: string, text: string, replyToId?: st
   targets.delete(username.toLowerCase());
   for (const t of targets) {
     const reply = msg.replyTo && t === msg.replyTo.user.toLowerCase();
-    notify(t, { kind: reply ? "reply" : "mention", from: username, text: `${username} ${reply ? "replied to you" : "mentioned you"}: ${trimmed.slice(0, 60)}` }).catch(() => {});
+    notify(t, { kind: reply ? "reply" : "mention", from: username, text: `${username} ${reply ? "replied to you" : "mentioned you"}: ${trimmed.slice(0, 60)}`, link: "/?chat=open" }).catch(() => {});
   }
   return msg;
 }

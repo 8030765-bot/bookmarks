@@ -5,7 +5,7 @@ import { readLocal, timeAgo, writeLocal } from "./ui";
 import { useOnRevChange } from "./sync";
 import Markdown from "./Markdown";
 
-export interface Notification { id: string; kind: string; text: string; at: string; read?: boolean; from?: string }
+export interface Notification { id: string; kind: string; text: string; at: string; read?: boolean; from?: string; link?: string }
 export interface Profile {
   avatar?: string; color?: string; bio?: string; displayName?: string; status?: string; statusEmoji?: string; statusUntil?: string;
   banner?: string; border?: string; into?: string[]; showcase?: string[]; visibility?: "everyone" | "members" | "private"; hideOnline?: boolean;
@@ -35,12 +35,18 @@ export interface Personal {
   /** your look/layout, synced between devices */
   settings: Record<string, unknown>;
   myStuff: PrivateLink[];
+  notifyPrefs: Record<string, boolean>;
+  dndUntil: string | null;
+  /** this account has push turned on somewhere */
+  push: boolean;
+  /** the site's push key (null = push isn't set up) */
+  pushKey: string | null;
   /** settings arrived from the server (so syncing can start) */
   loaded: boolean;
 }
 const EMPTY: Personal = {
   user: null, favorites: [], ratings: {}, notifications: [], profile: {}, links: {}, folders: {}, folderOrder: [], views: [],
-  following: [], blocked: [], settings: {}, myStuff: [], loaded: false,
+  following: [], blocked: [], settings: {}, myStuff: [], notifyPrefs: {}, dndUntil: null, push: false, pushKey: null, loaded: false,
 };
 const GUEST_KEY = "guestLinkPrefs";
 const GUEST_FOLDERS = "guestFolderPrefs";
@@ -82,7 +88,8 @@ export function usePersonal(user: string | null) {
           user: json.user, favorites: json.favorites || [], ratings: json.ratings || {}, notifications: json.notifications || [],
           profile: json.profile || {}, links: json.links || {}, folders: json.folders || {}, folderOrder: json.folderOrder || [],
           views: json.views || [], following: json.following || [], blocked: json.blocked || [], settings: json.settings || {},
-          myStuff: json.myStuff || [], loaded: true,
+          myStuff: json.myStuff || [], notifyPrefs: json.notifyPrefs || {}, dndUntil: json.dndUntil || null,
+          push: !!json.push, pushKey: json.pushKey || null, loaded: true,
         });
       }
     } catch {}
@@ -131,10 +138,23 @@ export function usePersonal(user: string | null) {
     return j;
   }, [post]);
 
-  const markRead = useCallback(() => {
-    setData((d) => ({ ...d, notifications: d.notifications.map((n) => ({ ...n, read: true })) }));
-    post({ action: "readNotifications" }).catch(() => {});
+  const markRead = useCallback((id?: string) => {
+    setData((d) => ({ ...d, notifications: d.notifications.map((n) => (!id || n.id === id ? { ...n, read: true } : n)) }));
+    post({ action: "readNotifications", id }).catch(() => {});
   }, [post]);
+  const removeNotification = useCallback((id?: string) => {
+    setData((d) => ({ ...d, notifications: id ? d.notifications.filter((n) => n.id !== id) : [] }));
+    post({ action: "clearNotifications", id }).catch(() => {});
+  }, [post]);
+  const setNotifyPrefs = useCallback((prefs: Record<string, boolean>) => {
+    setData((d) => ({ ...d, notifyPrefs: { ...d.notifyPrefs, ...prefs } }));
+    post({ action: "notifyPrefs", prefs }).catch(() => {});
+  }, [post]);
+  const setDnd = useCallback((until: string | null) => {
+    setData((d) => ({ ...d, dndUntil: until }));
+    post({ action: "dnd", until }).then((j) => setData((d) => ({ ...d, dndUntil: j.dndUntil ?? null }))).catch(() => {});
+  }, [post]);
+  const setPushOn = useCallback((on: boolean) => setData((d) => ({ ...d, push: on })), []);
 
   const setFolderPref = useCallback((folderId: string, patch: Partial<FolderPref>) => {
     setData((d) => {
@@ -201,11 +221,9 @@ export function usePersonal(user: string | null) {
 
   return {
     ...data, reload: load, toggleFavorite, rate, saveProfile, markRead, setLinkPref, setFolderPref, setFolderOrder, saveView, deleteView,
-    follow, block, saveSettings, myStuffAction,
+    follow, block, saveSettings, myStuffAction, removeNotification, setNotifyPrefs, setDnd, setPushOn,
   };
 }
-
-const KIND_ICON: Record<string, string> = { like: "heart", mention: "chat", reply: "reply", suggestion: "bulb", comment: "chat", dm: "chat", role: "lock", system: "bell" };
 
 export function NotificationBell({ notifications, onOpen, open }: { notifications: Notification[]; onOpen: () => void; open: boolean }) {
   const unread = notifications.filter((n) => !n.read).length;
@@ -214,34 +232,6 @@ export function NotificationBell({ notifications, onOpen, open }: { notification
       <Icon name="bell" />
       {unread > 0 && <span className="notif-badge">{unread > 9 ? "9+" : unread}</span>}
     </button>
-  );
-}
-
-export function NotificationPanel({ notifications, onClose, onOpenChat }: { notifications: Notification[]; onClose: () => void; onOpenChat: () => void }) {
-  return (
-    <div className="drawer-backdrop" onClick={onClose}>
-      <aside className="drawer" onClick={(e) => e.stopPropagation()} aria-label="Notifications">
-        <div className="drawer-head">
-          <strong>Notifications</strong>
-          <button className="btn-icon" onClick={onClose} title="Close"><Icon name="x" /></button>
-        </div>
-        <div className="drawer-body">
-          {notifications.length === 0 && <div className="admin-empty">Nothing yet. Likes, replies and @mentions show up here.</div>}
-          <div className="notif-list">
-            {notifications.map((n) => (
-              <button
-                key={n.id}
-                className={`notif ${n.read ? "" : "unread"}`}
-                onClick={() => { if (n.kind === "mention" || n.kind === "reply" || n.kind === "dm") onOpenChat(); }}
-              >
-                <span className="notif-icon"><Icon name={KIND_ICON[n.kind] || "bell"} /></span>
-                <span className="notif-text">{n.text}<span className="notif-time">{timeAgo(n.at)}</span></span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </aside>
-    </div>
   );
 }
 

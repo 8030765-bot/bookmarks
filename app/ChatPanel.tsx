@@ -49,6 +49,8 @@ export default function ChatPanel({
   showToast,
   blocked = [],
   onBlock,
+  onMention,
+  quiet = false,
 }: {
   open: boolean;
   setOpen: (fn: (open: boolean) => boolean) => void;
@@ -62,6 +64,10 @@ export default function ChatPanel({
   /** people whose messages you've hidden (lowercase) */
   blocked?: string[];
   onBlock?: (username: string) => void;
+  /** someone @mentioned you while chat was closed */
+  onMention?: () => void;
+  /** do-not-disturb: no pop-ups */
+  quiet?: boolean;
 }) {
   const [allMessages, setMessages] = useState<ChatMessage[]>([]);
   const [roles, setRoles] = useState<Record<string, string>>({});
@@ -101,7 +107,10 @@ export default function ChatPanel({
     if (!messages.length) return;
     if (seenIds.current && user && !open) {
       const fresh = messages.filter((m) => !seenIds.current!.has(m.id) && m.user !== user && mentions(m.text, user));
-      if (fresh.length) showToast(`💬 ${fresh[fresh.length - 1].user} mentioned you in chat`);
+      if (fresh.length && !quiet) {
+        showToast(`💬 ${fresh[fresh.length - 1].user} mentioned you in chat`);
+        onMention?.();
+      }
     }
     seenIds.current = new Set(messages.map((m) => m.id));
   }, [messages, user, open, showToast]);

@@ -1,6 +1,7 @@
 import { Redis } from "@upstash/redis";
 import { v4 as uuid } from "uuid";
 import { REV_KEYS, bumpRev, userRevKey } from "./revs";
+import { sendPush } from "./push";
 
 // Per-account data that isn't shared with the class: profile, personal
 // favourites, star ratings, private "My stuff" links, and the notifications
@@ -45,7 +46,12 @@ export interface Notification {
   at: string;
   read?: boolean;
   from?: string;
+  /** where clicking it should take you, e.g. "/#link-abc" */
+  link?: string;
 }
+export type NotifyKind = Notification["kind"];
+/** Which kinds of notification you want (missing = yes). */
+export type NotifyPrefs = Partial<Record<NotifyKind, boolean>>;
 /** Your own extras on a shared link — nobody else sees these. */
 export interface LinkPref {
   note?: string; // private note
@@ -86,9 +92,12 @@ export interface UserData {
   settings: Record<string, unknown>;
   /** people whose chat messages you don't want to see (lowercase) */
   blocked: string[];
+  notifyPrefs: NotifyPrefs;
+  /** do-not-disturb until (ISO): notifications still arrive, quietly */
+  dndUntil?: string;
 }
 
-const EMPTY: UserData = { profile: {}, favorites: [], ratings: {}, myStuff: [], notifications: [], links: {}, folders: {}, folderOrder: [], views: [], settings: {}, blocked: [] };
+const EMPTY: UserData = { profile: {}, favorites: [], ratings: {}, myStuff: [], notifications: [], links: {}, folders: {}, folderOrder: [], views: [], settings: {}, blocked: [], notifyPrefs: {} };
 const FOLDER_SORTS = ["manual", "name", "newest", "clicks", "rating", "mine"];
 
 export async function setFolderPref(username: string, folderId: string, patch: Record<string, unknown>) {
@@ -176,7 +185,7 @@ export async function getUserData(username: string): Promise<UserData> {
   return {
     ...EMPTY, ...(raw || {}),
     profile: raw?.profile || {}, links: raw?.links || {}, folders: raw?.folders || {}, folderOrder: raw?.folderOrder || [], views: raw?.views || [],
-    settings: raw?.settings || {}, blocked: raw?.blocked || [],
+    settings: raw?.settings || {}, blocked: raw?.blocked || [], notifyPrefs: raw?.notifyPrefs || {},
   };
 }
 
@@ -325,21 +334,49 @@ export async function removeMyStuff(username: string, id: string): Promise<Priva
   return data.myStuff;
 }
 
-export async function markNotificationsRead(username: string): Promise<void> {
+export async function markNotificationsRead(username: string, id?: string): Promise<Notification[]> {
   const data = await getUserData(username);
-  data.notifications = data.notifications.map((n) => ({ ...n, read: true }));
+  data.notifications = data.notifications.map((n) => (!id || n.id === id ? { ...n, read: true } : n));
   await save(username, data);
+  return data.notifications;
+}
+export async function clearNotifications(username: string, id?: string): Promise<Notification[]> {
+  const data = await getUserData(username);
+  data.notifications = id ? data.notifications.filter((n) => n.id !== id) : [];
+  await save(username, data);
+  return data.notifications;
+}
+const KINDS: NotifyKind[] = ["mention", "reply", "suggestion", "like", "comment", "dm", "role", "system", "follow"];
+export async function setNotifyPrefs(username: string, patch: Record<string, unknown>) {
+  const data = await getUserData(username);
+  for (const k of KINDS) if (typeof patch[k] === "boolean") data.notifyPrefs[k] = patch[k] as boolean;
+  await save(username, data);
+  return data.notifyPrefs;
+}
+export async function setDnd(username: string, until: string | null) {
+  const data = await getUserData(username);
+  const t = until ? Date.parse(until) : NaN;
+  data.dndUntil = Number.isFinite(t) && t > Date.now() ? new Date(t).toISOString() : undefined;
+  await save(username, data);
+  return data.dndUntil || null;
 }
 
-/** Push a notification to someone's inbox (deduped by a key per 30s burst). */
+const PUSH_TITLES: Partial<Record<NotifyKind, string>> = {
+  mention: "You were mentioned", reply: "New reply", like: "Someone liked your link", follow: "New in something you follow",
+  suggestion: "Your suggestion", role: "Your role changed", system: "Theo's Bookmarks",
+};
+/** Add a notification to someone's inbox (unless they turned that kind off) and push it to their devices. */
 export async function notify(toUsername: string, n: Omit<Notification, "id" | "at" | "read">) {
   if (!toUsername) return;
   const data = await getUserData(toUsername);
-  data.notifications = [
-    { ...n, id: uuid(), at: new Date().toISOString(), read: false },
-    ...data.notifications,
-  ].slice(0, MAX_NOTIFS);
+  if (data.notifyPrefs[n.kind] === false) return;
+  const entry: Notification = { ...n, id: uuid(), at: new Date().toISOString(), read: false };
+  data.notifications = [entry, ...data.notifications].slice(0, MAX_NOTIFS);
   await save(toUsername, data);
+  const quiet = data.dndUntil && Date.parse(data.dndUntil) > Date.now();
+  if (!quiet) {
+    await sendPush(toUsername, { title: PUSH_TITLES[n.kind] || "Theo's Bookmarks", body: n.text.slice(0, 160), url: n.link || "/", tag: n.kind }).catch(() => {});
+  }
 }
 
 /* ---------- aggregate star ratings (public) ---------- */
