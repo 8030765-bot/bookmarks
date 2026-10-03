@@ -80,6 +80,7 @@ function QuickTabs({ lists, tab, setTab, onOpen, newTab }: {
   return (
     <section className="quick">
       <div className="quick-tabs" role="tablist">
+        <span className="nav-label">Shortcuts</span>
         {available.map((t) => (
           <button key={t.id} role="tab" aria-selected={active === t.id} className={active === t.id ? "on" : ""} onClick={() => setTab(t.id)}>
             <Icon name={t.icon} /> {t.label}
@@ -954,7 +955,8 @@ export default function HomePage() {
         </div>
 
         {sortedFolders.length > 0 && (
-          <nav className="folder-nav sticky" aria-label="Folders">
+          <nav className="folder-nav sticky" aria-label="Jump to folder">
+            <span className="nav-label">Jump to</span>
             {sortedFolders.map((f) => (
               <button
                 key={f.id}
