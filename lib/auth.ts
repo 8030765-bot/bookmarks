@@ -90,6 +90,8 @@ export async function login(username: string, password: string): Promise<Session
     throw new Error("Wrong username or password");
   }
   await redis.del(failKey);
+  // backfill: accounts created before the index existed get added on next login
+  await redis.sadd(USER_INDEX, user.username.toLowerCase());
   return { token: await createSession(user.username), username: user.username };
 }
 
@@ -108,7 +110,30 @@ export async function getCurrentUser(): Promise<string | null> {
   if (!session?.username) return null;
   // account may have been deleted by an admin
   const exists = await redis.exists(userKey(session.username));
-  return exists ? session.username : null;
+  if (!exists) return null;
+  // self-heal the index for accounts created before it existed
+  redis.sadd(USER_INDEX, session.username.toLowerCase()).catch(() => {});
+  return session.username;
+}
+
+/**
+ * Rebuild the user index by scanning every users:* key. Fixes accounts
+ * created before the index existed (they can log in but weren't listed).
+ */
+export async function rebuildUserIndex(): Promise<number> {
+  const redis = getRedis();
+  const names: string[] = [];
+  let cursor = "0";
+  do {
+    const [next, keys] = await redis.scan(cursor, { match: "users:*", count: 200 });
+    cursor = next;
+    for (const k of keys) {
+      if (k === USER_INDEX) continue;
+      names.push(k.slice("users:".length));
+    }
+  } while (cursor !== "0");
+  if (names.length) await redis.sadd(USER_INDEX, names[0], ...names.slice(1));
+  return names.length;
 }
 
 export async function listUsers(): Promise<{ username: string; createdAt: string }[]> {

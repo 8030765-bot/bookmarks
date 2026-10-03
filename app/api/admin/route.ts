@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteUser, listUsers } from "@/lib/auth";
+import { deleteUser, listUsers, rebuildUserIndex } from "@/lib/auth";
 import { clearChat, getBanned, getMessages, setBanned } from "@/lib/chat";
 import { getBookmarks } from "@/lib/store";
 import { approveSuggestion, deleteSuggestion, listSuggestions, rejectSuggestion } from "@/lib/suggestions";
@@ -45,6 +45,12 @@ export async function POST(req: NextRequest) {
         await setBanned(username, action === "ban");
         await log(username);
         return NextResponse.json({ banned: await getBanned() });
+      case "rebuildUsers": {
+        checkAdmin(ctx, password);
+        const found = await rebuildUserIndex();
+        await log(`rebuilt user list (${found})`);
+        return NextResponse.json({ users: await listUsers(), found });
+      }
       case "deleteUser":
         checkAdmin(ctx, password);
         if (!username) throw new Error("Missing username");

@@ -860,7 +860,13 @@ function UsersTab({
     <>
       <div className="admin-toolbar">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${info.users.length} users…`} />
+        <button
+          className="btn btn-secondary btn-sm"
+          title="Find older accounts that aren't listed yet"
+          onClick={async () => { try { const j = await admin("rebuildUsers"); refreshInfo(); showToast(`User list rebuilt — ${j.found} account${j.found === 1 ? "" : "s"}`); } catch (e: any) { showToast(e.message); } }}
+        >Rebuild list</button>
       </div>
+      <p className="hint" style={{ marginBottom: ".6rem" }}>Missing someone? Older accounts appear once they log in, or press Rebuild list.</p>
       <div className="admin-list">
         {users.length === 0 && <div className="admin-empty">No users yet.</div>}
         {users.map((u) => {
