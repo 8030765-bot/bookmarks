@@ -1,6 +1,6 @@
 "use client";
 import { Folder, Link } from "@/lib/types";
-import { Icon } from "../CommandPalette";
+import { Icon } from "./Icon";
 import LinkCard, { Highlight, LinkCardActions } from "./LinkCard";
 
 export type Drag = { kind: "link"; folderId: string; linkId: string } | { kind: "folder"; folderId: string } | null;

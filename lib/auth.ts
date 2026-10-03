@@ -68,6 +68,7 @@ export function setSessionCookie(token: string) {
     secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: SESSION_TTL_SECONDS,
+    priority: "high",
   });
 }
 
@@ -174,10 +175,15 @@ export async function getCurrentUser(): Promise<string | null> {
   // account may have been deleted by an admin
   const exists = await redis.exists(userKey(session.username));
   if (!exists) return null;
-  // self-heal the index for accounts created before it existed
-  redis.sadd(USER_INDEX, session.username.toLowerCase()).catch(() => {});
+  // self-heal the index for accounts created before it existed (once per server instance)
+  const lower = session.username.toLowerCase();
+  if (!indexed.has(lower)) {
+    indexed.add(lower);
+    redis.sadd(USER_INDEX, lower).catch(() => indexed.delete(lower));
+  }
   return session.username;
 }
+const indexed = new Set<string>();
 
 /**
  * Rebuild the user index by scanning every users:* key. Fixes accounts

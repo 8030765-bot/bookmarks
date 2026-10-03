@@ -1,10 +1,9 @@
 "use client";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { ChatMessage } from "@/lib/types";
-import { Icon } from "./CommandPalette";
+import { Icon } from "./components/Icon";
+import { holdFast, useOnRevChange } from "./components/sync";
 
-const OPEN_POLL_MS = 3000;
-const CLOSED_POLL_MS = 15000;
 const REACTIONS = ["👍", "😂", "❤️", "🔥", "😮", "😢"];
 const QUICK_EMOJI = ["😀", "😂", "🔥", "👍", "❤️", "🎮", "💀", "🙏"];
 
@@ -80,13 +79,11 @@ export default function ChatPanel({
     }
   }, []);
 
-  useEffect(() => {
-    load();
-    const id = setInterval(() => {
-      if (document.visibilityState === "visible") load();
-    }, open ? OPEN_POLL_MS : CLOSED_POLL_MS);
-    return () => clearInterval(id);
-  }, [open, load]);
+  // load once, then only when the shared poll says chat changed
+  useEffect(() => { load(); }, [load]);
+  useOnRevChange("chat", load);
+  // poll at full speed while the panel is open, even if you're just reading
+  useEffect(() => (open ? holdFast() : undefined), [open]);
 
   // ping when someone @mentions you while chat is closed
   useEffect(() => {

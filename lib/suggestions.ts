@@ -4,6 +4,7 @@ import { Suggestion, SuggestionKind } from "./types";
 import { getBookmarks, handleAction } from "./store";
 import { normalizeUrl } from "./url";
 import { notify } from "./userdata";
+import { REV_KEYS, bumpRev } from "./revs";
 
 const KEY = "suggestions"; // hash: id -> Suggestion
 const MAX_PENDING_PER_USER = 10;
@@ -86,6 +87,7 @@ export async function createSuggestion(username: string, body: Record<string, un
 
   await redis.hset(KEY, { [s.id]: s });
   await prune();
+  await bumpRev(REV_KEYS.suggestions);
   return s;
 }
 
@@ -125,6 +127,7 @@ export async function approveSuggestion(id: string, auth: { password?: string; _
   }
   const done: Suggestion = { ...s, status: "approved", resolvedAt: new Date().toISOString() };
   await getRedis().hset(KEY, { [id]: done });
+  await bumpRev(REV_KEYS.suggestions);
   notify(s.user, { kind: "suggestion", text: `Your suggestion was approved${name ? `: “${name}”` : ""}` }).catch(() => {});
   return done;
 }
@@ -138,10 +141,12 @@ export async function rejectSuggestion(id: string, reason?: string) {
     resolvedNote: clean(reason, 300) || undefined,
   };
   await getRedis().hset(KEY, { [id]: done });
+  await bumpRev(REV_KEYS.suggestions);
   notify(s.user, { kind: "suggestion", text: `Your suggestion was declined${done.resolvedNote ? `: “${done.resolvedNote}”` : ""}` }).catch(() => {});
   return done;
 }
 
 export async function deleteSuggestion(id: string) {
   await getRedis().hdel(KEY, id);
+  await bumpRev(REV_KEYS.suggestions);
 }

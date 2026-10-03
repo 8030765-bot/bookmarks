@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminSetPassword, deleteUser, listUsers, rebuildUserIndex } from "@/lib/auth";
 import { clearChat, getBanned, getMessages, setBanned } from "@/lib/chat";
-import { getBookmarks } from "@/lib/store";
+import { getBookmarks, withClicks } from "@/lib/store";
 import { approveSuggestion, deleteSuggestion, listSuggestions, rejectSuggestion } from "@/lib/suggestions";
 import {
-  Role, audit, checkAdmin, checkMod, checkOwner, checkPassword, getAuthContext, isAuthError, listAudit, listRoles, setRole,
+  Role, audit, checkAdmin, checkMod, checkOwner, checkPassword, getAuthContext, listAudit, listRoles, setRole,
 } from "@/lib/roles";
+import { errorResponse } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -100,7 +101,7 @@ export async function POST(req: NextRequest) {
         checkAdmin(ctx, password);
         await approveSuggestion(String(body.id || ""), { password, __auth: ctx }, body.overrides || {});
         await log(String(body.id || ""));
-        return NextResponse.json({ suggestions: await listSuggestions(), data: await getBookmarks() });
+        return NextResponse.json({ suggestions: await listSuggestions(), data: await withClicks(await getBookmarks()) });
       case "rejectSuggestion":
         checkMod(ctx, password);
         await rejectSuggestion(String(body.id || ""), body.reason);
@@ -114,7 +115,6 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Unknown action" }, { status: 400 });
     }
   } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "Request failed";
-    return NextResponse.json({ error: message }, { status: isAuthError(message) ? 403 : message.startsWith("Log in") ? 401 : 400 });
+    return errorResponse(e);
   }
 }

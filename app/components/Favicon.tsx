@@ -30,6 +30,8 @@ export default function Favicon({ url, name, size = 22, className = "" }: { url:
     );
   }
   return (
+    // a plain <img>: next/image would route every icon through paid image optimisation
+    // eslint-disable-next-line @next/next/no-img-element
     <img
       className={className}
       src={iconUrl(host)}
@@ -37,6 +39,7 @@ export default function Favicon({ url, name, size = 22, className = "" }: { url:
       width={size}
       height={size}
       loading="lazy"
+      decoding="async"
       onLoad={(e) => {
         // Google's "unknown site" globe is 16px even though we ask for 64
         if ((e.target as HTMLImageElement).naturalWidth <= 16) setFailed(true);

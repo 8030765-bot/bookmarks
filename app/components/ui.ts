@@ -1,4 +1,37 @@
-import { Folder, Link } from "@/lib/types";
+import { Folder, Link, Suggestion } from "@/lib/types";
+
+/** One-line description of a suggestion, for lists and toasts. */
+export function suggestionSummary(s: Suggestion) {
+  if (s.kind === "addLink") return `Add “${s.name}”`;
+  if (s.kind === "removeLink") return `Remove “${s.linkName}”`;
+  if (s.kind === "editLink") return `Change “${s.linkName}”${s.name && s.name !== s.linkName ? ` → “${s.name}”` : ""}`;
+  return s.note && s.note.length > 60 ? `${s.note.slice(0, 60)}…` : s.note || "Idea";
+}
+
+/** Open a connection to a site's server while the pointer is on its card, so the click loads faster. */
+const warmed = new Set<string>();
+export function warmUp(url: string) {
+  try {
+    const origin = new URL(url).origin;
+    if (warmed.has(origin) || warmed.size > 60) return;
+    warmed.add(origin);
+    const el = document.createElement("link");
+    el.rel = "preconnect";
+    el.href = origin;
+    document.head.appendChild(el);
+  } catch {
+    // not a valid URL — nothing to warm up
+  }
+}
+
+/** A fresh id so a retried request is only applied once. */
+export function newOpId() {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+  }
+}
 
 export const FOLDER_EMOJIS = [
   "📁", "🏠", "🎮", "🎰", "🔒", "📚", "🧮", "🔬", "🎨", "🎵", "🎬", "📺",

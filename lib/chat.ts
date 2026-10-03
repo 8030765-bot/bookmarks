@@ -2,6 +2,7 @@ import { Redis } from "@upstash/redis";
 import { v4 as uuid } from "uuid";
 import { ChatMessage } from "./types";
 import { notify } from "./userdata";
+import { REV_KEYS, bumpRev } from "./revs";
 
 const MESSAGES_KEY = "chat:messages";
 const DELETED_KEY = "chat:deleted";
@@ -48,6 +49,7 @@ export async function postMessage(username: string, text: string, replyToId?: st
   }
   await redis.lpush(MESSAGES_KEY, msg);
   await redis.ltrim(MESSAGES_KEY, 0, MAX_MESSAGES - 1);
+  await bumpRev(REV_KEYS.chat);
   // notify @mentions and the person being replied to (never yourself)
   const targets = new Set<string>();
   for (const m of trimmed.matchAll(/@([a-zA-Z0-9_]{3,20})/g)) targets.add(m[1].toLowerCase());
@@ -63,10 +65,12 @@ export async function postMessage(username: string, text: string, replyToId?: st
 export async function deleteMessage(id: string): Promise<void> {
   const redis = getRedis();
   await redis.sadd(DELETED_KEY, id);
+  await bumpRev(REV_KEYS.chat);
 }
 
 export async function clearChat(): Promise<void> {
   await getRedis().del(MESSAGES_KEY, DELETED_KEY, REACTIONS_KEY);
+  await bumpRev(REV_KEYS.chat);
 }
 
 export async function getBanned(): Promise<string[]> {
@@ -93,4 +97,5 @@ export async function toggleReaction(username: string, id: string, emoji: string
   else delete current[emoji];
   if (Object.keys(current).length) await redis.hset(REACTIONS_KEY, { [id]: current });
   else await redis.hdel(REACTIONS_KEY, id);
+  await bumpRev(REV_KEYS.chat);
 }

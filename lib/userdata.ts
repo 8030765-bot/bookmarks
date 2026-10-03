@@ -1,5 +1,6 @@
 import { Redis } from "@upstash/redis";
 import { v4 as uuid } from "uuid";
+import { REV_KEYS, bumpRev, userRevKey } from "./revs";
 
 // Per-account data that isn't shared with the class: profile, personal
 // favourites, star ratings, private "My stuff" links, and the notifications
@@ -47,6 +48,8 @@ export async function getUserData(username: string): Promise<UserData> {
 
 async function save(username: string, data: UserData) {
   await getRedis().set(key(username), data);
+  // lets the account's other tabs/devices know to refresh
+  await bumpRev(userRevKey(username));
 }
 
 export async function getProfile(username: string): Promise<Profile> {
@@ -123,6 +126,7 @@ export async function recordAggregateRating(linkId: string, oldStars: number | u
   if (newStars) { sum += newStars; count += 1; }
   if (count <= 0) await redis.hdel(RATINGS_KEY, linkId);
   else await redis.hset(RATINGS_KEY, { [linkId]: `${sum},${count}` });
+  await bumpRev(REV_KEYS.ratings);
 }
 
 export interface RatingAgg { avg: number; count: number }

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { changePassword, getCurrentUser, regenerateRecoveryCode } from "@/lib/auth";
 import { normalizeUrl } from "@/lib/url";
+import { errorResponse } from "@/lib/http";
+import { rateLimit } from "@/lib/ratelimit";
 import {
   addMyStuff, getUserData, markNotificationsRead, recordAggregateRating, removeMyStuff,
   setProfile, setRating, toggleFavorite,
@@ -19,6 +21,7 @@ export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+    await rateLimit(`me:${user.toLowerCase()}`, 120, 60);
     const body = await req.json();
     switch (String(body.action || "")) {
       case "profile":
@@ -53,7 +56,6 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Unknown action" }, { status: 400 });
     }
   } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "Request failed";
-    return NextResponse.json({ error: message }, { status: 400 });
+    return errorResponse(e);
   }
 }

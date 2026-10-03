@@ -1,7 +1,8 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Icon } from "../CommandPalette";
+import { Icon } from "./Icon";
 import { timeAgo } from "./ui";
+import { useOnRevChange } from "./sync";
 
 export interface Notification { id: string; kind: string; text: string; at: string; read?: boolean; from?: string }
 export interface Profile { avatar?: string; color?: string; bio?: string }
@@ -28,12 +29,8 @@ export function usePersonal(user: string | null) {
     } catch {}
   }, [user]);
   useEffect(() => { load(); }, [load]);
-  // poll for new notifications while logged in
-  useEffect(() => {
-    if (!user) return;
-    const id = setInterval(() => { if (document.visibilityState === "visible") load(); }, 20000);
-    return () => clearInterval(id);
-  }, [user, load]);
+  // new notifications, or changes made on another device
+  useOnRevChange("user", load);
 
   const post = useCallback(async (body: Record<string, unknown>) => {
     const json = await fetch("/api/me", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
@@ -159,7 +156,13 @@ export function ProfileCard({ username, onClose }: { username: string; onClose: 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal profile-card" onClick={(e) => e.stopPropagation()}>
-        {!p && !missing && <div className="admin-empty">Loading…</div>}
+        {!p && !missing && (
+          <>
+            <div className="skeleton skel-row" style={{ height: 76 }} />
+            <div className="skeleton skel-line" style={{ width: "70%" }} />
+            <div className="skeleton skel-line" style={{ width: "45%" }} />
+          </>
+        )}
         {missing && <div className="admin-empty">No profile for {username}.</div>}
         {p && (
           <>

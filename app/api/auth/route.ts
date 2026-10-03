@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { login, logout, resetWithCode, setSessionCookie, signup } from "@/lib/auth";
 import { getAuthContext, getRole, ownerExists } from "@/lib/roles";
+import { errorResponse } from "@/lib/http";
+import { clientIp, rateLimit } from "@/lib/ratelimit";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +21,7 @@ export async function POST(req: NextRequest) {
     const action = String(body.action || "");
     const username = String(body.username || "").trim();
     const password = String(body.password || "");
+    const ip = clientIp(req);
     if (action === "logout") {
       await logout();
       return NextResponse.json({ user: null });
@@ -27,6 +30,7 @@ export async function POST(req: NextRequest) {
       const code = String(body.code || "");
       const newPassword = String(body.newPassword || "");
       if (!username || !code || !newPassword) return NextResponse.json({ error: "Fill in every field" }, { status: 400 });
+      await rateLimit(`reset:${ip}`, 20, 15 * 60);
       const { recoveryCode } = await resetWithCode(username, code, newPassword);
       return NextResponse.json({ ok: true, recoveryCode });
     }
@@ -36,6 +40,9 @@ export async function POST(req: NextRequest) {
     if (!username || !password) {
       return NextResponse.json({ error: "Missing username or password" }, { status: 400 });
     }
+    // per-address limits on top of the per-account lockout
+    if (action === "signup") await rateLimit(`signup:${ip}`, 8, 60 * 60);
+    else await rateLimit(`login:${ip}`, 40, 10 * 60);
     const session = action === "signup" ? await signup(username, password) : await login(username, password);
     setSessionCookie(session.token);
     // include role + ownerExists so the client unlocks admin immediately (no refresh needed)
@@ -44,9 +51,6 @@ export async function POST(req: NextRequest) {
     const recoveryCode = action === "signup" ? (session as { recoveryCode?: string }).recoveryCode : undefined;
     return NextResponse.json({ user: session.username, role, ownerExists: hasOwner, recoveryCode });
   } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "Request failed";
-    const status = message.startsWith("Wrong") ? 401 : message.startsWith("Too many") ? 429 : 400;
-    return NextResponse.json({ error: message }, { status });
+    return errorResponse(e);
   }
 }
-

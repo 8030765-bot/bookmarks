@@ -1,8 +1,8 @@
 "use client";
 import { Folder, Link } from "@/lib/types";
-import { Icon } from "../CommandPalette";
+import { Icon } from "./Icon";
 import Favicon from "./Favicon";
-import { hostOf, isNew, safeHref } from "./ui";
+import { hostOf, isNew, safeHref, warmUp } from "./ui";
 import { StarRating } from "./Personal";
 
 /** Highlights every search word that appears in the text. */
@@ -88,6 +88,8 @@ export default function LinkCard({
         rel="noopener noreferrer"
         onClick={() => actions.open(folder, link)}
         onAuxClick={(e) => { if (e.button === 1) actions.open(folder, link); }}
+        onMouseEnter={() => href && warmUp(href)}
+        onFocus={() => href && warmUp(href)}
         draggable={false}
         title={link.notes || link.url}
       >

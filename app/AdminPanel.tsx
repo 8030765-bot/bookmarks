@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BookmarksData, ChatMessage, Folder, Link, Suggestion } from "@/lib/types";
-import { Icon } from "./CommandPalette";
+import { Icon } from "./components/Icon";
 import { suggestionSummary } from "./SuggestModal";
 import Favicon from "./components/Favicon";
 import { parseBookmarksHtml } from "./components/Community";
@@ -168,7 +168,7 @@ export default function AdminPanel({
 const ROLE_LABELS: Record<string, string> = { owner: "Owner", admin: "Admin", mod: "Moderator" };
 function RolesTab({ admin, info, refreshInfo, showToast }: { admin: (a: string, p?: Record<string, any>) => Promise<any>; info: AdminInfo | null; refreshInfo: () => void; showToast: (m: string) => void }) {
   const [q, setQ] = useState("");
-  if (!info) return <div className="admin-empty">Loading…</div>;
+  if (!info) return <div>{[0, 1, 2, 3, 4].map((i) => <div key={i} className="skeleton skel-row" />)}</div>;
   const me = info.me.user?.toLowerCase();
   const act = async (action: string, username: string, extra: Record<string, any>, done: string) => {
     try { await admin(action, { username, ...extra }); refreshInfo(); showToast(done); }

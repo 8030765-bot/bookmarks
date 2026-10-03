@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityEntry, Contributor, Folder, Link, Poll } from "@/lib/types";
-import { Icon } from "../CommandPalette";
+import { Icon } from "./Icon";
 import Favicon from "./Favicon";
 import { COLORS, LinkRef, timeAgo } from "./ui";
 
@@ -65,7 +65,7 @@ export function LeaderboardModal({ me, online, onClose }: { me: string | null; o
             <span className="live-dot" /> Online now: {online.map((u) => <span key={u} className="online-name">{u}</span>)}
           </div>
         )}
-        {!leaders && <div className="admin-empty">Loading…</div>}
+        {!leaders && [0, 1, 2, 3].map((i) => <div key={i} className="skeleton skel-row" />)}
         {leaders && leaders.length === 0 && <div className="admin-empty">No accounts yet — sign up to be first on the board!</div>}
         <div className="leader-list">
           {leaders?.map((c, i) => (

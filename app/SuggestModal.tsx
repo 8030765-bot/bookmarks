@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { BookmarksData, Suggestion, SuggestionKind } from "@/lib/types";
+import { suggestionSummary } from "./components/ui";
 
 export interface SuggestStart {
   kind?: SuggestionKind;
@@ -24,12 +25,7 @@ function timeAgo(iso?: string) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
-export function suggestionSummary(s: Suggestion) {
-  if (s.kind === "addLink") return `Add “${s.name}”`;
-  if (s.kind === "removeLink") return `Remove “${s.linkName}”`;
-  if (s.kind === "editLink") return `Change “${s.linkName}”${s.name && s.name !== s.linkName ? ` → “${s.name}”` : ""}`;
-  return s.note && s.note.length > 60 ? `${s.note.slice(0, 60)}…` : s.note || "Idea";
-}
+export { suggestionSummary };
 
 export default function SuggestModal({
   data,

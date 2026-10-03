@@ -5,10 +5,46 @@ import { v4 as uuid } from "uuid";
 import { normalizeUrl } from "./url";
 import { AuthContext, checkAdmin } from "./roles";
 import { notify } from "./userdata";
+import { REV_KEYS } from "./revs";
 const KEY = "bookmarks:shared";
 const PREV_KEY = "bookmarks:shared:prev";
+// visit counts live in their own hash (HINCRBY) so a click never rewrites the whole list
+const CLICKS_KEY = "clicks";
 function getRedis() {
   return Redis.fromEnv();
+}
+
+/* ---------- input limits ---------- */
+const MAX_NAME = 100;
+const MAX_URL = 2000;
+const MAX_TAGS = 8;
+function cleanName(v: unknown, max = MAX_NAME) {
+  return String(v ?? "").trim().slice(0, max);
+}
+function cleanUrl(v: unknown) {
+  const raw = String(v ?? "");
+  if (raw.length > MAX_URL) throw new Error("That link is too long");
+  return normalizeUrl(raw);
+}
+function cleanTags(v: unknown): string[] {
+  const list = Array.isArray(v) ? v.map(String) : typeof v === "string" ? v.split(",") : [];
+  return Array.from(new Set(list.map((t) => t.trim().toLowerCase().replace(/,/g, "").slice(0, 24)).filter(Boolean))).slice(0, MAX_TAGS);
+}
+function cleanColor(v: unknown) {
+  return typeof v === "string" && /^#[0-9a-f]{3,8}$/i.test(v) ? v : undefined;
+}
+
+/** Adds the separately-stored visit counts onto a copy of the data for the client. */
+export async function withClicks(data: BookmarksData): Promise<BookmarksData> {
+  const raw = (await getRedis().hgetall<Record<string, number>>(CLICKS_KEY)) || {};
+  if (!Object.keys(raw).length) return data;
+  return {
+    ...data,
+    folders: data.folders.map((f) => ({
+      ...f,
+      links: f.links.map((l) => (raw[l.id] ? { ...l, clicks: (l.clicks || 0) + Number(raw[l.id]) } : l)),
+    })),
+  };
 }
 function linkCount(data: BookmarksData | null | undefined): number {
   if (!data?.folders) return 0;
@@ -39,7 +75,7 @@ export async function getBookmarks(): Promise<BookmarksData> {
   return normalize(data);
 }
 /**
- * snapshot=false skips saving an undo point (used for clicks/stars so
+ * snapshot=false skips saving an undo point (used for likes/votes so
  * "Undo last change" in the admin panel undoes a real edit).
  */
 export async function saveBookmarks(data: BookmarksData, { snapshot = true } = {}): Promise<void> {
@@ -64,6 +100,8 @@ export async function saveBookmarks(data: BookmarksData, { snapshot = true } = {
     await redis.set(PREV_KEY, existing);
   }
   await redis.set(KEY, normalized);
+  // publish the new revision so every open page knows to refresh
+  await redis.set(REV_KEYS.bookmarks, normalized.rev);
 }
 function findLink(data: BookmarksData, folderId: string, linkId: string) {
   const folder = data.folders.find((f) => f.id === folderId);
@@ -108,16 +146,12 @@ export async function handleAction(
     case "addLink": {
       if (data.settings?.lockAdding) requireAdmin(password);
       const folderId = String(body.folderId || "");
-      const name = String(body.name || "").trim();
-      const url = normalizeUrl(String(body.url || ""));
+      const name = cleanName(body.name);
+      const url = cleanUrl(body.url);
       if (!folderId || !name || !url) throw new Error("Missing fields");
       const folder = data.folders.find((f) => f.id === folderId);
       if (!folder) throw new Error("Folder not found");
-      const tags = Array.isArray(body.tags)
-        ? (body.tags as string[]).map(String).filter(Boolean)
-        : typeof body.tags === "string"
-          ? String(body.tags).split(",").map((t) => t.trim()).filter(Boolean)
-          : [];
+      const tags = cleanTags(body.tags);
       const user = me;
       const addedBy = typeof body.suggestedBy === "string" && body.suggestedBy ? body.suggestedBy : user;
       folder.links.push({
@@ -128,7 +162,7 @@ export async function handleAction(
         tags,
         clicks: 0,
         createdAt: new Date().toISOString(),
-        color: typeof body.color === "string" ? body.color : undefined,
+        color: cleanColor(body.color),
         notes: typeof body.notes === "string" && body.notes.trim() ? body.notes.trim().slice(0, 500) : undefined,
       });
       pushActivity(data, "add", `Added link “${name}”${credit(body)}`);
@@ -143,12 +177,10 @@ export async function handleAction(
       if (!folder) throw new Error("Folder not found");
       const link = folder.links.find((l) => l.id === linkId);
       if (!link) throw new Error("Link not found");
-      if (typeof body.name === "string" && body.name.trim()) link.name = body.name.trim();
-      if (typeof body.url === "string" && body.url.trim()) link.url = normalizeUrl(body.url);
-      if (Array.isArray(body.tags)) link.tags = (body.tags as string[]).map(String);
-      else if (typeof body.tags === "string")
-        link.tags = String(body.tags).split(",").map((t) => t.trim()).filter(Boolean);
-      if (typeof body.color === "string") link.color = body.color || undefined;
+      if (typeof body.name === "string" && body.name.trim()) link.name = cleanName(body.name);
+      if (typeof body.url === "string" && body.url.trim()) link.url = cleanUrl(body.url);
+      if (Array.isArray(body.tags) || typeof body.tags === "string") link.tags = cleanTags(body.tags);
+      if (typeof body.color === "string") link.color = cleanColor(body.color);
       if (typeof body.notes === "string") link.notes = body.notes.trim().slice(0, 500) || undefined;
       link.updatedAt = new Date().toISOString();
       pushActivity(data, "edit", `Edited link “${link.name}”${credit(body)}`);
@@ -169,15 +201,15 @@ export async function handleAction(
     }
     case "addFolder": {
       if (data.settings?.lockAdding) requireAdmin(password);
-      const name = String(body.name || "").trim();
-      const emoji = String(body.emoji || "📁");
+      const name = cleanName(body.name, 60);
+      const emoji = cleanName(body.emoji, 8) || "📁";
       if (!name) throw new Error("Name required");
       data.folders.push({
         id: uuid(),
         name,
         emoji,
         links: [],
-        color: typeof body.color === "string" ? body.color : undefined,
+        color: cleanColor(body.color),
         createdAt: new Date().toISOString(),
       });
       pushActivity(data, "add", `Added folder “${name}”`);
@@ -189,9 +221,9 @@ export async function handleAction(
       const folderId = String(body.folderId || body.id || "");
       const folder = data.folders.find((f) => f.id === folderId);
       if (!folder) throw new Error("Folder not found");
-      if (typeof body.name === "string" && body.name.trim()) folder.name = body.name.trim();
-      if (typeof body.emoji === "string" && body.emoji) folder.emoji = body.emoji;
-      if (typeof body.color === "string") folder.color = body.color || undefined;
+      if (typeof body.name === "string" && body.name.trim()) folder.name = cleanName(body.name, 60);
+      if (typeof body.emoji === "string" && body.emoji.trim()) folder.emoji = cleanName(body.emoji, 8);
+      if (typeof body.color === "string") folder.color = cleanColor(body.color);
       if (typeof body.pinned === "boolean") folder.pinned = body.pinned;
       pushActivity(data, "edit", `Edited folder “${folder.name}”`);
       await saveBookmarks(data);
@@ -234,14 +266,7 @@ export async function handleAction(
       return data;
     }
     case "trackClick": {
-      const folderId = String(body.folderId || "");
-      const linkId = String(body.linkId || "");
-      const folder = data.folders.find((f) => f.id === folderId);
-      if (!folder) return data;
-      const link = folder.links.find((l) => l.id === linkId);
-      if (!link) return data;
-      link.clicks = (link.clicks || 0) + 1;
-      await saveBookmarks(data, { snapshot: false });
+      // handled by trackClick() below without touching the big blob
       return data;
     }
     case "toggleLike": {
@@ -337,7 +362,7 @@ export async function handleAction(
     case "setAnnouncement": {
       requireAdmin(password);
       if (!data.settings) data.settings = {};
-      data.settings.announcement = typeof body.text === "string" ? body.text : "";
+      data.settings.announcement = typeof body.text === "string" ? body.text.slice(0, 300) : "";
       await saveBookmarks(data);
       return data;
     }
@@ -391,10 +416,13 @@ export async function handleAction(
     case "resetClicks": {
       requireAdmin(password);
       if (body.folderId && body.linkId) {
-        findLink(data, String(body.folderId), String(body.linkId)).link.clicks = 0;
+        const { link } = findLink(data, String(body.folderId), String(body.linkId));
+        link.clicks = 0;
+        await getRedis().hdel(CLICKS_KEY, link.id);
         pushActivity(data, "edit", "Reset clicks on one link");
       } else {
         data.folders.forEach((f) => f.links.forEach((l) => (l.clicks = 0)));
+        await getRedis().del(CLICKS_KEY);
         pushActivity(data, "edit", "Reset all click counts");
       }
       await saveBookmarks(data);
@@ -488,9 +516,16 @@ export async function handleAction(
       // swap, so pressing undo again redoes
       await redis.set(PREV_KEY, data);
       await redis.set(KEY, restored);
+      await redis.set(REV_KEYS.bookmarks, restored.rev);
       return restored;
     }
     default:
       throw new Error("Unknown action");
   }
+}
+
+/** One visit: a single HINCRBY instead of read-modify-write of the whole list. */
+export async function trackClick(linkId: string) {
+  if (!/^[\w-]{1,100}$/.test(linkId)) return;
+  await getRedis().hincrby(CLICKS_KEY, linkId, 1);
 }

@@ -1,7 +1,7 @@
 "use client";
 import { useMemo, useState } from "react";
 import { BookmarksData, Folder, Link } from "@/lib/types";
-import { Icon } from "../CommandPalette";
+import { Icon } from "./Icon";
 import Favicon from "./Favicon";
 import { COLORS, hostOf, nameFromUrl, normUrl } from "./ui";
 

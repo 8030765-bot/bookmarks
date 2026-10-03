@@ -1,25 +1,32 @@
 "use client";
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import dynamic from "next/dynamic";
 import { BookmarksData, Folder, Link, Suggestion } from "@/lib/types";
 import ChatPanel from "./ChatPanel";
-import CommandPalette, { Icon, PaletteItem } from "./CommandPalette";
-import AdminPanel from "./AdminPanel";
-import SuggestModal, { SuggestStart, suggestionSummary } from "./SuggestModal";
+import type { PaletteItem } from "./CommandPalette";
+import type { SuggestStart } from "./SuggestModal";
+import { Icon } from "./components/Icon";
 import FolderSection, { Drag } from "./components/FolderSection";
 import { LinkCardActions } from "./components/LinkCard";
-import LinkModal, { LinkModalMode, LinkValues } from "./components/LinkModal";
+import type { LinkModalMode, LinkValues } from "./components/LinkModal";
+import { reportStatus, useOnRevChange, useRev, useSyncLoop, useSyncStatus } from "./components/sync";
+// big, rarely-needed pieces load on demand so the first visit is faster
+const CommandPalette = dynamic(() => import("./CommandPalette"), { ssr: false });
+const AdminPanel = dynamic(() => import("./AdminPanel"), { ssr: false, loading: () => <div className="admin-panel admin-loading"><div className="skeleton" /></div> });
+const SuggestModal = dynamic(() => import("./SuggestModal"), { ssr: false });
+const LinkModal = dynamic(() => import("./components/LinkModal"), { ssr: false });
 import { ConfirmModal, FolderModal, FolderValues, ShortcutsModal } from "./components/Modals";
 import Favicon from "./components/Favicon";
 import {
   NotificationBell, NotificationPanel, ProfileCard, ProfileModal, usePersonal,
 } from "./components/Personal";
-import { LinkRef, isNew, readLocal, safeHref, writeLocal } from "./components/ui";
+import { LinkRef, isNew, newOpId, readLocal, safeHref, suggestionSummary, writeLocal } from "./components/ui";
 import {
   CustomizeModal, DEFAULT_LOOK, LeaderboardModal, Look, OnlinePill, Palette, PollCards, SpinWheel, WhatsNew, applyLook, usePresence,
 } from "./components/Community";
 
-const SYNC_MS = 3000;
 const ADMIN_PW_KEY = "adminPw";
+const CACHE_KEY = "cache:data";
 const DEFAULT_TITLE = "Made by Theo 7A";
 const DEFAULT_SUBTITLE = "Shared school bookmarks — everyone sees the same list";
 
@@ -159,10 +166,10 @@ export default function HomePage() {
   const searchRef = useRef<HTMLInputElement>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>();
 
-  const showToast = useCallback((msg: string, action?: Toast["action"]) => {
+  const showToast = useCallback((msg: string, action?: Toast["action"], ms?: number) => {
     clearTimeout(toastTimer.current);
     setToast({ msg, action });
-    toastTimer.current = setTimeout(() => setToast(null), action ? 6000 : 2800);
+    toastTimer.current = setTimeout(() => setToast(null), ms ?? (action ? 6000 : 2800));
   }, []);
   const setSafeData = useCallback((raw: unknown) => setData(ensureData(raw)), []);
 
@@ -212,6 +219,28 @@ export default function HomePage() {
     };
   }, []);
   useEffect(() => { applyLook(look); lookRef.current = look; }, [look]);
+
+  // offline support + "update available" (production only — dev reloads constantly)
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production" || !("serviceWorker" in navigator)) return;
+    let reloading = false;
+    const onController = () => { if (!reloading) { reloading = true; location.reload(); } };
+    navigator.serviceWorker.addEventListener("controllerchange", onController);
+    let hourly: ReturnType<typeof setInterval> | undefined;
+    navigator.serviceWorker.register("/sw.js").then((reg) => {
+      const offer = (w: ServiceWorker | null) => {
+        if (!w || !navigator.serviceWorker.controller) return;
+        showToast("A new version of the site is ready", { label: "Update", run: () => w.postMessage("skipWaiting") }, 60_000);
+      };
+      if (reg.waiting) offer(reg.waiting);
+      reg.addEventListener("updatefound", () => {
+        const w = reg.installing;
+        w?.addEventListener("statechange", () => { if (w.state === "installed") offer(w); });
+      });
+      hourly = setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
+    }).catch(() => {});
+    return () => { navigator.serviceWorker.removeEventListener("controllerchange", onController); clearInterval(hourly); };
+  }, [showToast]);
   const savePref = <T,>(key: string, set: (v: T) => void) => (v: T) => { set(v); writeLocal(key, v); };
   // merge into the latest look so quick successive clicks don't overwrite each other
   const changeLook = (next: Look) => setLook((prev) => {
@@ -235,56 +264,65 @@ export default function HomePage() {
   }
 
   // ---------- loading + live sync ----------
+  // Show the last copy saved on this device instantly (and when offline),
+  // then swap in the fresh list as soon as it arrives.
   const load = useCallback(async () => {
+    const cached = readLocal<BookmarksData | null>(CACHE_KEY, null);
+    if (cached && Array.isArray(cached.folders)) {
+      setData((d) => d || ensureData(cached));
+      setLoading(false);
+    }
     try {
       setError(null);
       const res = await fetch("/api/bookmarks", { cache: "no-store" });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error || "Failed to load");
+      if (!res.ok) {
+        if (json.quota) reportStatus("quota");
+        throw new Error(json.error || "Failed to load");
+      }
       setSafeData(json);
     } catch (e: any) {
-      setError(e.message || "Could not load bookmarks");
+      if (!cached) setError(e.message || "Could not load bookmarks");
+      else if (!navigator.onLine) reportStatus("offline");
     } finally {
       setLoading(false);
     }
   }, [setSafeData]);
   useEffect(() => { load(); }, [load]);
 
+  // keep the on-device copy fresh (debounced — the list can be big)
+  useEffect(() => {
+    if (!data) return;
+    const t = setTimeout(() => writeLocal(CACHE_KEY, data), 1000);
+    return () => clearTimeout(t);
+  }, [data]);
+
   const revRef = useRef(0);
   useEffect(() => { revRef.current = data?.rev ?? 0; }, [data]);
   const applyIfNewer = useCallback((json: any) => {
     if (json && !json.unchanged && Array.isArray(json.folders) && (json.rev ?? 0) > revRef.current) setSafeData(json);
   }, [setSafeData]);
+
+  // one shared poll tells every part of the page when its data changed
+  useSyncLoop(user);
+  const syncStatus = useSyncStatus();
+  useEffect(() => { setOffline(syncStatus === "offline"); }, [syncStatus]);
+  const serverRev = useRev("bookmarks");
   useEffect(() => {
-    let stopped = false;
-    const sync = async () => {
-      if (document.visibilityState !== "visible") return;
-      try {
-        const res = await fetch(`/api/bookmarks?rev=${revRef.current}`, { cache: "no-store" });
-        if (stopped) return;
-        setOffline(!res.ok && res.status >= 500);
-        if (res.ok) applyIfNewer(await res.json());
-      } catch {
-        // offline for a moment — next tick retries
-        if (!stopped) setOffline(true);
-      }
-    };
-    const id = setInterval(sync, SYNC_MS);
-    document.addEventListener("visibilitychange", sync);
-    return () => { stopped = true; clearInterval(id); document.removeEventListener("visibilitychange", sync); };
-  }, [applyIfNewer]);
+    if (serverRev < 0 || serverRev <= revRef.current) return;
+    fetch("/api/bookmarks", { cache: "no-store" }).then((r) => r.json()).then(applyIfNewer).catch(() => {});
+  }, [serverRev, applyIfNewer]);
 
   const presence = usePresence(user);
   const personal = usePersonal(user);
   const favoriteSet = useMemo(() => new Set(personal.favorites), [personal.favorites]);
 
-  // live-ish average ratings
-  useEffect(() => {
-    const load = () => fetch("/api/ratings", { cache: "no-store" }).then((r) => r.json()).then((j) => setAggRatings(j.ratings || {})).catch(() => {});
-    load();
-    const id = setInterval(() => { if (document.visibilityState === "visible") load(); }, 15000);
-    return () => clearInterval(id);
+  // average ratings: load once, then again whenever anyone rates something
+  const loadRatings = useCallback(() => {
+    fetch("/api/ratings", { cache: "no-store" }).then((r) => r.json()).then((j) => setAggRatings(j.ratings || {})).catch(() => {});
   }, []);
+  useEffect(() => { loadRatings(); }, [loadRatings]);
+  useOnRevChange("ratings", loadRatings);
 
   // highlight the folder chip for whichever folder is on screen
   const folderIds = (data?.folders || []).map((f) => f.id).join(",");
@@ -346,51 +384,68 @@ export default function HomePage() {
 
   // Tell people when an admin approves or declines one of their suggestions.
   const suggestionStatus = useRef<Map<string, Suggestion["status"]> | null>(null);
-  useEffect(() => {
-    suggestionStatus.current = null;
+  const checkSuggestions = useCallback(async () => {
     if (!user) return;
-    const check = async () => {
-      if (document.visibilityState !== "visible") return;
-      try {
-        const json = await fetch("/api/suggestions", { cache: "no-store" }).then((r) => r.json());
-        if (!Array.isArray(json.suggestions)) return;
-        const list = json.suggestions as Suggestion[];
-        const before = suggestionStatus.current;
-        if (before) {
-          for (const x of list) {
-            if (before.get(x.id) === "pending" && x.status !== "pending") {
-              showToast(x.status === "approved" ? `✅ Approved: ${suggestionSummary(x)}` : `Declined: ${suggestionSummary(x)}`);
-            }
+    try {
+      const json = await fetch("/api/suggestions", { cache: "no-store" }).then((r) => r.json());
+      if (!Array.isArray(json.suggestions)) return;
+      const list = json.suggestions as Suggestion[];
+      const before = suggestionStatus.current;
+      if (before) {
+        for (const x of list) {
+          if (before.get(x.id) === "pending" && x.status !== "pending") {
+            showToast(x.status === "approved" ? `✅ Approved: ${suggestionSummary(x)}` : `Declined: ${suggestionSummary(x)}`);
           }
         }
-        suggestionStatus.current = new Map(list.map((x) => [x.id, x.status]));
-      } catch {}
-    };
-    check();
-    const id = setInterval(check, 15000);
-    return () => clearInterval(id);
+      }
+      suggestionStatus.current = new Map(list.map((x) => [x.id, x.status]));
+    } catch {}
   }, [user, showToast]);
+  useEffect(() => { suggestionStatus.current = null; checkSuggestions(); }, [checkSuggestions]);
+  useOnRevChange("suggestions", checkSuggestions);
 
   // ---------- server calls ----------
-  async function api(action: string, payload: Record<string, any> = {}): Promise<BookmarksData | null> {
-    setSubmitting(true);
+  async function api(action: string, payload: Record<string, any> = {}, { quiet = false } = {}): Promise<BookmarksData | null> {
+    if (!quiet) setSubmitting(true);
+    // the same id on every retry, so the server applies the change only once
+    const body = JSON.stringify({ action, ...payload, opId: newOpId() });
     try {
-      const res = await fetch("/api/bookmarks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, ...payload }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Request failed");
-      const next = ensureData(json);
-      setData(next);
-      return next;
+      for (let attempt = 0; ; attempt++) {
+        let res: Response;
+        try {
+          res = await fetch("/api/bookmarks", { method: "POST", headers: { "Content-Type": "application/json" }, body });
+        } catch (netErr) {
+          // flaky connection: try again a couple of times before giving up
+          if (attempt < 2) { await new Promise((r) => setTimeout(r, 700 * (attempt + 1))); continue; }
+          reportStatus("offline");
+          throw new Error("You're offline — that change wasn't saved");
+        }
+        if ([502, 503, 504].includes(res.status) && attempt < 2) {
+          const peek = await res.clone().json().catch(() => ({}));
+          if (!peek.quota) { await new Promise((r) => setTimeout(r, 700 * (attempt + 1))); continue; }
+        }
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (json.quota) reportStatus("quota");
+          throw new Error(json.error || "Request failed");
+        }
+        const next = ensureData(json);
+        setData(next);
+        return next;
+      }
     } catch (e: any) {
       showToast(e.message || "Something went wrong");
       return null;
     } finally {
-      setSubmitting(false);
+      if (!quiet) setSubmitting(false);
     }
+  }
+  /** Change one link on screen right away; the server's answer replaces it a moment later. */
+  function patchLinkLocally(folderId: string, linkId: string, fn: (l: Link) => Link) {
+    setData((d) => d && {
+      ...d,
+      folders: d.folders.map((f) => (f.id !== folderId ? f : { ...f, links: f.links.map((l) => (l.id === linkId ? fn(l) : l)) })),
+    });
   }
   const adminPw = () => (adminUnlocked ? adminPassword : undefined);
   const undo = () => api("undo", { password: adminPassword }).then((d) => d && showToast("Undone"));
@@ -455,12 +510,14 @@ export default function HomePage() {
   }
   function trackAndOpen(folder: Folder, link: Link, openWindow = false) {
     remember(folder, link);
-    // clicks don't block the UI and don't show errors
+    // clicks don't block the UI and don't show errors; the count goes up on screen straight away
+    patchLinkLocally(folder.id, link.id, (l) => ({ ...l, clicks: (l.clicks || 0) + 1 }));
     fetch("/api/bookmarks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "trackClick", folderId: folder.id, linkId: link.id }),
-    }).then((r) => r.json()).then(applyIfNewer).catch(() => {});
+      keepalive: true,
+    }).catch(() => {});
     const href = safeHref(link.url);
     if (openWindow && href) {
       if (look.newTab) window.open(href, "_blank", "noopener,noreferrer");
@@ -540,7 +597,12 @@ export default function HomePage() {
     suggest: (f, l) => setSuggest({ kind: "editLink", folderId: f.id, linkId: l.id }),
     like: (f, l) => {
       if (!user) { showToast("Log in to like websites"); openLogin(); return; }
-      api("toggleLike", { folderId: f.id, linkId: l.id });
+      const me = user.toLowerCase();
+      patchLinkLocally(f.id, l.id, (x) => {
+        const likes = x.likes || [];
+        return { ...x, likes: likes.includes(me) ? likes.filter((u) => u !== me) : [...likes, me] };
+      });
+      api("toggleLike", { folderId: f.id, linkId: l.id }, { quiet: true }).then((ok) => { if (!ok) load(); });
     },
     filterTag: (t) => { setTagFilter(t === tagFilter ? "" : t); window.scrollTo({ top: 0, behavior: "smooth" }); },
     rate: (linkId, stars) => { if (!user) { showToast("Log in to rate"); openLogin(); return; } personal.rate(linkId, stars); },
@@ -834,9 +896,13 @@ export default function HomePage() {
         />
       )}
 
-      {offline && (
+      {syncStatus === "quota" ? (
         <div className="offline-bar" role="status">
-          <span className="offline-dot" /> You&apos;re offline — changes from others will appear when you reconnect.
+          <span className="offline-dot" /> The site&apos;s free database limit is used up — you&apos;re seeing the last saved copy and changes are paused until it resets.
+        </div>
+      ) : offline && (
+        <div className="offline-bar" role="status">
+          <span className="offline-dot" /> You&apos;re offline — showing the copy saved on this device. Changes from others will appear when you reconnect.
         </div>
       )}
       <div className="topbar" ref={topbarRef}>
@@ -943,7 +1009,19 @@ export default function HomePage() {
         <PollCards
           polls={data?.polls || []}
           user={user}
-          onVote={(pollId, option) => { api("votePoll", { pollId, option }); }}
+          onVote={(pollId, option) => {
+            const me = user?.toLowerCase();
+            if (me) setData((d) => d && {
+              ...d,
+              polls: (d.polls || []).map((p) => {
+                if (p.id !== pollId) return p;
+                const votes = { ...p.votes };
+                if (votes[me] === option) delete votes[me]; else votes[me] = option;
+                return { ...p, votes };
+              }),
+            });
+            api("votePoll", { pollId, option }, { quiet: true }).then((ok) => { if (!ok) load(); });
+          }}
           onNeedLogin={() => { showToast("Log in to vote"); openLogin(); }}
         />
 
@@ -1028,7 +1106,7 @@ export default function HomePage() {
           </>
         )}
 
-        <main className="folders">
+        <main className={`folders ${allRefs.length > 150 ? "big-list" : ""}`}>
           {sortedFolders.length === 0 && (
             <div className="empty-state">
               <div className="empty-emoji">📂</div>

@@ -2,16 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { deleteMessage, getMessages, postMessage, toggleReaction } from "@/lib/chat";
 import { getBookmarks } from "@/lib/store";
-import { audit, checkMod, getAuthContext, isAuthError } from "@/lib/roles";
+import { audit, checkMod, getAuthContext } from "@/lib/roles";
+import { errorResponse } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
-
-function errorResponse(e: unknown) {
-  const message = e instanceof Error ? e.message : "Request failed";
-  const status =
-    isAuthError(message) || message.includes("muted") ? 403 : message.startsWith("Slow down") ? 429 : 400;
-  return NextResponse.json({ error: message }, { status });
-}
 
 export async function GET() {
   try {

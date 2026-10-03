@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Folder } from "@/lib/types";
-import { Icon } from "../CommandPalette";
+import { Icon } from "./Icon";
 import { COLORS, FOLDER_EMOJIS } from "./ui";
 
 export interface FolderValues {
