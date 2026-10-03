@@ -5,6 +5,7 @@ import { Icon } from "./Icon";
 import Favicon from "./Favicon";
 import { COST_LABEL, STATUS_LABEL, STICKER_LABEL, useCardEnv } from "./cardEnv";
 import { ageLabel, hostOf, safeHref, timeAgo } from "./ui";
+import { speak } from "./Fun";
 
 /** The "back" of a card: everything about one link, plus your own notes and ticks. */
 export default function LinkDetails({ link }: { folder: Folder; link: Link }) {
@@ -137,6 +138,10 @@ export default function LinkDetails({ link }: { folder: Folder; link: Link }) {
       )}
 
       <div className="cd-actions">
+        <button className="pick" title="Read the name and description out loud" onClick={() => {
+          const text = [link.name, link.notes, link.tip, ...(link.communityNotes || []).map((n) => n.text)].filter(Boolean).join(". ");
+          if (!speak(text)) actions.toast("Your device can't read aloud");
+        }}>🔊 Read aloud</button>
         {actions.thank && link.addedBy && link.addedBy.toLowerCase() !== env.me?.toLowerCase() && (
           <button className={`pick ${thanked ? "on" : ""}`} disabled={thanked} onClick={() => actions.thank!(link)} title={`Say thanks to ${link.addedBy}`}>
             🙏 {thanked ? "Thanked" : "Say thanks"}

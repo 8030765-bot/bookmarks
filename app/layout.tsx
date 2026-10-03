@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import LookBoot from "./components/LookBoot";
 
 // served from our own domain at build time: no extra request to Google, no flash of the wrong font
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500", "600", "700"], display: "swap", variable: "--font-inter" });
@@ -24,7 +25,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={inter.variable}>
-      <body>{children}</body>
+      <body>
+        <a className="skip-link" href="#main">Skip to content</a>
+        {children}
+        <LookBoot />
+      </body>
     </html>
   );
 }

@@ -20,6 +20,8 @@ export interface Profile {
   statusUntil?: string;
   /** banner style on your profile */
   banner?: string;
+  /** a theme code (from Customize → Share) shown on your profile */
+  themeCode?: string;
   /** ring around your avatar */
   border?: string;
   /** topics you're into (tags) */
@@ -222,6 +224,7 @@ export async function setProfile(username: string, patch: Partial<Profile>) {
   }
   if (typeof patch.banner === "string") p.banner = BANNERS.includes(patch.banner) && patch.banner !== "none" ? patch.banner : undefined;
   if (typeof patch.border === "string") p.border = BORDERS.includes(patch.border) && patch.border !== "none" ? patch.border : undefined;
+  if (typeof patch.themeCode === "string") p.themeCode = /^TB1\.[A-Za-z0-9_-]{2,600}$/.test(patch.themeCode) ? patch.themeCode : undefined;
   if (Array.isArray(patch.into)) {
     const into = Array.from(new Set(patch.into.map((t) => String(t).trim().toLowerCase().replace(/[^a-z0-9 -]/g, "").slice(0, 24)).filter(Boolean))).slice(0, 5);
     p.into = into.length ? into : undefined;

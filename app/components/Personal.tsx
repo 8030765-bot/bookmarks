@@ -8,7 +8,7 @@ import Markdown from "./Markdown";
 export interface Notification { id: string; kind: string; text: string; at: string; read?: boolean; from?: string; link?: string }
 export interface Profile {
   avatar?: string; color?: string; bio?: string; displayName?: string; status?: string; statusEmoji?: string; statusUntil?: string;
-  banner?: string; border?: string; into?: string[]; showcase?: string[]; visibility?: "everyone" | "members" | "private"; hideOnline?: boolean;
+  banner?: string; border?: string; themeCode?: string; into?: string[]; showcase?: string[]; visibility?: "everyone" | "members" | "private"; hideOnline?: boolean;
 }
 /** A private link only you can see. */
 export interface PrivateLink { id: string; name: string; url: string; createdAt: string; folder?: string }

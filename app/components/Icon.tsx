@@ -1,4 +1,5 @@
 "use client";
+import { useSyncExternalStore } from "react";
 
 // Every icon on the site: simple stroke paths drawn in one 24x24 box.
 export const ICON_PATHS: Record<string, string> = {
@@ -59,7 +60,26 @@ export const ICON_PATHS: Record<string, string> = {
   popout: "M14 4h6v6M20 4l-8 8M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
 };
 
+/* "Emoji icons" setting: swap the line icons for emoji where there's a good match. */
+const EMOJI: Record<string, string> = {
+  plus: "➕", info: "ℹ️", mic: "🎤", dice: "🎲", eye: "👁️", note: "📝", tag: "🏷️", folder: "📁", shuffle: "🔀", chat: "💬", moon: "🌙",
+  grid: "🔳", lock: "🔒", user: "👤", logout: "🚪", chart: "📊", link: "🔗", users: "👥", settings: "⚙️", database: "🗄️", clock: "🕐",
+  x: "✖️", edit: "✏️", trash: "🗑️", pin: "📌", download: "⬇️", upload: "⬆️", undo: "↩️", star: "⭐", copy: "📋", external: "↗️",
+  search: "🔍", sun: "☀️", list: "📃", keyboard: "⌨️", check: "✔️", heart: "❤️", share: "📤", trophy: "🏆", palette: "🎨", bell: "🔔",
+  poll: "📊", reply: "💬", bulb: "💡", tools: "🧰", popout: "🪟",
+};
+let iconStyle: "line" | "emoji" = "line";
+const iconListeners = new Set<() => void>();
+export function setIconStyle(s: "line" | "emoji") {
+  if (s === iconStyle) return;
+  iconStyle = s;
+  iconListeners.forEach((f) => f());
+}
+const subscribe = (cb: () => void) => { iconListeners.add(cb); return () => { iconListeners.delete(cb); }; };
+
 export function Icon({ name }: { name: keyof typeof ICON_PATHS | string }) {
+  const style = useSyncExternalStore(subscribe, () => iconStyle, () => "line" as const);
+  if (style === "emoji" && EMOJI[name]) return <span className="icon-emoji" aria-hidden="true">{EMOJI[name]}</span>;
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
       strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

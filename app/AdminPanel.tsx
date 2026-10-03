@@ -985,6 +985,18 @@ function SiteTab({
         checked={s.chatEnabled !== false}
         onChange={(v) => run("setSettings", { settings: { chatEnabled: v } })}
       />
+      <h3 className="admin-h">Look</h3>
+      <Toggle
+        label="April Fools mode 🤡"
+        hint="Silly tilted cards and a backwards title for everyone (each person can turn it off for themselves)."
+        checked={!!s.aprilFools}
+        onChange={(v) => run("setSettings", { settings: { aprilFools: v } })}
+      />
+      <p className="row-sub">
+        Default theme for new visitors: {s.defaultTheme ? <><code>{s.defaultTheme.slice(0, 24)}…</code> <button className="link-btn" onClick={() => run("setSettings", { settings: { defaultTheme: "" } })}>clear</button></> : "the normal one"}
+        {" · "}Theme of the month: {s.themeOfMonth ? <>{s.themeOfMonth.name} <button className="link-btn" onClick={() => run("setSettings", { settings: { themeOfMonth: null } })}>clear</button></> : "none"}
+      </p>
+      <p className="row-sub">Set these from Customize → Share while logged in as an admin.</p>
     </>
   );
 }

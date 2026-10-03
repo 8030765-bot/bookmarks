@@ -193,6 +193,12 @@ export interface SiteSettings {
   challenge?: { title: string; text?: string; round: string; endsAt?: string };
   /** community: the site's birthday (YYYY-MM-DD) for the yearly celebration */
   siteBirthday?: string;
+  /** look: the theme new visitors start with (a theme code) */
+  defaultTheme?: string;
+  /** look: an admin-picked theme people can try this month */
+  themeOfMonth?: { code: string; name: string };
+  /** fun: April Fools mode, switched on by an admin */
+  aprilFools?: boolean;
 }
 
 export interface Poll {

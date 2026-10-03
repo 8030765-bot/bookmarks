@@ -91,7 +91,7 @@ function DeckEditor({ deck, save, remove }: { deck: Deck; save: (d: Deck) => voi
           }}>Add these</button>
         </div>
       )}
-      <ul className="tool-list cards">
+      <ul className="tool-list deck-cards">
         {deck.cards.map((c) => (
           <li key={c.id}>
             <span><strong>{c.front}</strong> — {c.back}</span>

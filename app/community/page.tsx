@@ -10,6 +10,7 @@ import { UserChip, setFlairMap } from "../components/People";
 import { CommunityInfo } from "../components/Today";
 import { useOnRevChange, useSyncLoop } from "../components/sync";
 import { hostOf, safeHref, timeAgo } from "../components/ui";
+import { EasterEgg } from "../components/Fun";
 
 type Tab = BoardKind | "roadmap" | "events" | "fame" | "recap";
 const TABS: { id: Tab; label: string }[] = [
@@ -80,7 +81,7 @@ function Community() {
         <Link className="btn btn-secondary btn-sm" href="/people"><Icon name="users" /> People</Link>
       </div>
       <header className="hero">
-        <h1>Community</h1>
+        <h1>Community <EasterEgg id="community" /></h1>
         <p>Ask for links, answer questions, share tips and vote on what comes next.</p>
         {info && (
           <div className="goal-row">
@@ -105,7 +106,7 @@ function Community() {
         ))}
       </nav>
 
-      <main className="cm-body">
+      <main id="main" className="cm-body">
         {tab === "challenge" && (
           <>
             {challenge ? (

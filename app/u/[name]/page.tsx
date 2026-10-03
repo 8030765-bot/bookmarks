@@ -9,6 +9,7 @@ import { Icon } from "../../components/Icon";
 import { Avatar, roleClass } from "../../components/People";
 import type { Profile } from "../../components/Personal";
 import { ageLabel, safeHref, timeAgo } from "../../components/ui";
+import { PALETTES, decodeTheme } from "../../components/look";
 
 interface LinkLite { id: string; name: string; url: string; folder: string; emoji: string }
 interface FullProfile {
@@ -55,6 +56,8 @@ export default function ProfilePage() {
   useEffect(() => { if (p) document.title = `${p.profile?.displayName || p.username} · Theo's Bookmarks`; }, [p]);
 
   const pr = p?.profile || {};
+  const theme = pr.themeCode ? decodeTheme(pr.themeCode) : null;
+  const themePal = theme ? PALETTES.find((x) => x.id === theme.palette) : undefined;
   const online = !!p?.lastSeen && Date.now() - p.lastSeen < 90_000;
   const share = () => navigator.clipboard.writeText(location.href).then(() => setMsg("Link to this profile copied")).catch(() => setMsg(location.href));
 
@@ -81,6 +84,13 @@ export default function ProfilePage() {
               <h1 className={roleClass(p.role)}>{pr.displayName || p.username}</h1>
               <div className="pp-handle">@{p.username}{p.role && <span className={`pill role-${p.role}`}>{p.role}</span>}{p.social?.followsYou && <span className="pill">follows you</span>}</div>
               {pr.status && <div className="pp-status">{pr.statusEmoji} {pr.status}</div>}
+              {theme && (
+                <div className="pp-theme">
+                  <span className="pp-theme-swatch" style={{ background: `linear-gradient(135deg, ${themePal?.swatch[0] || "#000"} 50%, ${theme.accent || themePal?.swatch[1] || "#7c6cff"} 50%)` }} aria-hidden="true" />
+                  <span>Theme: {themePal?.label || "Custom"}</span>
+                  {!p.self && <a className="link-btn" href={`/?theme=${encodeURIComponent(pr.themeCode!)}`}>Use this theme</a>}
+                </div>
+              )}
               <div className="pp-meta">
                 {p.joined && <span>Joined {ageLabel(p.joined)}</span>}
                 {p.lastSeen && <span>{online ? "🟢 Online now" : `Active ${timeAgo(new Date(p.lastSeen).toISOString())}`}</span>}

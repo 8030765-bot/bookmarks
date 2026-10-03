@@ -86,6 +86,19 @@ export function TodayStrip({ data, allRefs, user, community, onOpenLink, onOpenF
     return now.getFullYear() - y;
   })();
   const featuredFolder = s.featuredFolderId ? data.folders.find((f) => f.id === s.featuredFolderId) : undefined;
+  // on this day: something added on today's date in an earlier year
+  const onThisDay = (() => {
+    const now = new Date();
+    const md = `${now.getMonth()}-${now.getDate()}`;
+    const old = allRefs.filter((r) => {
+      if (!r.link.createdAt) return false;
+      const d = new Date(r.link.createdAt);
+      return `${d.getMonth()}-${d.getDate()}` === md && d.getFullYear() < now.getFullYear();
+    });
+    if (!old.length) return null;
+    const pick = old[dayIndex() % old.length];
+    return { ref: pick, years: now.getFullYear() - new Date(pick.link.createdAt!).getFullYear() };
+  })();
   const goal = info?.goals.links;
 
   if (hidden) {
@@ -134,6 +147,17 @@ export function TodayStrip({ data, allRefs, user, community, onOpenLink, onOpenF
               <Favicon url={lotd.link.url} name={lotd.link.name} size={16} /> {lotd.link.name}
             </a>
             <button className="tt-sub" onClick={() => onOpenLink(lotd.link.id)}>in {lotd.folder.emoji} {lotd.folder.name}</button>
+          </div>
+        )}
+        {onThisDay && (
+          <div className="today-tile">
+            <span className="tt-label">📆 On this day</span>
+            <a className="tt-main tt-link" href={onThisDay.ref.link.url} target="_blank" rel="noopener noreferrer">
+              <Favicon url={onThisDay.ref.link.url} name={onThisDay.ref.link.name} size={16} /> {onThisDay.ref.link.name}
+            </a>
+            <button className="tt-sub" onClick={() => onOpenLink(onThisDay.ref.link.id)}>
+              added {onThisDay.years} year{onThisDay.years === 1 ? "" : "s"} ago{onThisDay.ref.link.addedBy ? ` by ${onThisDay.ref.link.addedBy}` : ""}
+            </button>
           </div>
         )}
         <div className="today-tile wyr">

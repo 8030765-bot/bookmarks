@@ -95,7 +95,7 @@ export function PaletteMaker() {
         </select>
         <button className="btn btn-secondary btn-sm" onClick={() => setBase(hslToHex(Math.floor(Math.random() * 360), 55 + Math.floor(Math.random() * 35), 45 + Math.floor(Math.random() * 20)))}>🎲 Random</button>
       </div>
-      <div className="palette">
+      <div className="tool-palette">
         {colors.map((c, i) => (
           <button key={i} style={{ background: c, color: textOn(c) }} onClick={() => copy(c)} title="Copy">
             {copied === c ? "copied" : c.toUpperCase()}

@@ -738,6 +738,15 @@ export async function handleAction(
           endsAt: typeof c!.endsAt === "string" && Number.isFinite(Date.parse(c!.endsAt)) ? new Date(c!.endsAt).toISOString() : undefined,
         } : undefined;
       }
+      // look
+      const themeCode = (v: unknown) => (typeof v === "string" && /^TB1\.[A-Za-z0-9_-]{2,600}$/.test(v) ? v : undefined);
+      if (patch.defaultTheme !== undefined) s.defaultTheme = themeCode(patch.defaultTheme);
+      if (patch.themeOfMonth !== undefined) {
+        const t = patch.themeOfMonth as Record<string, unknown> | null;
+        const code = themeCode(t?.code);
+        s.themeOfMonth = code ? { code, name: String(t?.name || "Theme of the month").trim().slice(0, 40) || "Theme of the month" } : undefined;
+      }
+      if (typeof patch.aprilFools === "boolean") s.aprilFools = patch.aprilFools || undefined;
       if (typeof patch.siteBirthday === "string") s.siteBirthday = /^\d{4}-\d{2}-\d{2}$/.test(patch.siteBirthday) ? patch.siteBirthday : undefined;
       pushActivity(data, "settings", "Updated site settings");
       await saveBookmarks(data);

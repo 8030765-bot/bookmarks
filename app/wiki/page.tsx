@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Icon } from "../components/Icon";
 import { timeAgo } from "../components/ui";
+import { EasterEgg } from "../components/Fun";
 
 interface PageInfo { slug: string; title: string; updatedBy: string; updatedAt: string; locked?: boolean }
 
@@ -27,7 +28,7 @@ export default function WikiIndex() {
       </div>
       <header className="hero">
         <h1>Wiki</h1>
-        <p>Guides and how-tos for the websites here. Anyone with an account can write or fix a page.</p>
+        <p>Guides and how-tos for the websites here. Anyone with an account can write or fix a page. <EasterEgg id="wiki" /></p>
       </header>
       <div className="actions-row">
         <input className="people-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a page…" aria-label="Find a page" />

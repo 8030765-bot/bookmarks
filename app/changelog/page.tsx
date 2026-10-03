@@ -2,9 +2,24 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { Icon } from "../components/Icon";
+import { EasterEgg } from "../components/Fun";
 
 /** Updates to the site itself (not the bookmarks — those are in "What's new"). Newest first. */
 const RELEASES: { date: string; title: string; items: string[] }[] = [
+  {
+    date: "2026-10", title: "Look & feel",
+    items: [
+      "A new Customize window with a live preview: 14 themes (including Retro 95 and Terminal), any accent colour, backgrounds and dark mode by time of day",
+      "Fonts (including a dyslexia-friendly one), text size, weight and line spacing",
+      "Card styles, hover effects, an icon-only grid, folder header styles, page width and a folder list down the side",
+      "Hide or reorder parts of the homepage; minimal mode with no emoji; emoji or line icons",
+      "Share your theme as a code or a link, show it on your profile, and try the admins' theme of the month",
+      "High contrast, colourblind-safe colours, always-underlined links, skip-to-content and clearer keyboard focus",
+      "“What's this?” mode explains any button, and pages can be read aloud",
+      "Seasonal touches, holiday logos, snow in December, fireworks at New Year and an optional sparkle when you click",
+      "A greeting, an “On this day” link, a site pet that grows with the site — and a few secrets to find 🥚",
+    ],
+  },
   {
     date: "2026-10", title: "Tools",
     items: [
@@ -85,6 +100,7 @@ export default function ChangelogPage() {
           </section>
         ))}
       </div>
+      <p className="center"><EasterEgg id="changelog" /></p>
     </div>
   );
 }

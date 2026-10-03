@@ -1,11 +1,11 @@
 "use client";
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import dynamic from "next/dynamic";
 import { BookmarksData, Folder, Link, Suggestion } from "@/lib/types";
 import ChatPanel from "./ChatPanel";
 import type { PaletteItem } from "./CommandPalette";
 import type { SuggestStart } from "./SuggestModal";
-import { Icon } from "./components/Icon";
+import { Icon, setIconStyle } from "./components/Icon";
 import FolderSection, { Drag, FolderMeta } from "./components/FolderSection";
 import { FolderInfo, FolderMenu, FolderMenuState, PickModal, TagManager, folderMarkdown } from "./components/FolderExtras";
 import { MatchContext, closestWord, exactMatch, forgivingMatch, matchLink, parseQuery, relevance } from "./components/query";
@@ -34,8 +34,14 @@ import {
 import { NotificationPanel, WeeklyDigest, disablePush, enablePush, playPing } from "./components/Notifications";
 import { LinkRef, asMarkdown, isExpired, isNewSince, newOpId, normUrl, readLocal, safeHref, suggestionSummary, urlsIn, writeLocal } from "./components/ui";
 import {
-  CustomizeModal, DEFAULT_LOOK, LeaderboardModal, Look, OnlinePill, Palette, PollCards, SpinWheel, WhatsNew, applyLook, applyPollVote, usePresence,
+  DEFAULT_LOOK, LeaderboardModal, Look, OnlinePill, Palette, PollCards, SpinWheel, WhatsNew, applyLook, applyPollVote, usePresence,
 } from "./components/Community";
+import { ThemeEditor } from "./components/ThemeEditor";
+import { DEFAULT_ORDER, PALETTES, cleanLook, decodeTheme, greetingFor, holidayLogo } from "./components/look";
+import {
+  EasterEgg, HintMode, SitePet, Snow, randomLoadingLine, useLogoClicks, useNewYearFireworks, useSparkles, useUnlocked,
+} from "./components/Fun";
+import SideNav from "./components/SideNav";
 import { TodayStrip, sayThanks, suggestNote, useCommunityInfo } from "./components/Today";
 import { useTimerAlarm } from "./components/tools/timerAlarm";
 
@@ -182,6 +188,7 @@ export default function HomePage() {
   const [adminPassword, setAdminPassword] = useState("");
   const [adminOpen, setAdminOpen] = useState(false);
   const [user, setUser] = useState<string | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [role, setRole] = useState<"owner" | "admin" | "mod" | null>(null);
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileView, setProfileView] = useState<string | null>(null);
@@ -235,7 +242,7 @@ export default function HomePage() {
   useEffect(() => {
     // older versions stored just "theme"
     const legacy = readLocal<string | null>("theme", null);
-    setLook({ ...DEFAULT_LOOK, ...(legacy === "light" ? { palette: "light" as Palette } : {}), ...readLocal<Partial<Look>>("look", {}) });
+    setLook(cleanLook({ ...(legacy === "light" ? { palette: "light" as Palette } : {}), ...readLocal<Partial<Look>>("look", {}) }));
     setSeenActivity(readLocal<string | null>("seenActivity", null));
     setView(readLocal("view", "grid"));
     setSort(readLocal("sort", "manual"));
@@ -288,7 +295,25 @@ export default function HomePage() {
       window.removeEventListener("offline", goOffline);
     };
   }, []);
-  useEffect(() => { applyLook(look); lookRef.current = look; }, [look]);
+  // follow the device's dark mode and reduced-motion settings, and re-check the clock for "dark at night"
+  const [mediaTick, setMediaTick] = useState(0);
+  useEffect(() => {
+    const dark = window.matchMedia("(prefers-color-scheme: dark)");
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const bump = () => setMediaTick((n) => n + 1);
+    dark.addEventListener("change", bump);
+    motion.addEventListener("change", bump);
+    const id = setInterval(bump, 5 * 60_000);
+    return () => { dark.removeEventListener("change", bump); motion.removeEventListener("change", bump); clearInterval(id); };
+  }, []);
+  useEffect(() => {
+    applyLook(look, {
+      prefersDark: window.matchMedia("(prefers-color-scheme: dark)").matches,
+      reduceMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    });
+    setIconStyle(look.iconStyle);
+    lookRef.current = look;
+  }, [look, mediaTick]);
 
   // offline support + "update available" (production only — dev reloads constantly)
   useEffect(() => {
@@ -411,8 +436,8 @@ export default function HomePage() {
       set(s[key] as T);
       writeLocal(local, s[key]);
     };
-    setLook({ ...DEFAULT_LOOK, ...(s.look as Partial<Look>) });
-    writeLocal("look", { ...DEFAULT_LOOK, ...(s.look as Partial<Look>) });
+    setLook(cleanLook(s.look as Partial<Look>));
+    writeLocal("look", cleanLook(s.look as Partial<Look>));
     apply("view", setView);
     apply("sort", setSort);
     apply("collapsed", setCollapsed);
@@ -430,6 +455,56 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [look, view, sort, collapsed, quickTab, showTags, space, folderViewPrefs, startView]);
   useEffect(() => { if (!user) syncedFor.current = null; }, [user]);
+
+  // ---------- look extras: shared theme links, the admins' default theme, fun stuff ----------
+  const unlocked = useUnlocked();
+  const pendingTheme = useRef<string | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const code = params.get("theme");
+    if (!code) return;
+    pendingTheme.current = code;
+    params.delete("theme");
+    window.history.replaceState(null, "", `${location.pathname}${params.toString() ? `?${params}` : ""}${location.hash}`);
+  }, []);
+  useEffect(() => {
+    // wait until we know whose settings win (this device's or the account's), then apply it on top
+    const code = pendingTheme.current;
+    if (!code || !authChecked || (user && syncedFor.current !== user)) return;
+    pendingTheme.current = null;
+    const t = decodeTheme(code);
+    if (!t) { showToast("That theme link didn't work"); return; }
+    if (t.palette && PALETTES.find((x) => x.id === t.palette)?.secret && !unlocked.includes(t.palette)) delete t.palette;
+    const before = lookRef.current;
+    changeLook({ ...before, ...t });
+    showToast("Theme applied 🎨", { label: "Undo", run: () => changeLook(before) }, 8000);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authChecked, user, personal.loaded]);
+  const defaultThemeDone = useRef(false);
+  useEffect(() => {
+    // new visitors (nothing saved yet) start with the theme the admins picked
+    const code = data?.settings?.defaultTheme;
+    if (defaultThemeDone.current || !code || readLocal<unknown>("look", null) !== null) return;
+    defaultThemeDone.current = true;
+    const t = decodeTheme(code);
+    if (t) setLook(cleanLook({ ...DEFAULT_LOOK, ...t }));
+  }, [data?.settings?.defaultTheme]);
+  useSparkles(look.sparkles);
+  useNewYearFireworks();
+  const logoClick = useLogoClicks();
+  useEffect(() => {
+    const h = (e: Event) => showToast(String((e as CustomEvent).detail), undefined, 6000);
+    window.addEventListener("fun-toast", h);
+    return () => window.removeEventListener("fun-toast", h);
+  }, [showToast]);
+  const [hintMode, setHintMode] = useState(false);
+  const endHints = useCallback(() => setHintMode(false), []);
+  const [aprilOff, setAprilOff] = useState(false);
+  useEffect(() => { setAprilOff(readLocal("aprilOff", "") === new Date().toDateString()); }, []);
+  const aprilOn = !!data?.settings?.aprilFools && !aprilOff;
+  useEffect(() => { document.documentElement.setAttribute("data-april", aprilOn ? "on" : "off"); }, [aprilOn]);
+  const [loadingLine, setLoadingLine] = useState("");
+  useEffect(() => { setLoadingLine(randomLoadingLine()); }, []);
 
   // unread count in the tab title and on the installed app's icon
   const unreadCount = personal.notifications.filter((n) => !n.read).length;
@@ -529,7 +604,7 @@ export default function HomePage() {
       setRole(j.role || null);
       setOwnerExists(!!j.ownerExists);
       if (j.role) { setAdminUnlocked(true); setAdminPassword(""); }
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => setAuthChecked(true));
     let saved: string | null = null;
     try { saved = sessionStorage.getItem(ADMIN_PW_KEY); } catch {}
     if (saved === null) return;
@@ -1317,7 +1392,7 @@ export default function HomePage() {
       setShowCmd(false); setModal(null); setSuggest(null); setUserMenu(false); setPrompt(null);
       return;
     }
-    const t = e.target as HTMLElement;
+    const t = e.target instanceof Element ? e.target : document.body;
     if (e.altKey && !e.ctrlKey && !e.metaKey && /^Digit[1-9]$/.test(e.code)) {
       const f = topFolders[Number(e.code.slice(5)) - 1];
       if (f) { e.preventDefault(); jumpToFolder(f.id); }
@@ -1486,6 +1561,7 @@ export default function HomePage() {
   if (loading) {
     return (
       <div className="app">
+        {loadingLine && <p className="loading-line" role="status">{loadingLine}</p>}
         <div className="skeleton hero-skel" />
         <div className="skeleton bar-skel" />
         {[0, 1, 2].map((i) => (
@@ -1508,6 +1584,55 @@ export default function HomePage() {
       </div>
     );
   }
+
+  // homepage sections you can reorder (Customize → Layout)
+  const customOrder = look.order.join() !== DEFAULT_ORDER.join();
+  const logo = holidayLogo(new Date(), data?.settings?.siteBirthday);
+  const todayBlock = (
+    <>
+        {data && (
+          <TodayStrip
+            data={data}
+            allRefs={allRefs}
+            user={user}
+            community={community}
+            onOpenLink={openCard}
+            onOpenFolder={jumpToFolder}
+            onNeedLogin={() => { showToast("Log in to answer"); openLogin(); }}
+            onError={(m) => showToast(m)}
+          />
+        )}
+    </>
+  );
+  const pollsBlock = (
+    <>
+        <PollCards
+          polls={data?.polls || []}
+          user={user}
+          myAnon={community.info?.myPolls}
+          onVote={(pollId, option) => {
+            const me = user?.toLowerCase();
+            const poll = data?.polls?.find((p) => p.id === pollId);
+            if (me && poll) {
+              const res = applyPollVote(poll, me, option, community.info?.myPolls);
+              setData((d) => d && { ...d, polls: (d.polls || []).map((p) => (p.id === pollId ? res.poll : p)) });
+              if (poll.anonymous) community.patch({ myPolls: { ...(community.info?.myPolls || {}), [pollId]: res.mine } });
+            }
+            api("votePoll", { pollId, option }, { quiet: true }).then((ok) => { if (!ok) load(); });
+          }}
+          onNeedLogin={() => { showToast("Log in to vote"); openLogin(); }}
+        />
+    </>
+  );
+  const quickBlock = (
+            <QuickTabs
+              lists={{ recent: recentOpened, later: readLater, starred: favorites, following: followingAdds, top: topRated, visited: mostVisited, new: recent }}
+              tab={quickTab}
+              setTab={(t) => { setQuickTab(t); writeLocal("quickTab", t); }}
+              onOpen={trackAndOpen}
+              newTab={look.newTab}
+            />
+  );
 
   return (
     <div className={`shell ${showAdmin ? "with-admin" : ""}`}>
@@ -1536,8 +1661,8 @@ export default function HomePage() {
       )}
       <div className="topbar" ref={topbarRef}>
         <div className="topbar-inner">
-          <button className="brand" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} title="Back to top">
-            <span className="brand-mark">🔖</span>
+          <button className="brand" onClick={() => { if (!logoClick()) window.scrollTo({ top: 0, behavior: look.motion ? "smooth" : "auto" }); }} title={look.seasonal ? logo.label : "Back to top"}>
+            <span className="brand-mark">{look.seasonal ? logo.mark : "🔖"}</span>
             <span className="brand-name">{title}</span>
           </button>
           <SearchBox
@@ -1570,6 +1695,7 @@ export default function HomePage() {
                     <button className="phone-only" onClick={() => { setMoreMenu(false); setModal({ type: "leaderboard" }); }}><Icon name="trophy" /> Community</button>
                     <button onClick={() => { setMoreMenu(false); setShowCmd(true); }}><Icon name="search" /> Command menu <span className="kbd">Ctrl K</span></button>
                     <button onClick={() => { setMoreMenu(false); openTools(); }}><Icon name="tools" /> Tools <span className="kbd">O</span></button>
+                    <button onClick={() => { setMoreMenu(false); setHintMode(true); }}><Icon name="info" /> What&apos;s this? (explain buttons)</button>
                     <button onClick={() => { setMoreMenu(false); location.href = "/community"; }}><Icon name="users" /> Community page</button>
                     <button onClick={() => { setMoreMenu(false); setSuggest({}); }}><Icon name="bulb" /> Suggest a change</button>
                     {user && <button onClick={() => { setMoreMenu(false); setModal({ type: "profileEdit" }); }}><Icon name="user" /> Edit profile</button>}
@@ -1632,9 +1758,11 @@ export default function HomePage() {
         </div>
       </div>
 
+      {look.sideNav && <SideNav folders={topFolders} active={activeFolder} onJump={jumpToFolder} counts={(f) => f.links.length} />}
       <div className="app">
         <header className="hero">
-          <h1>{title}</h1>
+          <h1>{aprilOn ? Array.from(title).reverse().join("") : title}</h1>
+          {look.greeting && <p className="greeting">{greetingFor()}{user ? `, ${user}` : ""} 👋</p>}
           <p>{data?.settings?.subtitle || DEFAULT_SUBTITLE}</p>
           <div className="hero-stats">
             <OnlinePill count={presence.count} users={presence.users} onClick={() => setModal({ type: "leaderboard" })} />
@@ -1654,36 +1782,16 @@ export default function HomePage() {
             ><Icon name="x" /></button>
           </div>
         )}
-
-        {data && (
-          <TodayStrip
-            data={data}
-            allRefs={allRefs}
-            user={user}
-            community={community}
-            onOpenLink={openCard}
-            onOpenFolder={jumpToFolder}
-            onNeedLogin={() => { showToast("Log in to answer"); openLogin(); }}
-            onError={(m) => showToast(m)}
-          />
+        {aprilOn && (
+          <div className="announcement april">
+            <span>🤡 April Fools mode is on!</span>
+            <button className="link-btn" onClick={() => { setAprilOff(true); writeLocal("aprilOff", new Date().toDateString()); }}>Turn it off for me</button>
+          </div>
         )}
 
-        <PollCards
-          polls={data?.polls || []}
-          user={user}
-          myAnon={community.info?.myPolls}
-          onVote={(pollId, option) => {
-            const me = user?.toLowerCase();
-            const poll = data?.polls?.find((p) => p.id === pollId);
-            if (me && poll) {
-              const res = applyPollVote(poll, me, option, community.info?.myPolls);
-              setData((d) => d && { ...d, polls: (d.polls || []).map((p) => (p.id === pollId ? res.poll : p)) });
-              if (poll.anonymous) community.patch({ myPolls: { ...(community.info?.myPolls || {}), [pollId]: res.mine } });
-            }
-            api("votePoll", { pollId, option }, { quiet: true }).then((ok) => { if (!ok) load(); });
-          }}
-          onNeedLogin={() => { showToast("Log in to vote"); openLogin(); }}
-        />
+        {customOrder
+          ? look.order.map((sec) => <Fragment key={sec}>{sec === "today" ? todayBlock : sec === "polls" ? pollsBlock : !filtering && quickBlock}</Fragment>)
+          : <>{todayBlock}{pollsBlock}</>}
 
         <div className="actions-row">
           <div className="actions-left">
@@ -1836,19 +1944,11 @@ export default function HomePage() {
           )}
           </>
         ) : (
-          <>
-            <QuickTabs
-              lists={{ recent: recentOpened, later: readLater, starred: favorites, following: followingAdds, top: topRated, visited: mostVisited, new: recent }}
-              tab={quickTab}
-              setTab={(t) => { setQuickTab(t); writeLocal("quickTab", t); }}
-              onOpen={trackAndOpen}
-              newTab={look.newTab}
-            />
-          </>
+          !customOrder && quickBlock
         )}
 
         {!filtering && <ScrollMap deps={`${topFolders.map((f) => f.id).join()}|${Object.keys(collapsed).length}`} onJump={jumpToFolder} />}
-        <main className={`folders ${allRefs.length > 150 ? "big-list" : ""}`}>
+        <main id="main" tabIndex={-1} className={`folders ${allRefs.length > 150 ? "big-list" : ""}`}>
           {sortedFolders.length === 0 && (
             <div className="empty-state">
               <div className="empty-emoji">📂</div>
@@ -1959,7 +2059,10 @@ export default function HomePage() {
         <footer className="footer">
           {title} · Shared with the whole class ·{" "}
           <button className="link-btn" onClick={() => setModal({ type: "shortcuts" })}>Keyboard shortcuts (?)</button>
+          {" · "}<a className="link-btn" href="/changelog">What&apos;s changed</a>
+          <EasterEgg id="footer" />
         </footer>
+        <SitePet links={allRefs.length} />
       </div>
 
       {modal?.type === "link" && data && (
@@ -2125,13 +2228,20 @@ export default function HomePage() {
       {modal?.type === "shortcuts" && <ShortcutsModal onClose={() => setModal(null)} />}
       {modal?.type === "leaderboard" && <LeaderboardModal me={user} online={presence.users} onClose={() => setModal(null)} />}
       {modal?.type === "customize" && (
-        <CustomizeModal
+        <ThemeEditor
           look={look}
           onChange={changeLook}
           onClose={() => setModal(null)}
           startView={startView}
           onStartView={(v) => { setStartView(v); writeLocal("startView", v); }}
           folders={topFolders}
+          unlocked={unlocked}
+          themeOfMonth={data?.settings?.themeOfMonth}
+          admin={adminUnlocked && role !== "mod"}
+          onAdminTheme={(kind, code, name) => {
+            api("setSettings", { settings: kind === "default" ? { defaultTheme: code } : { themeOfMonth: { code, name } }, password: adminPassword });
+          }}
+          onProfileTheme={user ? (code) => { personal.saveProfile({ themeCode: code }); } : undefined}
         />
       )}
       {modal?.type === "whatsnew" && <WhatsNew activity={data?.activity || []} onClose={() => setModal(null)} />}
@@ -2434,6 +2544,8 @@ export default function HomePage() {
           ]}
         />
       )}
+      <Snow on={look.snow} />
+      <HintMode on={hintMode} onOff={endHints} />
       {scrolled && (
         <button className="to-top" onClick={() => window.scrollTo({ top: 0, behavior: look.motion ? "smooth" : "auto" })} title="Back to top">
           <Icon name="up" />

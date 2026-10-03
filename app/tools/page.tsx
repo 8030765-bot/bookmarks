@@ -6,6 +6,7 @@ import { Icon } from "../components/Icon";
 import { TOOLS, ToolView, popOut, toolById } from "../components/tools/ToolsDrawer";
 import { ToolsProvider } from "../components/tools/shared";
 import { useTimerAlarm } from "../components/tools/timerAlarm";
+import { EasterEgg } from "../components/Fun";
 
 export default function ToolsPage() {
   return <Suspense fallback={<div className="app"><div className="skeleton skel-row" /></div>}><ToolsInner /></Suspense>;
@@ -42,6 +43,7 @@ function ToolsInner() {
       <header className="hero">
         <h1>Tools</h1>
         <p>Timers, notes, flashcards, a calculator and more. Your notes, to-dos, habits and flashcards are private.</p>
+        <EasterEgg id="tools" />
       </header>
       <ToolsProvider user={user}>
         {tool ? (

@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import { Icon } from "../../components/Icon";
 import Markdown from "../../components/Markdown";
 import { timeAgo } from "../../components/ui";
+import { speak } from "../../components/Fun";
 
 interface WikiPage { slug: string; title: string; body: string; updatedBy: string; updatedAt: string; locked?: boolean; history: { body: string; by: string; at: string }[] }
 
@@ -95,6 +96,7 @@ function WikiInner() {
         <article className="wiki-article">
           <h1>{page.locked && "🔒 "}{page.title}</h1>
           <div className="muted-inline">Last edited by {page.updatedBy} {timeAgo(page.updatedAt)}{page.history.length > 0 && <> · <button className="link-btn" onClick={() => setShowHistory((v) => !v)}>{page.history.length} earlier version{page.history.length === 1 ? "" : "s"}</button></>}</div>
+          <button className="link-btn" onClick={() => speak(`${page.title}. ${page.body.replace(/[#*_`>\[\]()-]/g, " ")}`)}>🔊 Read aloud</button>
           <Markdown text={page.body || "*This page is empty.*"} className="wiki-body" />
           {showHistory && (
             <div className="wiki-history">
