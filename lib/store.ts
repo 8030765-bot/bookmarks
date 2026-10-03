@@ -1,5 +1,5 @@
 import { Redis } from "@upstash/redis";
-import { BookmarksData, ActivityEntry } from "./types";
+import { BookmarksData, ActivityEntry, Folder } from "./types";
 import { defaultData } from "./defaultData";
 import { v4 as uuid } from "uuid";
 import { normalizeUrl } from "./url";
@@ -119,7 +119,10 @@ export async function handleAction(
         : typeof body.tags === "string"
           ? String(body.tags).split(",").map((t) => t.trim()).filter(Boolean)
           : [];
+      const user = typeof body.__user === "string" ? body.__user : undefined;
+      const addedBy = typeof body.suggestedBy === "string" && body.suggestedBy ? body.suggestedBy : user;
       folder.links.push({
+        addedBy,
         id: uuid(),
         name,
         url,
@@ -240,6 +243,82 @@ export async function handleAction(
       if (!link) return data;
       link.clicks = (link.clicks || 0) + 1;
       await saveBookmarks(data, { snapshot: false });
+      return data;
+    }
+    case "toggleLike": {
+      const user = typeof body.__user === "string" ? body.__user.toLowerCase() : "";
+      if (!user) throw new Error("Log in to like websites");
+      const { link } = findLink(data, String(body.folderId || ""), String(body.linkId || ""));
+      const likes = new Set(link.likes || []);
+      if (likes.has(user)) likes.delete(user);
+      else likes.add(user);
+      link.likes = Array.from(likes);
+      await saveBookmarks(data, { snapshot: false });
+      return data;
+    }
+    case "createPoll": {
+      requireAdmin(password);
+      const question = String(body.question || "").trim().slice(0, 200);
+      const options = (Array.isArray(body.options) ? body.options : [])
+        .map((o) => String(o).trim().slice(0, 80))
+        .filter(Boolean)
+        .slice(0, 6);
+      if (!question || options.length < 2) throw new Error("A poll needs a question and at least 2 options");
+      data.polls = [{ id: uuid(), question, options, votes: {}, createdAt: new Date().toISOString() }, ...(data.polls || [])].slice(0, 20);
+      pushActivity(data, "add", `New poll: “${question}”`);
+      await saveBookmarks(data);
+      return data;
+    }
+    case "votePoll": {
+      const user = typeof body.__user === "string" ? body.__user.toLowerCase() : "";
+      if (!user) throw new Error("Log in to vote");
+      const poll = (data.polls || []).find((p) => p.id === String(body.pollId || ""));
+      if (!poll) throw new Error("Poll not found");
+      if (poll.closed) throw new Error("This poll is closed");
+      const choice = Number(body.option);
+      if (!Number.isInteger(choice) || choice < 0 || choice >= poll.options.length) throw new Error("Invalid option");
+      if (poll.votes[user] === choice) delete poll.votes[user]; // tap again to take your vote back
+      else poll.votes[user] = choice;
+      await saveBookmarks(data, { snapshot: false });
+      return data;
+    }
+    case "closePoll":
+    case "deletePoll": {
+      requireAdmin(password);
+      const id = String(body.pollId || "");
+      if (action === "deletePoll") data.polls = (data.polls || []).filter((p) => p.id !== id);
+      else {
+        const poll = (data.polls || []).find((p) => p.id === id);
+        if (!poll) throw new Error("Poll not found");
+        poll.closed = !poll.closed;
+      }
+      await saveBookmarks(data);
+      return data;
+    }
+    case "addFolders": {
+      // merge an imported browser-bookmarks file in as new folders
+      requireAdmin(password);
+      const incoming = Array.isArray(body.folders) ? (body.folders as Record<string, unknown>[]) : [];
+      let added = 0;
+      for (const f of incoming.slice(0, 50)) {
+        const name = String(f.name || "Imported").trim().slice(0, 60) || "Imported";
+        const links: Folder["links"] = [];
+        for (const l of (Array.isArray(f.links) ? (f.links as Record<string, unknown>[]) : []).slice(0, 500)) {
+          try {
+            const url = normalizeUrl(String(l.url || ""));
+            if (!url) continue;
+            links.push({ id: uuid(), name: String(l.name || url).trim().slice(0, 100) || url, url, tags: [], clicks: 0, createdAt: new Date().toISOString() });
+          } catch {
+            // skip javascript:, chrome:// and other non-web bookmarks
+          }
+        }
+        if (!links.length) continue;
+        data.folders.push({ id: uuid(), name, emoji: "📥", links, createdAt: new Date().toISOString() });
+        added += links.length;
+      }
+      if (!added) throw new Error("No web links found in that file");
+      pushActivity(data, "import", `Imported ${added} websites`);
+      await saveBookmarks(data);
       return data;
     }
     case "importData": {

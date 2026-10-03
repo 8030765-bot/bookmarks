@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { deleteMessage, getMessages, postMessage } from "@/lib/chat";
+import { deleteMessage, getMessages, postMessage, toggleReaction } from "@/lib/chat";
 import { getBookmarks, requireAdmin } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +29,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Chat is turned off" }, { status: 403 });
     }
     const body = await req.json();
-    await postMessage(user, String(body.text || ""));
+    if (body.action === "react") {
+      await toggleReaction(user, String(body.id || ""), String(body.emoji || ""));
+    } else {
+      await postMessage(user, String(body.text || ""), body.replyTo ? String(body.replyTo) : undefined);
+    }
     return NextResponse.json({ messages: await getMessages() });
   } catch (e) {
     return errorResponse(e);

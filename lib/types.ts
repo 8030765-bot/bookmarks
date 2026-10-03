@@ -10,6 +10,10 @@ export interface Link {
   createdAt?: string;
   updatedAt?: string;
   color?: string;
+  /** username who added it (or who suggested it) */
+  addedBy?: string;
+  /** lowercase usernames who liked it */
+  likes?: string[];
 }
 
 export interface Folder {
@@ -35,6 +39,9 @@ export interface ChatMessage {
   user: string;
   text: string;
   at: string;
+  replyTo?: { id: string; user: string; text: string };
+  /** emoji -> lowercase usernames (merged in when listing) */
+  reactions?: Record<string, string[]>;
 }
 
 export type SuggestionKind = "addLink" | "editLink" | "removeLink" | "other";
@@ -69,6 +76,16 @@ export interface SiteSettings {
   sortBy?: "name" | "newest" | "clicks" | "manual";
 }
 
+export interface Poll {
+  id: string;
+  question: string;
+  options: string[];
+  /** lowercase username -> option index */
+  votes: Record<string, number>;
+  createdAt: string;
+  closed?: boolean;
+}
+
 export interface BookmarksData {
   /** bumped on every save so clients can cheaply check for changes */
   rev?: number;
@@ -76,4 +93,16 @@ export interface BookmarksData {
   folders: Folder[];
   activity?: ActivityEntry[];
   settings?: SiteSettings;
+  polls?: Poll[];
+}
+
+export interface Contributor {
+  username: string;
+  joined?: string;
+  added: number;
+  likesReceived: number;
+  likesGiven: number;
+  suggestionsApproved: number;
+  messages: number;
+  score: number;
 }

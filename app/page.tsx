@@ -10,13 +10,16 @@ import { LinkCardActions } from "./components/LinkCard";
 import LinkModal, { LinkModalMode, LinkValues } from "./components/LinkModal";
 import { ConfirmModal, FolderModal, FolderValues, ShortcutsModal } from "./components/Modals";
 import { LinkRef, faviconUrl, isNew, readLocal, safeHref, writeLocal } from "./components/ui";
+import {
+  CustomizeModal, DEFAULT_LOOK, LeaderboardModal, Look, OnlinePill, Palette, PollCards, SpinWheel, WhatsNew, applyLook, usePresence,
+} from "./components/Community";
 
 const SYNC_MS = 3000;
 const ADMIN_PW_KEY = "adminPw";
 const DEFAULT_TITLE = "Made by Theo 7A";
 const DEFAULT_SUBTITLE = "Shared school bookmarks — everyone sees the same list";
 
-type Sort = "manual" | "name" | "newest" | "clicks";
+type Sort = "manual" | "name" | "newest" | "clicks" | "likes";
 type Modal =
   | { type: "link"; mode: LinkModalMode }
   | { type: "folder"; folder?: Folder }
@@ -24,6 +27,10 @@ type Modal =
   | { type: "adminLogin" }
   | { type: "login" }
   | { type: "shortcuts" }
+  | { type: "leaderboard" }
+  | { type: "customize" }
+  | { type: "spin" }
+  | { type: "whatsnew" }
   | null;
 interface Toast {
   msg: string;
@@ -39,7 +46,13 @@ function ensureData(raw: unknown): BookmarksData {
     folders: d.folders.map((f) => ({ ...f, links: Array.isArray(f.links) ? f.links : [] })),
     activity: Array.isArray(d.activity) ? d.activity : [],
     settings: d.settings || {},
+    polls: Array.isArray(d.polls) ? d.polls : [],
   };
+}
+
+/** fields of `next` that differ from the look it was based on */
+function diffLook(base: Look, next: Look): Partial<Look> {
+  return Object.fromEntries(Object.entries(next).filter(([k, v]) => base[k as keyof Look] !== v)) as Partial<Look>;
 }
 
 function QuickRow({ title, icon, items, onOpen, showClicks }: {
@@ -79,7 +92,9 @@ export default function HomePage() {
   const [search, setSearch] = useState("");
   const [tagFilter, setTagFilter] = useState("");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [look, setLook] = useState<Look>(DEFAULT_LOOK);
+  const [seenActivity, setSeenActivity] = useState<string | null>("");
+  const lookRef = useRef<Look>(DEFAULT_LOOK);
   const [view, setView] = useState<"grid" | "list">("grid");
   const [sort, setSort] = useState<Sort>("manual");
   const [showCmd, setShowCmd] = useState(false);
@@ -107,14 +122,27 @@ export default function HomePage() {
 
   // ---------- preferences (per browser) ----------
   useEffect(() => {
-    setTheme(readLocal("theme", "dark"));
+    // older versions stored just "theme"
+    const legacy = readLocal<string | null>("theme", null);
+    setLook({ ...DEFAULT_LOOK, ...(legacy === "light" ? { palette: "light" as Palette } : {}), ...readLocal<Partial<Look>>("look", {}) });
+    setSeenActivity(readLocal<string | null>("seenActivity", null));
     setView(readLocal("view", "grid"));
     setSort(readLocal("sort", "manual"));
     setCollapsed(readLocal("collapsed", {}));
   }, []);
-  useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
+  useEffect(() => { applyLook(look); lookRef.current = look; }, [look]);
   const savePref = <T,>(key: string, set: (v: T) => void) => (v: T) => { set(v); writeLocal(key, v); };
-  const changeTheme = savePref("theme", setTheme);
+  // merge into the latest look so quick successive clicks don't overwrite each other
+  const changeLook = (next: Look) => setLook((prev) => {
+    const merged = { ...prev, ...diffLook(lookRef.current, next) };
+    writeLocal("look", merged);
+    return merged;
+  });
+  const theme = look.palette === "light" ? "light" : "dark";
+  const changeTheme = (t: "dark" | "light") => {
+    if (t === "light") { writeLocal("lastDark", look.palette); changeLook({ ...look, palette: "light" }); }
+    else changeLook({ ...look, palette: readLocal<Palette>("lastDark", "black") === "light" ? "black" : readLocal<Palette>("lastDark", "black") });
+  };
   const changeView = savePref("view", setView);
   const changeSort = savePref("sort", setSort);
   function toggleCollapsed(id: string, value?: boolean) {
@@ -161,6 +189,17 @@ export default function HomePage() {
     document.addEventListener("visibilitychange", sync);
     return () => { stopped = true; clearInterval(id); document.removeEventListener("visibilitychange", sync); };
   }, [applyIfNewer]);
+
+  const presence = usePresence(user);
+
+  // #folder-<id> deep links (from "copy link to folder")
+  const handledHash = useRef(false);
+  useEffect(() => {
+    if (!data || handledHash.current) return;
+    handledHash.current = true;
+    const m = location.hash.match(/^#folder-(.+)$/);
+    if (m && data.folders.some((f) => f.id === m[1])) setTimeout(() => jumpToFolder(m[1]), 150);
+  }, [data]);
 
   // ---------- account + admin session ----------
   useEffect(() => {
@@ -243,6 +282,9 @@ export default function HomePage() {
   }, [allRefs]);
   const favorites = allRefs.filter((r) => r.link.favorite);
   const mostVisited = [...allRefs].filter((r) => (r.link.clicks || 0) > 0).sort((a, b) => (b.link.clicks || 0) - (a.link.clicks || 0)).slice(0, 8);
+  const topRated = allRefs.filter((r) => (r.link.likes?.length || 0) > 0).sort((a, b) => (b.link.likes?.length || 0) - (a.link.likes?.length || 0)).slice(0, 8);
+  const latestActivity = data?.activity?.[0]?.id ?? null;
+  const hasNews = !!latestActivity && seenActivity !== "" && seenActivity !== latestActivity;
   const recent = allRefs.filter((r) => isNew(r.link)).sort((a, b) => (b.link.createdAt || "").localeCompare(a.link.createdAt || "")).slice(0, 8);
   const totalClicks = allRefs.reduce((n, r) => n + (r.link.clicks || 0), 0);
   const sortedFolders = useMemo(
@@ -262,6 +304,7 @@ export default function HomePage() {
     if (sort === "name") list = [...list].sort((a, b) => a.name.localeCompare(b.name));
     if (sort === "newest") list = [...list].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
     if (sort === "clicks") list = [...list].sort((a, b) => (b.clicks || 0) - (a.clicks || 0));
+    if (sort === "likes") list = [...list].sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
     return list;
   }
   const folderViews = sortedFolders.map((f) => ({ folder: f, links: visibleLinks(f) }));
@@ -352,6 +395,10 @@ export default function HomePage() {
       }
     },
     suggest: (f, l) => setSuggest({ kind: "editLink", folderId: f.id, linkId: l.id }),
+    like: (f, l) => {
+      if (!user) { showToast("Log in to like websites"); openLogin(); return; }
+      api("toggleLike", { folderId: f.id, linkId: l.id });
+    },
     filterTag: (t) => { setTagFilter(t === tagFilter ? "" : t); window.scrollTo({ top: 0, behavior: "smooth" }); },
   };
 
@@ -371,6 +418,15 @@ export default function HomePage() {
       return;
     }
     await api("moveFolderTo", { folderId, beforeFolderId, password: adminPassword });
+  }
+
+  function openWhatsNew() {
+    setModal({ type: "whatsnew" });
+    if (latestActivity) { setSeenActivity(latestActivity); writeLocal("seenActivity", latestActivity); }
+  }
+  function shareFolder(f: Folder) {
+    const url = `${location.origin}${location.pathname}#folder-${f.id}`;
+    navigator.clipboard.writeText(url).then(() => showToast(`Link to ${f.name} copied`)).catch(() => showToast(url));
   }
 
   // ---------- admin + auth ----------
@@ -456,6 +512,10 @@ export default function HomePage() {
       g: () => changeView(view === "grid" ? "list" : "grid"),
       t: () => changeTheme(theme === "dark" ? "light" : "dark"),
       "?": () => setModal({ type: "shortcuts" }),
+      s: () => setModal({ type: "spin" }),
+      l: () => setModal({ type: "leaderboard" }),
+      p: () => setModal({ type: "customize" }),
+      w: openWhatsNew,
     };
     if (run[k]) { e.preventDefault(); run[k](); }
   };
@@ -474,6 +534,10 @@ export default function HomePage() {
       cmd("add", addingLocked ? "Suggest a website" : "Add website", "plus", () => openAdd(), "N"),
       cmd("folder", "New folder", "folder", openNewFolder, "F"),
       cmd("random", "Random website", "shuffle", randomBookmark, "R"),
+      cmd("spin", "Spin the wheel", "shuffle", () => setModal({ type: "spin" }), "S"),
+      cmd("community", "Community & leaderboard", "trophy", () => setModal({ type: "leaderboard" }), "L"),
+      cmd("customize", "Customize look", "palette", () => setModal({ type: "customize" }), "P"),
+      cmd("news", "What's new", "bell", openWhatsNew, "W"),
       cmd("suggest", "Suggest a change", "bulb", () => setSuggest({})),
       cmd("chat", chatOpen ? "Close chat" : "Open chat", "chat", () => setChatOpen((o) => !o), "C"),
       cmd("theme", theme === "dark" ? "Light mode" : "Dark mode", theme === "dark" ? "sun" : "moon", () => changeTheme(theme === "dark" ? "light" : "dark"), "T"),
@@ -565,7 +629,10 @@ export default function HomePage() {
           </label>
           <div className="top-actions">
             <button className="icon-btn" title="Command menu (Ctrl K)" onClick={() => setShowCmd(true)}><Icon name="keyboard" /></button>
-            <button className="icon-btn" title="Random website (R)" onClick={randomBookmark}><Icon name="shuffle" /></button>
+            <button className="icon-btn" title="Spin the wheel (S)" onClick={() => setModal({ type: "spin" })}><Icon name="shuffle" /></button>
+            <button className="icon-btn" title="Community (L)" onClick={() => setModal({ type: "leaderboard" })}><Icon name="trophy" /></button>
+            <button className={`icon-btn ${hasNews ? "dot" : ""}`} title="What's new (W)" onClick={openWhatsNew}><Icon name="bell" /></button>
+            <button className="icon-btn" title="Customize (P)" onClick={() => setModal({ type: "customize" })}><Icon name="palette" /></button>
             <button className="icon-btn" title="Suggest a change" onClick={() => setSuggest({})}><Icon name="bulb" /></button>
             <button className="icon-btn" title="Toggle theme (T)" onClick={() => changeTheme(theme === "dark" ? "light" : "dark")}>
               <Icon name={theme === "dark" ? "sun" : "moon"} />
@@ -597,12 +664,12 @@ export default function HomePage() {
         </div>
       </div>
 
-      <div className="app" data-theme={theme}>
+      <div className="app">
         <header className="hero">
           <h1>{title}</h1>
           <p>{data?.settings?.subtitle || DEFAULT_SUBTITLE}</p>
           <div className="hero-stats">
-            <span className="live"><span className="live-dot" /> Live</span>
+            <OnlinePill count={presence.count} users={presence.users} onClick={() => setModal({ type: "leaderboard" })} />
             <span><strong>{allRefs.length}</strong> websites</span>
             <span><strong>{data?.folders.length || 0}</strong> folders</span>
             <span><strong>{totalClicks}</strong> visits</span>
@@ -612,6 +679,13 @@ export default function HomePage() {
         {data?.settings?.announcement && (
           <div className="announcement"><Icon name="bulb" /> <span>{data.settings.announcement}</span></div>
         )}
+
+        <PollCards
+          polls={data?.polls || []}
+          user={user}
+          onVote={(pollId, option) => { api("votePoll", { pollId, option }); }}
+          onNeedLogin={() => { showToast("Log in to vote"); openLogin(); }}
+        />
 
         <div className="actions-row">
           <div className="actions-left">
@@ -628,6 +702,7 @@ export default function HomePage() {
               <option value="name">Name A–Z</option>
               <option value="newest">Newest first</option>
               <option value="clicks">Most visited</option>
+              <option value="likes">Most liked</option>
             </select>
             <div className="seg-toggle" role="group" aria-label="View">
               <button className={view === "grid" ? "on" : ""} onClick={() => changeView("grid")} title="Grid view"><Icon name="grid" /></button>
@@ -667,6 +742,7 @@ export default function HomePage() {
         ) : (
           <>
             <QuickRow title="Starred" icon="star" items={favorites} onOpen={trackAndOpen} />
+            <QuickRow title="Top rated" icon="heart" items={topRated} onOpen={trackAndOpen} />
             <QuickRow title="Most visited" icon="chart" items={mostVisited} onOpen={trackAndOpen} showClicks />
             <QuickRow title="Recently added" icon="clock" items={recent} onOpen={trackAndOpen} />
           </>
@@ -701,6 +777,7 @@ export default function HomePage() {
                 query={search}
                 view={view}
                 admin={adminUnlocked}
+                me={user}
                 canAdd={!addingLocked}
                 dragEnabled={dragEnabled}
                 drag={drag}
@@ -716,6 +793,7 @@ export default function HomePage() {
                 }}
                 onEditFolder={() => setModal({ type: "folder", folder })}
                 onDeleteFolder={() => setModal({ type: "deleteFolder", folder })}
+                onShareFolder={() => shareFolder(folder)}
                 onMoveLink={moveLink}
                 onMoveFolder={moveFolder}
               />
@@ -761,6 +839,12 @@ export default function HomePage() {
         />
       )}
       {modal?.type === "shortcuts" && <ShortcutsModal onClose={() => setModal(null)} />}
+      {modal?.type === "leaderboard" && <LeaderboardModal me={user} online={presence.users} onClose={() => setModal(null)} />}
+      {modal?.type === "customize" && <CustomizeModal look={look} onChange={changeLook} onClose={() => setModal(null)} />}
+      {modal?.type === "whatsnew" && <WhatsNew activity={data?.activity || []} onClose={() => setModal(null)} />}
+      {modal?.type === "spin" && (
+        <SpinWheel refs={allRefs} folders={sortedFolders} onOpen={(f, l) => trackAndOpen(f, l, true)} onClose={() => setModal(null)} />
+      )}
       {modal?.type === "adminLogin" && (
         <div className="modal-overlay" onClick={() => !submitting && setModal(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -830,6 +914,7 @@ export default function HomePage() {
         setOpen={setChatOpen}
         chatEnabled={data?.settings?.chatEnabled !== false}
         user={user}
+        online={presence.users}
         adminPassword={adminUnlocked ? adminPassword : null}
         onNeedLogin={() => openLogin()}
         showToast={showToast}

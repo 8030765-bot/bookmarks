@@ -13,6 +13,7 @@ export default function FolderSection({
   query,
   view,
   admin,
+  me,
   canAdd,
   dragEnabled,
   drag,
@@ -25,6 +26,7 @@ export default function FolderSection({
   onOpenAll,
   onEditFolder,
   onDeleteFolder,
+  onShareFolder,
   onMoveLink,
   onMoveFolder,
 }: {
@@ -35,6 +37,7 @@ export default function FolderSection({
   query: string;
   view: "grid" | "list";
   admin: boolean;
+  me: string | null;
   canAdd: boolean;
   dragEnabled: boolean;
   drag: Drag;
@@ -47,6 +50,7 @@ export default function FolderSection({
   onOpenAll: () => void;
   onEditFolder: () => void;
   onDeleteFolder: () => void;
+  onShareFolder: () => void;
   onMoveLink: (from: { folderId: string; linkId: string }, toFolderId: string, beforeLinkId: string | null) => void;
   onMoveFolder: (folderId: string, beforeFolderId: string) => void;
 }) {
@@ -108,6 +112,7 @@ export default function FolderSection({
           {admin && dragEnabled && <span className="drag-handle" title="Drag to reorder folders"><Icon name="grip" /></span>}
           {canAdd && <button className="btn-icon" title={`Add a website to ${folder.name}`} onClick={onAddHere}><Icon name="plus" /></button>}
           {links.length > 0 && <button className="btn-icon" title="Open all in new tabs" onClick={onOpenAll}><Icon name="external" /></button>}
+          <button className="btn-icon" title="Copy a link to this folder" onClick={onShareFolder}><Icon name="share" /></button>
           {admin && <button className="btn-icon" title="Edit folder" onClick={onEditFolder}><Icon name="edit" /></button>}
           {admin && <button className="btn-icon danger" title="Delete folder" onClick={onDeleteFolder}><Icon name="trash" /></button>}
         </div>
@@ -133,6 +138,7 @@ export default function FolderSection({
                 link={link}
                 query={query}
                 admin={admin}
+                me={me}
                 actions={actions}
                 draggable={admin && dragEnabled}
                 dropBefore={dropTarget === `link:${link.id}`}

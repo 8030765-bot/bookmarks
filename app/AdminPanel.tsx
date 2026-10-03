@@ -3,11 +3,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BookmarksData, ChatMessage, Folder, Link, Suggestion } from "@/lib/types";
 import { Icon } from "./CommandPalette";
 import { suggestionSummary } from "./SuggestModal";
+import { parseBookmarksHtml } from "./components/Community";
 
-type Tab = "overview" | "suggestions" | "links" | "folders" | "chat" | "users" | "site" | "data" | "activity";
+type Tab = "overview" | "suggestions" | "polls" | "links" | "folders" | "chat" | "users" | "site" | "data" | "activity";
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "overview", label: "Overview", icon: "chart" },
   { id: "suggestions", label: "Suggestions", icon: "bulb" },
+  { id: "polls", label: "Polls", icon: "poll" },
   { id: "links", label: "Links", icon: "link" },
   { id: "folders", label: "Folders", icon: "folder" },
   { id: "chat", label: "Chat", icon: "chat" },
@@ -140,6 +142,7 @@ export default function AdminPanel({
         {tab === "suggestions" && (
           <SuggestionsTab data={data} info={info} admin={admin} setInfo={setInfo} applyData={applyData} showToast={showToast} />
         )}
+        {tab === "polls" && <PollsTab data={data} run={run} submitting={submitting} showToast={showToast} />}
         {tab === "links" && <LinksTab data={data} rows={allLinks} run={run} submitting={submitting} showToast={showToast} />}
         {tab === "folders" && <FoldersTab data={data} run={run} submitting={submitting} showToast={showToast} />}
         {tab === "chat" && (
@@ -333,6 +336,81 @@ function SuggestionsTab({
             {x.status !== "pending" && (
               <button className="btn-icon sm sugg-del" title="Remove from list" onClick={() => act("deleteSuggestion", x)}><Icon name="x" /></button>
             )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+/* ---------- Polls ---------- */
+function PollsTab({ data, run, submitting, showToast }: { data: BookmarksData; run: Api; submitting: boolean; showToast: (m: string) => void }) {
+  const [question, setQuestion] = useState("");
+  const [options, setOptions] = useState(["", ""]);
+  const polls = data.polls || [];
+  const filled = options.map((o) => o.trim()).filter(Boolean);
+  return (
+    <>
+      <form
+        className="poll-form"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (await run("createPoll", { question, options: filled })) {
+            setQuestion(""); setOptions(["", ""]); showToast("Poll posted for everyone");
+          }
+        }}
+      >
+        <div className="form-group">
+          <label>Question</label>
+          <input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="e.g. Which game should we add next?" maxLength={200} />
+        </div>
+        <label className="sub-label">Options</label>
+        {options.map((o, i) => (
+          <div key={i} className="poll-option-input">
+            <input
+              value={o}
+              onChange={(e) => setOptions(options.map((x, j) => (j === i ? e.target.value : x)))}
+              placeholder={`Option ${i + 1}`}
+              maxLength={80}
+            />
+            {options.length > 2 && (
+              <button type="button" className="btn-icon sm" onClick={() => setOptions(options.filter((_, j) => j !== i))} title="Remove option"><Icon name="x" /></button>
+            )}
+          </div>
+        ))}
+        <div className="admin-toolbar end">
+          {options.length < 6 && (
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setOptions([...options, ""])}><Icon name="plus" /> Option</button>
+          )}
+          <button className="btn btn-primary btn-sm" disabled={submitting || !question.trim() || filled.length < 2}>Post poll</button>
+        </div>
+      </form>
+      <h3 className="admin-h">All polls</h3>
+      {polls.length === 0 && <div className="admin-empty">No polls yet.</div>}
+      {polls.map((p) => {
+        const total = Object.keys(p.votes).length;
+        return (
+          <div key={p.id} className={`sugg-card ${p.closed ? "approved" : "pending"}`}>
+            <div className="sugg-top">
+              <strong>{p.question}</strong>
+              <span className="row-sub inline">{total} votes · {timeAgo(p.createdAt)}</span>
+            </div>
+            <div className="sugg-body">
+              {p.options.map((o, i) => {
+                const n = Object.values(p.votes).filter((v) => v === i).length;
+                return (
+                  <div key={i} className="bar-row">
+                    <span className="bar-label">{o}</span>
+                    <span className="bar"><span style={{ width: `${total ? (n / total) * 100 : 0}%` }} /></span>
+                    <span className="bar-num">{n}</span>
+                  </div>
+                );
+              })}
+              <div className="sugg-actions">
+                <button className="btn btn-secondary btn-sm" onClick={() => run("closePoll", { pollId: p.id })}>{p.closed ? "Reopen" : "Close voting"}</button>
+                <button className="btn btn-danger btn-sm" onClick={async () => { if (confirm("Delete this poll?")) await run("deletePoll", { pollId: p.id }); }}>Delete</button>
+              </div>
+            </div>
           </div>
         );
       })}
@@ -823,6 +901,24 @@ function DataTab({ data, run, showToast }: { data: BookmarksData; run: Api; show
         <label className="action-card">
           <Icon name="upload" /><span>Import JSON</span><em>Replaces everything</em>
           <input type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) importFile(f); e.target.value = ""; }} />
+        </label>
+        <label className="action-card">
+          <Icon name="upload" /><span>Import from browser</span><em>Chrome/Edge bookmarks .html — adds folders</em>
+          <input
+            type="file"
+            accept=".html,.htm,text/html"
+            hidden
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (!f) return;
+              const folders = parseBookmarksHtml(await f.text());
+              const count = folders.reduce((n, x) => n + x.links.length, 0);
+              if (!count) { showToast("No web links found in that file"); return; }
+              if (!confirm(`Add ${count} websites in ${folders.length} new folder(s)? Existing bookmarks stay as they are.`)) return;
+              if (await run("addFolders", { folders })) showToast(`Imported ${count} websites`);
+            }}
+          />
         </label>
         <button className="action-card" onClick={async () => { if (await run("undo")) showToast("Undone — press again to redo"); }}>
           <Icon name="undo" /><span>Undo last change</span><em>Press again to redo</em>

@@ -24,6 +24,7 @@ export interface LinkCardActions {
   edit: (folder: Folder, link: Link) => void;
   remove: (folder: Folder, link: Link) => void;
   suggest: (folder: Folder, link: Link) => void;
+  like: (folder: Folder, link: Link) => void;
   filterTag: (tag: string) => void;
 }
 
@@ -32,6 +33,7 @@ export default function LinkCard({
   link,
   query,
   admin,
+  me,
   actions,
   draggable,
   dropBefore,
@@ -44,6 +46,8 @@ export default function LinkCard({
   link: Link;
   query: string;
   admin: boolean;
+  /** logged-in username, for "you liked this" */
+  me: string | null;
   actions: LinkCardActions;
   draggable: boolean;
   dropBefore: boolean;
@@ -53,6 +57,8 @@ export default function LinkCard({
   onDrop: (e: React.DragEvent) => void;
 }) {
   const href = safeHref(link.url);
+  const likes = link.likes?.length || 0;
+  const liked = !!me && !!link.likes?.includes(me.toLowerCase());
   return (
     <div
       className={`card ${link.favorite ? "fav" : ""} ${dropBefore ? "drop-before" : ""}`}
@@ -96,7 +102,7 @@ export default function LinkCard({
           <span className="card-host"><Highlight text={hostOf(link.url)} query={query} /></span>
         </span>
       </a>
-      {(link.tags?.length || link.clicks || link.notes) ? (
+      {(link.tags?.length || link.clicks || link.notes || link.addedBy) ? (
         <div className="card-meta">
           {link.tags?.map((t) => (
             <button key={t} className="tag" onClick={() => actions.filterTag(t)} title={`Show everything tagged ${t}`}>
@@ -105,8 +111,18 @@ export default function LinkCard({
           ))}
           {link.notes && <span className="meta-note" title={link.notes}>📝 note</span>}
           {(link.clicks || 0) > 0 && <span className="meta-clicks">{link.clicks} visit{link.clicks === 1 ? "" : "s"}</span>}
+          {link.addedBy && <span className="meta-by">by {link.addedBy}</span>}
         </div>
       ) : null}
+      <button
+        className={`like-btn ${liked ? "on" : ""} ${likes ? "has" : ""}`}
+        onClick={() => actions.like(folder, link)}
+        title={liked ? "Unlike" : "Like"}
+        aria-pressed={liked}
+      >
+        <Icon name="heart" />
+        {likes > 0 && <span>{likes}</span>}
+      </button>
       <div className="card-actions">
         <button className={`ca ${link.favorite ? "on" : ""}`} title={link.favorite ? "Unstar" : "Star"} onClick={() => actions.star(folder, link)}>
           <Icon name="star" />
