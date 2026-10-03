@@ -23,6 +23,11 @@ export async function POST(req: NextRequest) {
     if (action === "claimOwner") {
       if (!ctx.user) throw new Error("Log in to your account first");
       if (ctx.ownerExists) throw new Error("This site already has an owner");
+      // if OWNER_USERNAME is set, only that account may claim ownership (no race)
+      const reserved = (process.env.OWNER_USERNAME || "").trim().toLowerCase();
+      if (reserved && ctx.user.toLowerCase() !== reserved) {
+        throw new Error(`Only the account "${process.env.OWNER_USERNAME}" can become the owner`);
+      }
       checkPassword(password);
       await setRole(ctx.user, "owner");
       await audit({ ...ctx, role: "owner" }, "claimOwner", `${ctx.user} became the owner`);
