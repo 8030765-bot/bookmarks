@@ -47,7 +47,8 @@ ok("…and the same id can then be retried", r.json.folders?.find((f) => f.id ==
 
 // rate limit on visits
 let limited = false;
-for (let i = 0; i < 130 && !limited; i++) {
+// 250 clicks: even split across two one-minute windows, one of them goes over 120
+for (let i = 0; i < 250 && !limited; i++) {
   const rr = await bm("clicker", { action: "trackClick", folderId: fid, linkId: link.id });
   if (rr.status === 429) limited = true;
 }

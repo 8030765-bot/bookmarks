@@ -8,13 +8,35 @@ import { REV_KEYS, bumpRev, userRevKey } from "./revs";
 export interface Profile {
   avatar?: string; // emoji
   color?: string;
+  /** short write-up, simple formatting allowed */
   bio?: string;
+  /** name shown instead of the username (the username still identifies you) */
+  displayName?: string;
+  /** "studying 📚" */
+  status?: string;
+  statusEmoji?: string;
+  /** status clears itself after this (ISO) */
+  statusUntil?: string;
+  /** banner style on your profile */
+  banner?: string;
+  /** ring around your avatar */
+  border?: string;
+  /** topics you're into (tags) */
+  into?: string[];
+  /** up to 3 links you're showing off on your profile */
+  showcase?: string[];
+  /** who can see your profile */
+  visibility?: "everyone" | "members" | "private";
+  /** don't show when you're online or last active */
+  hideOnline?: boolean;
 }
 export interface PrivateLink {
   id: string;
   name: string;
   url: string;
   createdAt: string;
+  /** which of your private folders it's in ("" = the main list) */
+  folder?: string;
 }
 export interface Notification {
   id: string;
@@ -60,9 +82,13 @@ export interface UserData {
   /** your own arrangement of the folders (ids, top first) */
   folderOrder: string[];
   views: SavedView[];
+  /** your look and layout, so they follow you to other devices */
+  settings: Record<string, unknown>;
+  /** people whose chat messages you don't want to see (lowercase) */
+  blocked: string[];
 }
 
-const EMPTY: UserData = { profile: {}, favorites: [], ratings: {}, myStuff: [], notifications: [], links: {}, folders: {}, folderOrder: [], views: [] };
+const EMPTY: UserData = { profile: {}, favorites: [], ratings: {}, myStuff: [], notifications: [], links: {}, folders: {}, folderOrder: [], views: [], settings: {}, blocked: [] };
 const FOLDER_SORTS = ["manual", "name", "newest", "clicks", "rating", "mine"];
 
 export async function setFolderPref(username: string, folderId: string, patch: Record<string, unknown>) {
@@ -150,6 +176,7 @@ export async function getUserData(username: string): Promise<UserData> {
   return {
     ...EMPTY, ...(raw || {}),
     profile: raw?.profile || {}, links: raw?.links || {}, folders: raw?.folders || {}, folderOrder: raw?.folderOrder || [], views: raw?.views || [],
+    settings: raw?.settings || {}, blocked: raw?.blocked || [],
   };
 }
 
@@ -163,14 +190,107 @@ export async function getProfile(username: string): Promise<Profile> {
   return (await getUserData(username)).profile;
 }
 
+const BANNERS = ["none", "sunset", "ocean", "forest", "candy", "night", "gold"];
+const BORDERS = ["none", "ring", "glow", "double", "dashed"];
 export async function setProfile(username: string, patch: Partial<Profile>) {
   const data = await getUserData(username);
   const p = data.profile;
+  const text = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) || undefined : undefined);
   if (typeof patch.avatar === "string") p.avatar = patch.avatar.slice(0, 8);
-  if (typeof patch.color === "string") p.color = patch.color.slice(0, 16);
-  if (typeof patch.bio === "string") p.bio = patch.bio.slice(0, 200);
+  if (typeof patch.color === "string") p.color = /^#[0-9a-f]{3,8}$/i.test(patch.color) ? patch.color : undefined;
+  if (typeof patch.bio === "string") p.bio = text(patch.bio, 500);
+  if (typeof patch.displayName === "string") p.displayName = text(patch.displayName.replace(/[\u0000-\u001f]/g, ""), 30);
+  if (typeof patch.status === "string") p.status = text(patch.status, 60);
+  if (typeof patch.statusEmoji === "string") p.statusEmoji = text(patch.statusEmoji, 8);
+  if (typeof patch.statusUntil === "string") {
+    const t = Date.parse(patch.statusUntil);
+    p.statusUntil = patch.statusUntil && Number.isFinite(t) ? new Date(t).toISOString() : undefined;
+  }
+  if (typeof patch.banner === "string") p.banner = BANNERS.includes(patch.banner) && patch.banner !== "none" ? patch.banner : undefined;
+  if (typeof patch.border === "string") p.border = BORDERS.includes(patch.border) && patch.border !== "none" ? patch.border : undefined;
+  if (Array.isArray(patch.into)) {
+    const into = Array.from(new Set(patch.into.map((t) => String(t).trim().toLowerCase().replace(/[^a-z0-9 -]/g, "").slice(0, 24)).filter(Boolean))).slice(0, 5);
+    p.into = into.length ? into : undefined;
+  }
+  if (Array.isArray(patch.showcase)) {
+    const ids = patch.showcase.map(String).filter((id) => /^[\w-]{1,100}$/.test(id)).slice(0, 3);
+    p.showcase = ids.length ? ids : undefined;
+  }
+  if (typeof patch.visibility === "string") p.visibility = ["members", "private"].includes(patch.visibility) ? patch.visibility : undefined;
+  if (typeof patch.hideOnline === "boolean") p.hideOnline = patch.hideOnline || undefined;
+  (Object.keys(p) as (keyof Profile)[]).forEach((k) => { if (p[k] === undefined) delete p[k]; });
   await save(username, data);
   return p;
+}
+
+/** A status that has run out shouldn't show any more. */
+export function liveProfile(p: Profile): Profile {
+  if (p.statusUntil && Date.parse(p.statusUntil) < Date.now()) {
+    const { status: _s, statusEmoji: _e, statusUntil: _u, ...rest } = p;
+    return rest;
+  }
+  return p;
+}
+
+/* ---------- settings that follow you between devices ---------- */
+const SETTING_KEYS = ["look", "view", "sort", "collapsed", "quickTab", "showTags", "space", "folderViews", "startView", "sync"];
+export async function saveSettings(username: string, patch: Record<string, unknown>) {
+  const data = await getUserData(username);
+  for (const k of SETTING_KEYS) if (k in patch) data.settings[k] = patch[k];
+  if (JSON.stringify(data.settings).length > 20_000) throw new Error("Those settings are too big to save");
+  await save(username, data);
+  return data.settings;
+}
+
+export async function setBlocked(username: string, target: string, block: boolean) {
+  const data = await getUserData(username);
+  const t = target.toLowerCase();
+  if (t === username.toLowerCase()) throw new Error("You can't block yourself");
+  const set = new Set(data.blocked);
+  if (block) set.add(t); else set.delete(t);
+  data.blocked = Array.from(set).slice(0, 200);
+  await save(username, data);
+  return data.blocked;
+}
+
+/* ---------- My Stuff folders ---------- */
+export async function moveMyStuff(username: string, id: string, folder: string) {
+  const data = await getUserData(username);
+  data.myStuff = data.myStuff.map((l) => (l.id === id ? { ...l, folder: folder.trim().slice(0, 40) || undefined } : l));
+  await save(username, data);
+  return data.myStuff;
+}
+export async function renameMyStuffFolder(username: string, from: string, to: string) {
+  const data = await getUserData(username);
+  const name = to.trim().slice(0, 40);
+  data.myStuff = data.myStuff.map((l) => ((l.folder || "") === from ? { ...l, folder: name || undefined } : l));
+  await save(username, data);
+  return data.myStuff;
+}
+export async function importMyStuff(username: string, items: { name: string; url: string; folder?: string }[]) {
+  const data = await getUserData(username);
+  const have = new Set(data.myStuff.map((l) => l.url));
+  const added: PrivateLink[] = [];
+  for (const it of items) {
+    if (have.has(it.url) || data.myStuff.length + added.length >= MAX_MYSTUFF) continue;
+    have.add(it.url);
+    added.push({ id: uuid(), name: it.name.slice(0, 100), url: it.url, createdAt: new Date().toISOString(), folder: it.folder?.slice(0, 40) || undefined });
+  }
+  data.myStuff = [...added, ...data.myStuff];
+  await save(username, data);
+  return { myStuff: data.myStuff, added: added.length };
+}
+
+/** Move a whole account's data to a new username. */
+export async function renameUserData(oldName: string, newName: string) {
+  if (oldName.toLowerCase() === newName.toLowerCase()) return;
+  const redis = getRedis();
+  const raw = await redis.get(key(oldName));
+  if (raw) await redis.set(key(newName), raw);
+  await redis.del(key(oldName), userRevKey(oldName));
+}
+export async function deleteUserData(username: string) {
+  await getRedis().del(key(username), userRevKey(username));
 }
 
 export async function toggleFavorite(username: string, linkId: string): Promise<string[]> {
@@ -191,9 +311,9 @@ export async function setRating(username: string, linkId: string, stars: number)
   return data.ratings;
 }
 
-export async function addMyStuff(username: string, name: string, url: string): Promise<PrivateLink[]> {
+export async function addMyStuff(username: string, name: string, url: string, folder?: string): Promise<PrivateLink[]> {
   const data = await getUserData(username);
-  data.myStuff = [{ id: uuid(), name: name.slice(0, 100), url, createdAt: new Date().toISOString() }, ...data.myStuff].slice(0, MAX_MYSTUFF);
+  data.myStuff = [{ id: uuid(), name: name.slice(0, 100), url, createdAt: new Date().toISOString(), folder: folder?.trim().slice(0, 40) || undefined }, ...data.myStuff].slice(0, MAX_MYSTUFF);
   await save(username, data);
   return data.myStuff;
 }

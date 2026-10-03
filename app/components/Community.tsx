@@ -282,7 +282,15 @@ export function applyLook(look: Look) {
   }
 }
 
-export function CustomizeModal({ look, onChange, onClose }: { look: Look; onChange: (l: Look) => void; onClose: () => void }) {
+export function CustomizeModal({ look, onChange, onClose, startView, onStartView, folders = [] }: {
+  look: Look;
+  onChange: (l: Look) => void;
+  onClose: () => void;
+  /** where the page opens: "top", "later", "favorites" or "folder:<id>" */
+  startView?: string;
+  onStartView?: (v: string) => void;
+  folders?: Folder[];
+}) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -308,6 +316,17 @@ export function CustomizeModal({ look, onChange, onClose }: { look: Look; onChan
             ))}
           </div>
         </div>
+        {onStartView && (
+          <div className="form-group">
+            <label>Open the site at</label>
+            <select value={startView || "top"} onChange={(e) => onStartView(e.target.value)}>
+              <option value="top">The top</option>
+              <option value="later">My Read later list</option>
+              <option value="favorites">My favorites</option>
+              {folders.map((f) => <option key={f.id} value={`folder:${f.id}`}>{f.emoji} {f.name}</option>)}
+            </select>
+          </div>
+        )}
         <div className="form-group">
           <label>Card size</label>
           <div className="seg">

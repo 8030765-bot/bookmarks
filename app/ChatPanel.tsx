@@ -3,6 +3,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { ChatMessage } from "@/lib/types";
 import { Icon } from "./components/Icon";
 import { holdFast, useOnRevChange } from "./components/sync";
+import { UserChip } from "./components/People";
 
 const REACTIONS = ["👍", "😂", "❤️", "🔥", "😮", "😢"];
 const QUICK_EMOJI = ["😀", "😂", "🔥", "👍", "❤️", "🎮", "💀", "🙏"];
@@ -46,6 +47,8 @@ export default function ChatPanel({
   canModerate,
   onNeedLogin,
   showToast,
+  blocked = [],
+  onBlock,
 }: {
   open: boolean;
   setOpen: (fn: (open: boolean) => boolean) => void;
@@ -56,8 +59,15 @@ export default function ChatPanel({
   canModerate: boolean;
   onNeedLogin: () => void;
   showToast: (msg: string) => void;
+  /** people whose messages you've hidden (lowercase) */
+  blocked?: string[];
+  onBlock?: (username: string) => void;
 }) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [allMessages, setMessages] = useState<ChatMessage[]>([]);
+  const [roles, setRoles] = useState<Record<string, string>>({});
+  // messages from people you've blocked are hidden just for you
+  const messages = blocked.length ? allMessages.filter((m) => !blocked.includes(m.user.toLowerCase())) : allMessages;
+  const hiddenCount = allMessages.length - messages.length;
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [lastSeenId, setLastSeenId] = useState<string | null>(null);
@@ -74,6 +84,7 @@ export default function ChatPanel({
       if (!res.ok) return;
       const json = await res.json();
       if (Array.isArray(json.messages)) setMessages(json.messages);
+      if (json.roles) setRoles(json.roles);
     } catch {
       // network blip — next poll will retry
     }
@@ -179,6 +190,7 @@ export default function ChatPanel({
           </div>
           <div className="chat-list" ref={listRef} onClick={() => setPicker(null)}>
             {messages.length === 0 && <div className="chat-empty">No messages yet. Say hi! 👋</div>}
+            {hiddenCount > 0 && <div className="chat-hidden-note">{hiddenCount} message{hiddenCount === 1 ? "" : "s"} from people you blocked are hidden</div>}
             {messages.map((m, i) => {
               const mine = m.user === user;
               const grouped = i > 0 && messages[i - 1].user === m.user && !m.replyTo
@@ -188,7 +200,7 @@ export default function ChatPanel({
                 <div key={m.id} className={`chat-msg ${mine ? "mine" : ""} ${grouped ? "grouped" : ""} ${mentions(m.text, user) ? "mentioned" : ""}`}>
                   {!grouped && (
                     <div className="chat-meta">
-                      <button className="chat-user" onClick={() => mention(m.user)} title={`Mention ${m.user}`}>{m.user}</button>
+                      <UserChip username={m.user} role={roles[m.user.toLowerCase()]} online={online.includes(m.user)} className="chat-user" onOpen={mention} />
                       <span className="muted">{timeLabel(m.at)}</span>
                     </div>
                   )}
@@ -203,6 +215,9 @@ export default function ChatPanel({
                       <button title="React" onClick={(e) => { e.stopPropagation(); setPicker(picker === m.id ? null : m.id); }}>😊</button>
                       <button title="Reply" onClick={() => { setReplyTo(m); inputRef.current?.focus(); }}><Icon name="reply" /></button>
                       {canModerate && <button title="Delete" className="danger" onClick={() => remove(m.id)}><Icon name="trash" /></button>}
+                      {user && onBlock && m.user !== user && (
+                        <button title={`Hide messages from ${m.user}`} onClick={() => { if (confirm(`Hide all messages from ${m.user}? You can undo this in Account & security.`)) onBlock(m.user); }}><Icon name="eyeOff" /></button>
+                      )}
                     </div>
                   </div>
                   {picker === m.id && (

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { login, logout, resetWithCode, setSessionCookie, signup } from "@/lib/auth";
+import { login, loginWithCode, logout, resetWithCode, setSessionCookie, signup } from "@/lib/auth";
 import { getAuthContext, getRole, ownerExists } from "@/lib/roles";
 import { errorResponse } from "@/lib/http";
 import { clientIp, rateLimit } from "@/lib/ratelimit";
+import { notify } from "@/lib/userdata";
 
 export const dynamic = "force-dynamic";
 
@@ -15,12 +16,27 @@ export async function GET() {
   }
 }
 
+/** Logged in: set the cookie and tell the page who you are and what you can do. */
+async function loggedIn(session: { token: string; username: string; newDevice?: boolean }, remember: boolean, extra: Record<string, unknown> = {}) {
+  setSessionCookie(session.token, remember);
+  if (session.newDevice) {
+    notify(session.username, {
+      kind: "system",
+      text: "Your account just logged in on a new kind of device. If that wasn't you, change your password in Account & security.",
+    }).catch(() => {});
+  }
+  // include role + ownerExists so the client unlocks admin immediately (no refresh needed)
+  const [role, hasOwner] = await Promise.all([getRole(session.username), ownerExists()]);
+  return NextResponse.json({ user: session.username, role, ownerExists: hasOwner, ...extra });
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const action = String(body.action || "");
     const username = String(body.username || "").trim();
     const password = String(body.password || "");
+    const remember = body.remember !== false;
     const ip = clientIp(req);
     if (action === "logout") {
       await logout();
@@ -34,6 +50,11 @@ export async function POST(req: NextRequest) {
       const { recoveryCode } = await resetWithCode(username, code, newPassword);
       return NextResponse.json({ ok: true, recoveryCode });
     }
+    if (action === "login2fa") {
+      await rateLimit(`2fa:${ip}`, 30, 10 * 60);
+      const session = await loginWithCode(String(body.ticket || ""), String(body.code || ""));
+      return loggedIn(session, body.remember !== false);
+    }
     if (action !== "signup" && action !== "login") {
       return NextResponse.json({ error: "Unknown action" }, { status: 400 });
     }
@@ -41,15 +62,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing username or password" }, { status: 400 });
     }
     // per-address limits on top of the per-account lockout
-    if (action === "signup") await rateLimit(`signup:${ip}`, 8, 60 * 60);
-    else await rateLimit(`login:${ip}`, 40, 10 * 60);
-    const session = action === "signup" ? await signup(username, password) : await login(username, password);
-    setSessionCookie(session.token);
-    // include role + ownerExists so the client unlocks admin immediately (no refresh needed)
-    const [role, hasOwner] = await Promise.all([getRole(session.username), ownerExists()]);
-    // signup includes the one-time recovery code so the client can show it
-    const recoveryCode = action === "signup" ? (session as { recoveryCode?: string }).recoveryCode : undefined;
-    return NextResponse.json({ user: session.username, role, ownerExists: hasOwner, recoveryCode });
+    if (action === "signup") {
+      await rateLimit(`signup:${ip}`, 8, 60 * 60);
+      const session = await signup(username, password, remember);
+      // signup includes the one-time recovery code so the client can show it
+      return loggedIn(session, remember, { recoveryCode: session.recoveryCode });
+    }
+    await rateLimit(`login:${ip}`, 40, 10 * 60);
+    const result = await login(username, password, remember);
+    if ("needs2fa" in result) return NextResponse.json({ needs2fa: true, ticket: result.ticket, user: result.username });
+    return loggedIn(result, remember);
   } catch (e: unknown) {
     return errorResponse(e);
   }

@@ -2,14 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { deleteMessage, getMessages, postMessage, toggleReaction } from "@/lib/chat";
 import { getBookmarks } from "@/lib/store";
-import { audit, checkMod, getAuthContext } from "@/lib/roles";
+import { audit, checkMod, getAuthContext, listRoles } from "@/lib/roles";
 import { errorResponse } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    return NextResponse.json({ messages: await getMessages() });
+    // roles let the page colour names (owner / admin / mod)
+    const [messages, roles] = await Promise.all([getMessages(), listRoles()]);
+    return NextResponse.json({ messages, roles });
   } catch (e) {
     return errorResponse(e);
   }

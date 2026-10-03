@@ -3,9 +3,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { readLocal, timeAgo, writeLocal } from "./ui";
 import { useOnRevChange } from "./sync";
+import Markdown from "./Markdown";
 
 export interface Notification { id: string; kind: string; text: string; at: string; read?: boolean; from?: string }
-export interface Profile { avatar?: string; color?: string; bio?: string }
+export interface Profile {
+  avatar?: string; color?: string; bio?: string; displayName?: string; status?: string; statusEmoji?: string; statusUntil?: string;
+  banner?: string; border?: string; into?: string[]; showcase?: string[]; visibility?: "everyone" | "members" | "private"; hideOnline?: boolean;
+}
+/** A private link only you can see. */
+export interface PrivateLink { id: string; name: string; url: string; createdAt: string; folder?: string }
 /** Your own extras on a shared link (private note, read later, done…). */
 export interface LinkPref { note?: string; later?: boolean; done?: boolean; rename?: string; hidden?: boolean; checks?: number[] }
 /** Your own settings for a shared folder. */
@@ -22,8 +28,20 @@ export interface Personal {
   folders: Record<string, FolderPref>;
   folderOrder: string[];
   views: SavedView[];
+  /** lowercase usernames you follow */
+  following: string[];
+  /** lowercase usernames whose chat you've hidden */
+  blocked: string[];
+  /** your look/layout, synced between devices */
+  settings: Record<string, unknown>;
+  myStuff: PrivateLink[];
+  /** settings arrived from the server (so syncing can start) */
+  loaded: boolean;
 }
-const EMPTY: Personal = { user: null, favorites: [], ratings: {}, notifications: [], profile: {}, links: {}, folders: {}, folderOrder: [], views: [] };
+const EMPTY: Personal = {
+  user: null, favorites: [], ratings: {}, notifications: [], profile: {}, links: {}, folders: {}, folderOrder: [], views: [],
+  following: [], blocked: [], settings: {}, myStuff: [], loaded: false,
+};
 const GUEST_KEY = "guestLinkPrefs";
 const GUEST_FOLDERS = "guestFolderPrefs";
 const GUEST_ORDER = "guestFolderOrder";
@@ -53,12 +71,20 @@ export function usePersonal(user: string | null) {
         folders: readLocal<Record<string, FolderPref>>(GUEST_FOLDERS, {}),
         folderOrder: readLocal<string[]>(GUEST_ORDER, []),
         views: readLocal<SavedView[]>(GUEST_VIEWS, []),
+        loaded: true,
       });
       return;
     }
     try {
       const json = await fetch("/api/me", { cache: "no-store" }).then((r) => r.json());
-      if (json.user) setData({ user: json.user, favorites: json.favorites || [], ratings: json.ratings || {}, notifications: json.notifications || [], profile: json.profile || {}, links: json.links || {}, folders: json.folders || {}, folderOrder: json.folderOrder || [], views: json.views || [] });
+      if (json.user) {
+        setData({
+          user: json.user, favorites: json.favorites || [], ratings: json.ratings || {}, notifications: json.notifications || [],
+          profile: json.profile || {}, links: json.links || {}, folders: json.folders || {}, folderOrder: json.folderOrder || [],
+          views: json.views || [], following: json.following || [], blocked: json.blocked || [], settings: json.settings || {},
+          myStuff: json.myStuff || [], loaded: true,
+        });
+      }
     } catch {}
   }, [user]);
   useEffect(() => { load(); }, [load]);
@@ -147,7 +173,36 @@ export function usePersonal(user: string | null) {
     if (user) post({ action: "deleteView", id }).catch(() => {});
   }, [post, user]);
 
-  return { ...data, reload: load, toggleFavorite, rate, saveProfile, markRead, setLinkPref, setFolderPref, setFolderOrder, saveView, deleteView };
+  const follow = useCallback(async (username: string, on: boolean) => {
+    const lower = username.toLowerCase();
+    setData((d) => ({ ...d, following: on ? Array.from(new Set([...d.following, lower])) : d.following.filter((x) => x !== lower) }));
+    const j = await post({ action: "follow", username, on });
+    if (j.following) setData((d) => ({ ...d, following: j.following }));
+    return j;
+  }, [post]);
+
+  const block = useCallback(async (username: string, on: boolean) => {
+    const j = await post({ action: "block", username, on });
+    if (j.blocked) setData((d) => ({ ...d, blocked: j.blocked }));
+    return j;
+  }, [post]);
+
+  const saveSettings = useCallback((settings: Record<string, unknown>) => {
+    setData((d) => ({ ...d, settings: { ...d.settings, ...settings } }));
+    if (user) post({ action: "settings", settings }).catch(() => {});
+  }, [post, user]);
+
+  /** Any My Stuff change: posts the action and takes the new list from the answer. */
+  const myStuffAction = useCallback(async (body: Record<string, unknown>) => {
+    const j = await post(body);
+    if (j.myStuff) setData((d) => ({ ...d, myStuff: j.myStuff }));
+    return j;
+  }, [post]);
+
+  return {
+    ...data, reload: load, toggleFavorite, rate, saveProfile, markRead, setLinkPref, setFolderPref, setFolderOrder, saveView, deleteView,
+    follow, block, saveSettings, myStuffAction,
+  };
 }
 
 const KIND_ICON: Record<string, string> = { like: "heart", mention: "chat", reply: "reply", suggestion: "bulb", comment: "chat", dm: "chat", role: "lock", system: "bell" };
@@ -190,54 +245,167 @@ export function NotificationPanel({ notifications, onClose, onOpenChat }: { noti
   );
 }
 
-export function ProfileModal({ profile, onSave, onClose }: { profile: Profile; onSave: (p: Profile) => Promise<any>; onClose: () => void }) {
+export const BANNERS: [string, string][] = [
+  ["none", "None"], ["sunset", "Sunset"], ["ocean", "Ocean"], ["forest", "Forest"], ["candy", "Candy"], ["night", "Night"], ["gold", "Gold"],
+];
+export const BORDERS: [string, string][] = [["none", "None"], ["ring", "Ring"], ["glow", "Glow"], ["double", "Double"], ["dashed", "Dashed"]];
+const MORE_AVATARS = ["🐶", "🐯", "🦁", "🐧", "🐙", "🦖", "🐝", "🌈", "🍩", "⚽", "🏀", "🎸", "🎨", "📚", "🚀", "🛹"];
+const STATUS_TIMES: [string, number][] = [["Don't clear", 0], ["1 hour", 1], ["4 hours", 4], ["Today", 24], ["This week", 24 * 7]];
+
+/** Edit your profile: avatar, name, status, banner, bio, topics, showcase. */
+export function ProfileModal({ profile, links, onSave, onClose }: {
+  profile: Profile;
+  /** links you could showcase (your favorites and ones you added) */
+  links: { id: string; name: string }[];
+  onSave: (p: Profile) => Promise<any>;
+  onClose: () => void;
+}) {
   const [avatar, setAvatar] = useState(profile.avatar || AVATARS[0]);
   const [color, setColor] = useState(profile.color || PROFILE_COLORS[0]);
+  const [border, setBorder] = useState(profile.border || "none");
+  const [displayName, setDisplayName] = useState(profile.displayName || "");
+  const [status, setStatus] = useState(profile.status || "");
+  const [statusEmoji, setStatusEmoji] = useState(profile.statusEmoji || "");
+  const [statusHours, setStatusHours] = useState(0);
+  const [banner, setBanner] = useState(profile.banner || "none");
   const [bio, setBio] = useState(profile.bio || "");
+  const [into, setInto] = useState((profile.into || []).join(", "));
+  const [showcase, setShowcase] = useState<string[]>(profile.showcase || []);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  async function save() {
+    setSaving(true);
+    setError("");
+    const j = await onSave({
+      avatar, color, border, displayName, status, statusEmoji, banner, bio,
+      statusUntil: status && statusHours ? new Date(Date.now() + statusHours * 3600_000).toISOString() : status ? "" : "",
+      into: into.split(",").map((t) => t.trim()).filter(Boolean),
+      showcase,
+    }).catch(() => ({ error: "Couldn't save" }));
+    setSaving(false);
+    if (j?.error) setError(j.error); else onClose();
+  }
   return (
     <div className="modal-overlay" onClick={() => !saving && onClose()}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal wide" onClick={(e) => e.stopPropagation()}>
         <h2>Your profile</h2>
-        <div className="profile-preview" style={{ "--pc": color } as React.CSSProperties}>
-          <span className="big-avatar">{avatar}</span>
-          <div className="bio-prev">{bio || "No bio yet"}</div>
+        <div className={`profile-preview banner-${banner}`} style={{ "--pc": color } as React.CSSProperties}>
+          <span className={`big-avatar border-${border}`}>{avatar}</span>
+          <div>
+            <div className="profile-name">{displayName || "Your name"}</div>
+            {status && <div className="row-sub">{statusEmoji} {status}</div>}
+          </div>
         </div>
+        <div className="form-row">
+          <div className="form-group">
+            <label>Display name</label>
+            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Optional — your username still shows too" maxLength={30} />
+          </div>
+          <div className="form-group">
+            <label>Status</label>
+            <div className="status-row">
+              <input className="emoji-in" value={statusEmoji} onChange={(e) => setStatusEmoji(e.target.value)} placeholder="📚" maxLength={8} aria-label="Status emoji" />
+              <input value={status} onChange={(e) => setStatus(e.target.value)} placeholder="e.g. studying for a test" maxLength={60} />
+            </div>
+          </div>
+        </div>
+        {status && (
+          <div className="form-group">
+            <label>Clear status after</label>
+            <div className="seg">
+              {STATUS_TIMES.map(([label, hours]) => (
+                <button key={label} type="button" className={statusHours === hours ? "on" : ""} onClick={() => setStatusHours(hours)}>{label}</button>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="form-group">
           <label>Avatar</label>
           <div className="emoji-grid">
-            {AVATARS.map((a) => <button type="button" key={a} className={avatar === a ? "on" : ""} onClick={() => setAvatar(a)}>{a}</button>)}
+            {[...AVATARS, ...MORE_AVATARS].map((a) => <button type="button" key={a} className={avatar === a ? "on" : ""} onClick={() => setAvatar(a)}>{a}</button>)}
+            <input className="emoji-custom" value={[...AVATARS, ...MORE_AVATARS].includes(avatar) ? "" : avatar} onChange={(e) => setAvatar(e.target.value)} placeholder="Other" maxLength={4} aria-label="Custom emoji" />
           </div>
         </div>
-        <div className="form-group">
-          <label>Color</label>
-          <div className="swatches">
-            {PROFILE_COLORS.map((c) => <button type="button" key={c} className={`swatch ${color === c ? "on" : ""}`} style={{ background: c }} onClick={() => setColor(c)} />)}
+        <div className="form-row">
+          <div className="form-group">
+            <label>Colour</label>
+            <div className="swatches">
+              {PROFILE_COLORS.map((c) => <button type="button" key={c} className={`swatch ${color === c ? "on" : ""}`} style={{ background: c }} onClick={() => setColor(c)} aria-label={c} />)}
+            </div>
+          </div>
+          <div className="form-group">
+            <label>Avatar ring</label>
+            <select value={border} onChange={(e) => setBorder(e.target.value)}>{BORDERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+          </div>
+          <div className="form-group">
+            <label>Banner</label>
+            <select value={banner} onChange={(e) => setBanner(e.target.value)}>{BANNERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
           </div>
         </div>
         <div className="form-group">
           <label>Bio</label>
-          <textarea value={bio} onChange={(e) => setBio(e.target.value)} maxLength={200} placeholder="Say something about yourself" />
+          <textarea value={bio} onChange={(e) => setBio(e.target.value)} maxLength={500} placeholder={"Say something about yourself. **bold**, *italic* and links work."} />
+          <div className="hint">{bio.length}/500</div>
         </div>
+        <div className="form-group">
+          <label>Topics you&apos;re into</label>
+          <input value={into} onChange={(e) => setInto(e.target.value)} placeholder="e.g. maths, coding, art (up to 5)" />
+        </div>
+        {links.length > 0 && (
+          <div className="form-group">
+            <label>Show off up to 3 websites</label>
+            <div className="chip-grid showcase-pick">
+              {links.slice(0, 40).map((l) => (
+                <button type="button" key={l.id} className={`pick ${showcase.includes(l.id) ? "on" : ""}`}
+                  onClick={() => setShowcase(showcase.includes(l.id) ? showcase.filter((x) => x !== l.id) : [...showcase, l.id].slice(-3))}>
+                  {l.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {error && <div className="field-warn">{error}</div>}
         <div className="modal-actions">
           <button className="btn btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
-          <button className="btn btn-primary" disabled={saving} onClick={async () => { setSaving(true); await onSave({ avatar, color, bio }); setSaving(false); onClose(); }}>Save</button>
+          <button className="btn btn-primary" disabled={saving} onClick={save}>{saving ? "Saving…" : "Save"}</button>
         </div>
       </div>
     </div>
   );
 }
 
-interface PublicProfile { username: string; profile: Profile; added: number; likesReceived: number; joined?: string; role?: string | null }
-export function ProfileCard({ username, onClose }: { username: string; onClose: () => void }) {
+interface PublicProfile {
+  username: string;
+  profile?: Profile;
+  added?: number;
+  likesReceived?: number;
+  joined?: string;
+  role?: string | null;
+  social?: { followers: number; following: number; kudos: number; youFollow: boolean; followsYou: boolean; mutual: string[] };
+  lastSeen?: number;
+  hidden?: boolean;
+  membersOnly?: boolean;
+  self?: boolean;
+}
+/** Quick profile pop-up (the full page is /u/name). */
+export function ProfileCard({ username, me, onFollow, onKudos, onClose }: {
+  username: string;
+  me: string | null;
+  onFollow?: (u: string, on: boolean) => Promise<any>;
+  onKudos?: (u: string) => Promise<any>;
+  onClose: () => void;
+}) {
   const [p, setP] = useState<PublicProfile | null>(null);
   const [missing, setMissing] = useState(false);
-  useEffect(() => {
+  const [msg, setMsg] = useState("");
+  const load = useCallback(() => {
     fetch(`/api/profile?user=${encodeURIComponent(username)}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((j) => (j.username ? setP(j) : setMissing(true)))
       .catch(() => setMissing(true));
   }, [username]);
+  useEffect(() => { load(); }, [load]);
+  const pr = p?.profile || {};
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal profile-card" onClick={(e) => e.stopPropagation()}>
@@ -249,21 +417,38 @@ export function ProfileCard({ username, onClose }: { username: string; onClose: 
           </>
         )}
         {missing && <div className="admin-empty">No profile for {username}.</div>}
-        {p && (
+        {p && (p.hidden || p.membersOnly) && <div className="admin-empty">{p.username} keeps their profile {p.hidden ? "private" : "for members — log in to see it"}.</div>}
+        {p && !p.hidden && !p.membersOnly && (
           <>
-            <div className="profile-hero" style={{ "--pc": p.profile.color || "var(--accent)" } as React.CSSProperties}>
-              <span className="big-avatar">{p.profile.avatar || p.username[0]?.toUpperCase()}</span>
+            <div className={`profile-hero banner-${pr.banner || "none"}`} style={{ "--pc": pr.color || "var(--accent)" } as React.CSSProperties}>
+              <span className={`big-avatar border-${pr.border || "none"}`}>{pr.avatar || p.username[0]?.toUpperCase()}</span>
               <div>
-                <div className="profile-name">{p.username}{p.role && <span className={`pill role-${p.role}`}>{p.role}</span>}</div>
-                {p.joined && <div className="row-sub">joined {timeAgo(p.joined)}</div>}
+                <div className="profile-name">{pr.displayName || p.username}{p.role && <span className={`pill role-${p.role}`}>{p.role}</span>}</div>
+                <div className="row-sub">@{p.username}{p.joined ? ` · joined ${timeAgo(p.joined)}` : ""}</div>
+                {pr.status && <div className="row-sub">{pr.statusEmoji} {pr.status}</div>}
               </div>
             </div>
-            {p.profile.bio && <p className="profile-bio">{p.profile.bio}</p>}
-            <div className="profile-stats">
-              <div><strong>{p.added}</strong><span>sites added</span></div>
-              <div><strong>{p.likesReceived}</strong><span>likes received</span></div>
+            {pr.bio && <Markdown text={pr.bio} className="profile-bio" />}
+            <div className="profile-stats four">
+              <div><strong>{p.added || 0}</strong><span>sites added</span></div>
+              <div><strong>{p.social?.followers || 0}</strong><span>followers</span></div>
+              <div><strong>{p.social?.following || 0}</strong><span>following</span></div>
+              <div><strong>{p.social?.kudos || 0}</strong><span>kudos ⭐</span></div>
             </div>
-            <div className="modal-actions"><button className="btn btn-secondary" onClick={onClose}>Close</button></div>
+            {p.social?.followsYou && <p className="muted-inline">Follows you</p>}
+            {msg && <p className="hint">{msg}</p>}
+            <div className="modal-actions">
+              {me && !p.self && onKudos && (
+                <button className="btn btn-secondary" onClick={async () => { const j = await onKudos(p.username); setMsg(j.error || `Kudos sent ⭐ (${j.left} left today)`); load(); }}>⭐ Kudos</button>
+              )}
+              {me && !p.self && onFollow && (
+                <button className="btn btn-secondary" onClick={async () => { await onFollow(p.username, !p.social?.youFollow); load(); }}>
+                  {p.social?.youFollow ? "Unfollow" : "Follow"}
+                </button>
+              )}
+              <a className="btn btn-secondary" href={`/u/${encodeURIComponent(p.username)}`}>Full profile</a>
+              <button className="btn btn-primary" onClick={onClose}>Close</button>
+            </div>
           </>
         )}
       </div>

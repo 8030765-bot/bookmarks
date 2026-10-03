@@ -10,6 +10,9 @@ import FolderSection, { Drag, FolderMeta } from "./components/FolderSection";
 import { FolderInfo, FolderMenu, FolderMenuState, PickModal, TagManager, folderMarkdown } from "./components/FolderExtras";
 import { MatchContext, closestWord, exactMatch, forgivingMatch, matchLink, parseQuery, relevance } from "./components/query";
 import SearchBox from "./components/SearchBox";
+import MyStuff from "./components/MyStuff";
+import { PasswordStrength } from "./components/People";
+const AccountModal = dynamic(() => import("./components/Account"), { ssr: false });
 import ScrollMap from "./components/ScrollMap";
 import type { ChatMessage } from "@/lib/types";
 import { CardContext, CardEnv, LinkCardActions } from "./components/cardEnv";
@@ -45,6 +48,7 @@ type Modal =
   | { type: "link"; mode: LinkModalMode }
   | { type: "folder"; folder?: Folder; smart?: boolean }
   | { type: "tags" }
+  | { type: "account" }
   | { type: "deleteFolder"; folder: Folder }
   | { type: "adminLogin" }
   | { type: "login" }
@@ -79,11 +83,12 @@ function diffLook(base: Look, next: Look): Partial<Look> {
   return Object.fromEntries(Object.entries(next).filter(([k, v]) => base[k as keyof Look] !== v)) as Partial<Look>;
 }
 
-type QuickTab = "recent" | "later" | "starred" | "top" | "visited" | "new";
+type QuickTab = "recent" | "later" | "starred" | "following" | "top" | "visited" | "new";
 const QUICK_TABS: { id: QuickTab; label: string; icon: string }[] = [
   { id: "recent", label: "Recent", icon: "clock" },
   { id: "later", label: "Read later", icon: "note" },
   { id: "starred", label: "Starred", icon: "star" },
+  { id: "following", label: "Following", icon: "users" },
   { id: "top", label: "Top rated", icon: "heart" },
   { id: "visited", label: "Most visited", icon: "chart" },
   { id: "new", label: "New", icon: "plus" },
@@ -171,6 +176,11 @@ export default function HomePage() {
   const [fUsername, setFUsername] = useState("");
   const [fCode, setFCode] = useState("");
   const [fPassword, setFPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(true);
+  // 2-step login: the password was right, now waiting for the 6-digit code
+  const [ticket, setTicket] = useState<string | null>(null);
+  const [fTotp, setFTotp] = useState("");
+  const [myStuffOpen, setMyStuffOpen] = useState(true);
   const [userMenu, setUserMenu] = useState(false);
   const [drag, setDrag] = useState<Drag>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -361,6 +371,53 @@ export default function HomePage() {
   const personal = usePersonal(user);
   const favoriteSet = useMemo(() => new Set(personal.favorites), [personal.favorites]);
 
+  // ---------- settings that follow you between devices ----------
+  const [startView, setStartView] = useState("top");
+  useEffect(() => { setStartView(readLocal("startView", "top")); }, []);
+  const syncedFor = useRef<string | null>(null);
+  const snapshot = () => ({ look, view, sort, collapsed, quickTab, showTags, space, folderViews: folderViewPrefs, startView });
+  useEffect(() => {
+    if (!user || !personal.loaded || personal.user?.toLowerCase() !== user.toLowerCase() || syncedFor.current === user) return;
+    syncedFor.current = user;
+    const s = personal.settings;
+    if (s.sync === false) return;
+    // a brand-new account takes this device's settings; otherwise the account's win
+    if (!s.look) { personal.saveSettings(snapshot()); return; }
+    const apply = <T,>(key: string, set: (v: T) => void, local = key) => {
+      if (s[key] === undefined) return;
+      set(s[key] as T);
+      writeLocal(local, s[key]);
+    };
+    setLook({ ...DEFAULT_LOOK, ...(s.look as Partial<Look>) });
+    writeLocal("look", { ...DEFAULT_LOOK, ...(s.look as Partial<Look>) });
+    apply("view", setView);
+    apply("sort", setSort);
+    apply("collapsed", setCollapsed);
+    apply("quickTab", setQuickTab);
+    apply("showTags", setShowTags);
+    apply("space", setSpace);
+    apply("folderViews", setFolderViewPrefs);
+    apply("startView", setStartView);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, personal.loaded, personal.user]);
+  useEffect(() => {
+    if (!user || syncedFor.current !== user || personal.settings.sync === false) return;
+    const t = setTimeout(() => personal.saveSettings(snapshot()), 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [look, view, sort, collapsed, quickTab, showTags, space, folderViewPrefs, startView]);
+  useEffect(() => { if (!user) syncedFor.current = null; }, [user]);
+
+  // ?edit=profile (from your profile page) opens the profile editor
+  useEffect(() => {
+    if (!user) return;
+    const params = new URLSearchParams(location.search);
+    if (params.get("edit") !== "profile") return;
+    setModal({ type: "profileEdit" });
+    params.delete("edit");
+    window.history.replaceState(null, "", `${location.pathname}${params.toString() ? `?${params}` : ""}${location.hash}`);
+  }, [user]);
+
   // average ratings: load once, then again whenever anyone rates something
   const loadRatings = useCallback(() => {
     fetch("/api/ratings", { cache: "no-store" }).then((r) => r.json()).then((j) => setAggRatings(j.ratings || {})).catch(() => {});
@@ -399,6 +456,13 @@ export default function HomePage() {
   useEffect(() => {
     if (!data || handledHash.current) return;
     handledHash.current = true;
+    // no link to follow: open wherever you chose in Customize
+    const sv = readLocal<string>("startView", "top");
+    if (!location.hash && !location.search.includes("q=") && sv !== "top") {
+      if (sv === "later") setQuickTab("later");
+      else if (sv === "favorites") setQuickTab("starred");
+      else if (sv.startsWith("folder:") && data.folders.some((f) => f.id === sv.slice(7))) setTimeout(() => jumpToFolder(sv.slice(7)), 200);
+    }
     const m = location.hash.match(/^#folder-(.+)$/);
     if (m && data.folders.some((f) => f.id === m[1])) setTimeout(() => jumpToFolder(m[1]), 150);
     // #link-<id>: open that website's folder, scroll to the card and show its details
@@ -529,6 +593,11 @@ export default function HomePage() {
     return history.map((h) => byId.get(h.linkId)).filter((r): r is LinkRef => !!r).slice(0, 10);
   }, [history, allRefs]);
   const readLater = allRefs.filter((r) => personal.links[r.link.id]?.later);
+  // newest links from people you follow
+  const followingAdds = personal.following.length
+    ? allRefs.filter((r) => r.link.addedBy && personal.following.includes(r.link.addedBy.toLowerCase()))
+      .sort((a, b) => (b.link.createdAt || "").localeCompare(a.link.createdAt || "")).slice(0, 12)
+    : [];
   const hiddenCount = allRefs.filter((r) => personal.links[r.link.id]?.hidden).length;
   const lastOpened = useMemo(() => new Map(history.map((h) => [h.linkId, h.at])), [history]);
   const folderById = useMemo(() => new Map((data?.folders || []).map((f) => [f.id, f])), [data]);
@@ -1068,10 +1137,21 @@ export default function HomePage() {
       const res = await fetch("/api/auth", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: authMode, username: fUsername, password: fPassword }),
+        body: JSON.stringify(ticket
+          ? { action: "login2fa", ticket, code: fTotp, remember: rememberMe }
+          : { action: authMode, username: fUsername, password: fPassword, remember: rememberMe }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Could not log in");
+      if (!res.ok) {
+        if (/expired|password again/.test(json.error || "")) { setTicket(null); setFTotp(""); }
+        throw new Error(json.error || "Could not log in");
+      }
+      if (json.needs2fa) {
+        setTicket(json.ticket);
+        setFTotp("");
+        return;
+      }
+      setTicket(null); setFTotp("");
       setUser(json.user);
       setRole(json.role || null);
       setOwnerExists((o) => o || json.role === "owner");
@@ -1426,6 +1506,11 @@ export default function HomePage() {
                     <div className="menu-backdrop" onClick={() => setUserMenu(false)} />
                     <div className="menu">
                       <div className="menu-head">Signed in as<strong>{user}</strong></div>
+                      <a href={`/u/${encodeURIComponent(user)}`} className="menu-link"><Icon name="user" /> My profile</a>
+                      <button onClick={() => { setUserMenu(false); setModal({ type: "profileEdit" }); }}><Icon name="edit" /> Edit profile</button>
+                      <button onClick={() => { setUserMenu(false); setModal({ type: "account" }); }}><Icon name="lock" /> Account &amp; security</button>
+                      <button onClick={() => { setUserMenu(false); setMyStuffOpen(true); requestAnimationFrame(() => document.querySelector(".my-stuff")?.scrollIntoView({ behavior: "smooth" })); }}><Icon name="folder" /> My Stuff (private)</button>
+                      <a href="/people" className="menu-link"><Icon name="users" /> People</a>
                       <button onClick={() => { setUserMenu(false); setSuggest({}); }}><Icon name="bulb" /> My suggestions</button>
                       <button onClick={() => { setUserMenu(false); setChatOpen(true); }}><Icon name="chat" /> Open chat</button>
                       <button onClick={handleLogout}><Icon name="logout" /> Log out</button>
@@ -1635,7 +1720,7 @@ export default function HomePage() {
         ) : (
           <>
             <QuickTabs
-              lists={{ recent: recentOpened, later: readLater, starred: favorites, top: topRated, visited: mostVisited, new: recent }}
+              lists={{ recent: recentOpened, later: readLater, starred: favorites, following: followingAdds, top: topRated, visited: mostVisited, new: recent }}
               tab={quickTab}
               setTab={(t) => { setQuickTab(t); writeLocal("quickTab", t); }}
               onOpen={trackAndOpen}
@@ -1664,6 +1749,16 @@ export default function HomePage() {
               <p>No websites match that search. Know a good one?</p>
               <button className="btn btn-secondary" onClick={() => setSuggest({ kind: "addLink" })}><Icon name="bulb" /> Suggest a website</button>
             </div>
+          )}
+          {user && !filtering && (personal.myStuff.length > 0 || myStuffOpen) && personal.loaded && (
+            <MyStuff
+              items={personal.myStuff}
+              collapsed={!!collapsed["__mystuff"]}
+              newTab={look.newTab}
+              onToggle={() => toggleCollapsed("__mystuff")}
+              act={personal.myStuffAction}
+              toast={showToast}
+            />
           )}
           <CardContext.Provider value={cardEnv}>
             {specialViews.map((v) => (
@@ -1909,7 +2004,16 @@ export default function HomePage() {
       )}
       {modal?.type === "shortcuts" && <ShortcutsModal onClose={() => setModal(null)} />}
       {modal?.type === "leaderboard" && <LeaderboardModal me={user} online={presence.users} onClose={() => setModal(null)} />}
-      {modal?.type === "customize" && <CustomizeModal look={look} onChange={changeLook} onClose={() => setModal(null)} />}
+      {modal?.type === "customize" && (
+        <CustomizeModal
+          look={look}
+          onChange={changeLook}
+          onClose={() => setModal(null)}
+          startView={startView}
+          onStartView={(v) => { setStartView(v); writeLocal("startView", v); }}
+          folders={topFolders}
+        />
+      )}
       {modal?.type === "whatsnew" && <WhatsNew activity={data?.activity || []} onClose={() => setModal(null)} />}
       {modal?.type === "spin" && (
         <SpinWheel refs={allRefs} folders={sortedFolders} onOpen={(f, l) => trackAndOpen(f, l, true)} onClose={() => setModal(null)} />
@@ -1980,6 +2084,7 @@ export default function HomePage() {
                 <div className="form-group">
                   <label>New password</label>
                   <input type="password" value={fPassword} onChange={(e) => setFPassword(e.target.value)} required minLength={6} autoComplete="new-password" />
+                  <PasswordStrength password={fPassword} />
                 </div>
                 <div className="modal-actions">
                   <button type="button" className="btn btn-secondary" onClick={() => setAuthMode("login")}>Back</button>
@@ -1987,6 +2092,20 @@ export default function HomePage() {
                 </div>
               </form>
             ) : (
+              ticket ? (
+                <form onSubmit={handleAuth}>
+                  <p className="modal-text">🔐 2-step login is on. Open your authenticator app and type the 6-digit code for Theo&apos;s Bookmarks.</p>
+                  <div className="form-group">
+                    <label>Code</label>
+                    <input value={fTotp} onChange={(e) => setFTotp(e.target.value.replace(/\D/g, "").slice(0, 6))} required autoFocus inputMode="numeric" autoComplete="one-time-code" placeholder="123456" />
+                    <div className="hint">Lost your phone? Use “Forgot password?” with your recovery code — that also turns 2-step login off.</div>
+                  </div>
+                  <div className="modal-actions">
+                    <button type="button" className="btn btn-secondary" onClick={() => { setTicket(null); setFTotp(""); }}>Back</button>
+                    <button type="submit" className="btn btn-primary" disabled={submitting || fTotp.length !== 6}>{submitting ? "…" : "Log in"}</button>
+                  </div>
+                </form>
+              ) : (
               <form onSubmit={handleAuth}>
                 <div className="form-group">
                   <label>Username</label>
@@ -2004,9 +2123,13 @@ export default function HomePage() {
                     autoComplete={authMode === "signup" ? "new-password" : "current-password"}
                   />
                   {authMode === "signup"
-                    ? <div className="hint">At least 6 characters. Don&apos;t reuse a password from another site.</div>
+                    ? <><PasswordStrength password={fPassword} /><div className="hint">At least 6 characters. Don&apos;t reuse a password from another site.</div></>
                     : <button type="button" className="link-btn forgot" onClick={() => { setFPassword(""); setFCode(""); setAuthMode("reset"); }}>Forgot password?</button>}
                 </div>
+                <label className="check remember">
+                  <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} />
+                  Keep me logged in on this device
+                </label>
                 <div className="modal-actions">
                   <button type="button" className="btn btn-secondary" onClick={() => setModal(null)}>Cancel</button>
                   <button type="submit" className="btn btn-primary" disabled={submitting}>
@@ -2014,6 +2137,7 @@ export default function HomePage() {
                   </button>
                 </div>
               </form>
+              )
             )}
           </div>
         </div>
@@ -2051,9 +2175,38 @@ export default function HomePage() {
         <NotificationPanel notifications={personal.notifications} onClose={() => setNotifOpen(false)} onOpenChat={() => { setNotifOpen(false); setChatOpen(true); }} />
       )}
       {modal?.type === "profileEdit" && (
-        <ProfileModal profile={personal.profile} onSave={personal.saveProfile} onClose={() => setModal(null)} />
+        <ProfileModal
+          profile={personal.profile}
+          links={allRefs.filter((r) => favoriteSet.has(r.link.id) || r.link.addedBy?.toLowerCase() === user?.toLowerCase()).map((r) => ({ id: r.link.id, name: r.link.name }))}
+          onSave={personal.saveProfile}
+          onClose={() => setModal(null)}
+        />
       )}
-      {profileView && <ProfileCard username={profileView} onClose={() => setProfileView(null)} />}
+      {profileView && (
+        <ProfileCard
+          username={profileView}
+          me={user}
+          onFollow={(u, on) => personal.follow(u, on)}
+          onKudos={(u) => fetch("/api/me", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "kudos", username: u }) }).then((r) => r.json())}
+          onClose={() => setProfileView(null)}
+        />
+      )}
+      {modal?.type === "account" && user && (
+        <AccountModal
+          user={user}
+          profile={personal.profile}
+          blocked={personal.blocked}
+          syncOn={personal.settings.sync !== false}
+          onProfile={personal.saveProfile}
+          onUnblock={(u) => personal.block(u, false)}
+          onSyncChange={(on) => personal.saveSettings({ sync: on })}
+          onRenamed={(name) => { setUser(name); personal.reload(); }}
+          onDeleted={() => { setModal(null); setUser(null); setRole(null); setAdminUnlocked(false); showToast("Your account was deleted"); }}
+          onRecoveryCode={(code) => setModal({ type: "recovery", code, context: "reset" })}
+          toast={showToast}
+          onClose={() => setModal(null)}
+        />
+      )}
       <ChatPanel
         open={chatOpen}
         setOpen={setChatOpen}
@@ -2064,6 +2217,8 @@ export default function HomePage() {
         canModerate={adminUnlocked}
         onNeedLogin={() => openLogin()}
         showToast={showToast}
+        blocked={personal.blocked}
+        onBlock={(u) => { personal.block(u, true); showToast(`Hid messages from ${u}`); }}
       />
       {showCmd && (
         <CommandPalette

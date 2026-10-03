@@ -26,11 +26,19 @@ function run(cmd) {
       return ["0", [...kv.keys()].filter((k) => live(k) && re.test(k))];
     }
     case "get": { const e = live(a[0]); return e && typeof e.v === "string" ? e.v : null; }
+    case "rename": {
+      const e = live(a[0]);
+      if (!e) throw new Error("ERR no such key");
+      kv.delete(a[0]);
+      kv.set(a[1], e);
+      return "OK";
+    }
     case "set": {
       const [k, v, ...opts] = a;
       const o = opts.map((x) => str(x).toLowerCase());
       if (o.includes("nx") && live(k)) return null;
       if (o.includes("xx") && !live(k)) return null;
+      if (o.includes("keepttl")) { const old = live(k); kv.set(k, { v: str(v), exp: old?.exp || 0 }); return "OK"; }
       let exp = 0;
       const ex = o.indexOf("ex");
       if (ex >= 0) exp = now() + Number(opts[ex + 1]) * 1000;

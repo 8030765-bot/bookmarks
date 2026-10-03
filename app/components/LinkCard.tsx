@@ -7,6 +7,7 @@ import { hostOf, isExpired, isNewSince, isUpdatedSince, safeHref, timeAgo, warmU
 import { StarRating } from "./Personal";
 import { COST_LABEL, STATUS_LABEL, STICKER_LABEL, useCardEnv } from "./cardEnv";
 import LinkDetails from "./LinkDetails";
+import { UserChip } from "./People";
 
 export type { LinkCardActions } from "./cardEnv";
 
@@ -188,7 +189,7 @@ export default function LinkCard({
           {steps > 0 && <span className="meta-steps" title="Checklist">☑ {ticked}/{steps}</span>}
           {link.readMins ? <span className="meta-clicks">{link.readMins} min read</span> : null}
           {(link.clicks || 0) > 0 && <span className="meta-clicks">{link.clicks} visit{link.clicks === 1 ? "" : "s"}</span>}
-          {link.addedBy && <button className="meta-by" onClick={(e) => { e.preventDefault(); e.stopPropagation(); actions.openProfile(link.addedBy!); }}>by {link.addedBy}</button>}
+          {link.addedBy && <span className="meta-by">by <UserChip username={link.addedBy} className="meta-by" onOpen={actions.openProfile} /></span>}
           {pref.done && <span className="meta-done" title="You marked this done"><Icon name="check" /> done</span>}
           <StarRating linkId={link.id} mine={env.myRatings[link.id]} avg={agg?.avg} count={agg?.count} canRate={!!me} onRate={actions.rate} />
         </div>
