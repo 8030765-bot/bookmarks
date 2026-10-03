@@ -7,7 +7,9 @@ import type { PaletteItem } from "./CommandPalette";
 import type { SuggestStart } from "./SuggestModal";
 import { Icon } from "./components/Icon";
 import FolderSection, { Drag } from "./components/FolderSection";
-import { LinkCardActions } from "./components/LinkCard";
+import { CardContext, CardEnv, LinkCardActions } from "./components/cardEnv";
+import CardMenu, { CardMenuState } from "./components/CardMenu";
+import SelectionBar from "./components/SelectionBar";
 import type { LinkModalMode, LinkValues } from "./components/LinkModal";
 import { reportStatus, useOnRevChange, useRev, useSyncLoop, useSyncStatus } from "./components/sync";
 // big, rarely-needed pieces load on demand so the first visit is faster
@@ -15,12 +17,12 @@ const CommandPalette = dynamic(() => import("./CommandPalette"), { ssr: false })
 const AdminPanel = dynamic(() => import("./AdminPanel"), { ssr: false, loading: () => <div className="admin-panel admin-loading"><div className="skeleton" /></div> });
 const SuggestModal = dynamic(() => import("./SuggestModal"), { ssr: false });
 const LinkModal = dynamic(() => import("./components/LinkModal"), { ssr: false });
-import { ConfirmModal, FolderModal, FolderValues, ShortcutsModal } from "./components/Modals";
+import { ConfirmModal, FolderModal, FolderValues, PromptModal, ShortcutsModal } from "./components/Modals";
 import Favicon from "./components/Favicon";
 import {
   NotificationBell, NotificationPanel, ProfileCard, ProfileModal, usePersonal,
 } from "./components/Personal";
-import { LinkRef, isNew, newOpId, readLocal, safeHref, suggestionSummary, writeLocal } from "./components/ui";
+import { LinkRef, asMarkdown, isExpired, isNewSince, newOpId, readLocal, safeHref, suggestionSummary, urlsIn, writeLocal } from "./components/ui";
 import {
   CustomizeModal, DEFAULT_LOOK, LeaderboardModal, Look, OnlinePill, Palette, PollCards, SpinWheel, WhatsNew, applyLook, usePresence,
 } from "./components/Community";
@@ -30,7 +32,10 @@ const CACHE_KEY = "cache:data";
 const DEFAULT_TITLE = "Made by Theo 7A";
 const DEFAULT_SUBTITLE = "Shared school bookmarks — everyone sees the same list";
 
-type Sort = "manual" | "name" | "newest" | "clicks" | "likes";
+type Sort = "manual" | "name" | "newest" | "clicks" | "likes" | "mine";
+type PromptState = { title: string; initial: string; onSave: (v: string) => void; multiline?: boolean; placeholder?: string };
+/** Treat a fresh visit as starting after 30 minutes away. */
+const SESSION_GAP_MS = 30 * 60_000;
 type Modal =
   | { type: "link"; mode: LinkModalMode }
   | { type: "folder"; folder?: Folder }
@@ -68,9 +73,10 @@ function diffLook(base: Look, next: Look): Partial<Look> {
   return Object.fromEntries(Object.entries(next).filter(([k, v]) => base[k as keyof Look] !== v)) as Partial<Look>;
 }
 
-type QuickTab = "recent" | "starred" | "top" | "visited" | "new";
+type QuickTab = "recent" | "later" | "starred" | "top" | "visited" | "new";
 const QUICK_TABS: { id: QuickTab; label: string; icon: string }[] = [
   { id: "recent", label: "Recent", icon: "clock" },
+  { id: "later", label: "Read later", icon: "note" },
   { id: "starred", label: "Starred", icon: "star" },
   { id: "top", label: "Top rated", icon: "heart" },
   { id: "visited", label: "Most visited", icon: "chart" },
@@ -160,6 +166,16 @@ export default function HomePage() {
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [scrolled, setScrolled] = useState(false);
   const [moreMenu, setMoreMenu] = useState(false);
+  const [cardMenu, setCardMenu] = useState<CardMenuState | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const lastSelected = useRef<string | null>(null);
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState<PromptState | null>(null);
+  const [showHidden, setShowHidden] = useState(false);
+  const [folderViewPrefs, setFolderViewPrefs] = useState<Record<string, "grid" | "list">>({});
+  // when you were last here: links added/edited since then get a badge
+  const [since, setSince] = useState(0);
   const installPrompt = useRef<any>(null);
   const [canInstall, setCanInstall] = useState(false);
   const topbarRef = useRef<HTMLDivElement>(null);
@@ -186,6 +202,16 @@ export default function HomePage() {
     setHistory(readLocal("history", []));
     setShowTags(readLocal("showTags", false));
     setDismissed(readLocal<string | null>("dismissedAnnouncement", null));
+    setFolderViewPrefs(readLocal("folderViews", {}));
+    // a new visit starts after 30 minutes away; remember when the last one ended
+    const lastSeen = readLocal<number>("lastSeen", 0);
+    let prev = readLocal<number>("prevVisit", 0);
+    if (!lastSeen || Date.now() - lastSeen > SESSION_GAP_MS) { prev = lastSeen; writeLocal("prevVisit", prev); }
+    setSince(prev);
+    const tick = () => writeLocal("lastSeen", Date.now());
+    tick();
+    const id = setInterval(tick, 60_000);
+    return () => clearInterval(id);
   }, []);
 
   // ---------- page chrome: scroll, sticky offsets, install, connection ----------
@@ -465,11 +491,15 @@ export default function HomePage() {
   const topRated = allRefs.filter((r) => (r.link.likes?.length || 0) > 0).sort((a, b) => (b.link.likes?.length || 0) - (a.link.likes?.length || 0)).slice(0, 8);
   const latestActivity = data?.activity?.[0]?.id ?? null;
   const hasNews = !!latestActivity && seenActivity !== "" && seenActivity !== latestActivity;
-  const recent = allRefs.filter((r) => isNew(r.link)).sort((a, b) => (b.link.createdAt || "").localeCompare(a.link.createdAt || "")).slice(0, 8);
+  const recent = allRefs.filter((r) => isNewSince(r.link, since)).sort((a, b) => (b.link.createdAt || "").localeCompare(a.link.createdAt || "")).slice(0, 8);
   const recentOpened: LinkRef[] = useMemo(() => {
     const byId = new Map(allRefs.map((r) => [r.link.id, r]));
     return history.map((h) => byId.get(h.linkId)).filter((r): r is LinkRef => !!r).slice(0, 10);
   }, [history, allRefs]);
+  const readLater = allRefs.filter((r) => personal.links[r.link.id]?.later);
+  const hiddenCount = allRefs.filter((r) => personal.links[r.link.id]?.hidden).length;
+  const lastOpened = useMemo(() => new Map(history.map((h) => [h.linkId, h.at])), [history]);
+  const folderById = useMemo(() => new Map((data?.folders || []).map((f) => [f.id, f])), [data]);
   const totalClicks = allRefs.reduce((n, r) => n + (r.link.clicks || 0), 0);
   const sortedFolders = useMemo(
     () => [...(data?.folders || [])].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned)),
@@ -479,22 +509,44 @@ export default function HomePage() {
   const words = q.split(/\s+/).filter(Boolean);
   const filtering = !!q || !!tagFilter;
 
-  function visibleLinks(folder: Folder) {
-    let list = folder.links.filter((l) => {
-      if (tagFilter && !l.tags?.includes(tagFilter)) return false;
-      if (!words.length) return true;
-      // every word has to appear somewhere: name, address, notes, tags, folder or who added it
-      const haystack = [l.name, l.url, l.notes || "", folder.name, l.addedBy || "", ...(l.tags || [])].join(" ").toLowerCase();
-      return words.every((w) => haystack.includes(w));
-    });
+  /** Hidden-for-me and expired links drop out (admins still see expired ones). */
+  function shown(l: Link) {
+    if (!showHidden && personal.links[l.id]?.hidden) return false;
+    if (!adminUnlocked && isExpired(l)) return false;
+    return true;
+  }
+  function matches(l: Link, folder: Folder) {
+    if (tagFilter && !l.tags?.includes(tagFilter)) return false;
+    if (!words.length) return true;
+    // every word has to appear somewhere: name, address, notes, tags, folder, who added it, or your own note
+    const mine = personal.links[l.id];
+    const haystack = [l.name, l.url, l.notes || "", l.tip || "", folder.name, l.addedBy || "", l.keyword || "", mine?.note || "", mine?.rename || "", ...(l.tags || [])].join(" ").toLowerCase();
+    return words.every((w) => haystack.includes(w));
+  }
+  function sortLinks(list: Link[]) {
     if (sort === "name") list = [...list].sort((a, b) => a.name.localeCompare(b.name));
     if (sort === "newest") list = [...list].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
     if (sort === "clicks") list = [...list].sort((a, b) => (b.clicks || 0) - (a.clicks || 0));
     if (sort === "likes") list = [...list].sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
-    return list;
+    if (sort === "mine") list = [...list].sort((a, b) => (personal.ratings[b.id] || 0) - (personal.ratings[a.id] || 0));
+    // pinned links always lead their folder
+    return [...list].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned));
   }
-  const folderViews = sortedFolders.map((f) => ({ folder: f, links: visibleLinks(f) }));
+  function visibleLinks(folder: Folder) {
+    return sortLinks(folder.links.filter((l) => shown(l) && matches(l, folder)));
+  }
+  /** Links from other folders that are set to also show in this one. */
+  function shortcutsFor(folder: Folder): LinkRef[] {
+    return allRefs.filter((r) => r.folder.id !== folder.id && r.link.alsoIn?.includes(folder.id) && shown(r.link) && matches(r.link, r.folder));
+  }
+  const folderViews = sortedFolders.map((f) => ({ folder: f, links: visibleLinks(f), shortcuts: shortcutsFor(f) }));
   const matchCount = folderViews.reduce((n, v) => n + v.links.length, 0);
+  /** Every card on screen, top to bottom — for J/K and shift-click ranges. */
+  const visibleOrder = useMemo(
+    () => folderViews.flatMap((v) => (!filtering && collapsed[v.folder.id] ? [] : v.links.map((l) => l.id))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data, search, tagFilter, sort, collapsed, showHidden, personal.links, adminUnlocked]
+  );
 
   const addingLocked = !!data?.settings?.lockAdding && !adminUnlocked;
   const dragEnabled = adminUnlocked && sort === "manual" && !filtering;
@@ -530,10 +582,10 @@ export default function HomePage() {
     trackAndOpen(pick.folder, pick.link, true);
     showToast(`🎲 Opened ${pick.link.name}`);
   }
-  function openAdd(folderId?: string) {
+  function openAdd(folderId?: string, url?: string, bulk?: string) {
     if (addingLocked) { setSuggest({ kind: "addLink" }); return; }
     if (!data?.folders.length) { setModal({ type: "folder" }); showToast("Create a folder first"); return; }
-    setModal({ type: "link", mode: { kind: "add", folderId } });
+    setModal({ type: "link", mode: { kind: "add", folderId, url, bulk } });
   }
   function openNewFolder() {
     if (addingLocked) { setSuggest({ kind: "other" }); return; }
@@ -551,7 +603,8 @@ export default function HomePage() {
 
   async function saveLink(values: LinkValues): Promise<boolean> {
     if (modal?.type !== "link") return false;
-    const common = { name: values.name, url: values.url, tags: values.tags, color: values.color, notes: values.notes, password: adminPw() };
+    const { folderId: _target, ...fields } = values;
+    const common = { ...fields, password: adminPw() };
     if (modal.mode.kind === "add") {
       const ok = await api("addLink", { ...common, folderId: values.folderId });
       if (ok) showToast(`Added ${values.name} for everyone`);
@@ -564,6 +617,11 @@ export default function HomePage() {
     }
     if (ok) showToast("Saved");
     return !!ok;
+  }
+  async function addMany(folderId: string, links: { name: string; url: string }[], tags: string[]): Promise<boolean> {
+    const next = await api("addLinks", { folderId, links, tags, password: adminPw() });
+    if (next) showToast(`Added ${next.activity?.[0]?.detail?.match(/\d+/)?.[0] || links.length} websites for everyone`);
+    return !!next;
   }
   async function createFolderInline(name: string): Promise<string | null> {
     const next = await api("addFolder", { name, emoji: "📁", password: adminPw() });
@@ -607,7 +665,43 @@ export default function HomePage() {
     filterTag: (t) => { setTagFilter(t === tagFilter ? "" : t); window.scrollTo({ top: 0, behavior: "smooth" }); },
     rate: (linkId, stars) => { if (!user) { showToast("Log in to rate"); openLogin(); return; } personal.rate(linkId, stars); },
     openProfile: (u) => setProfileView(u),
+    pref: (linkId, patch) => personal.setLinkPref(linkId, patch),
+    adminEdit: async (f, l, patch) => {
+      const ok = await api("editLink", { folderId: f.id, linkId: l.id, ...patch, password: adminPassword });
+      if (ok) showToast("Saved");
+    },
+    menu: (f, l, at) => setCardMenu({ folder: f, link: l, ...at }),
+    select: (linkId, shift) => toggleSelect(linkId, shift),
+    prompt: (title, initial, onSave, opts) => setPrompt({ title, initial, onSave, ...opts }),
+    toast: (msg) => showToast(msg),
   };
+
+  // ---------- picking several cards ----------
+  function toggleSelect(linkId: string, shift: boolean) {
+    const anchor = lastSelected.current;
+    lastSelected.current = linkId;
+    // shift-click: select everything between the last pick and this one
+    const a = shift && anchor && anchor !== linkId ? visibleOrder.indexOf(anchor) : -1;
+    const b = visibleOrder.indexOf(linkId);
+    const range = a >= 0 && b >= 0 ? visibleOrder.slice(Math.min(a, b), Math.max(a, b) + 1) : null;
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (range) range.forEach((id) => next.add(id));
+      else if (next.has(linkId)) next.delete(linkId);
+      else next.add(linkId);
+      return next;
+    });
+  }
+  const selectedRefs = allRefs.filter((r) => selected.has(r.link.id));
+  const clearSelection = () => { setSelected(new Set()); lastSelected.current = null; };
+  function copySelected(format: "lines" | "markdown") {
+    const text = selectedRefs.map((r) => (format === "markdown" ? `- ${asMarkdown(r.link)}` : r.link.url)).join("\n");
+    navigator.clipboard.writeText(text).then(() => showToast(`Copied ${selectedRefs.length} links`)).catch(() => showToast("Couldn't copy"));
+  }
+  async function bulkAdmin(action: string, extra: Record<string, unknown>, done: string) {
+    const items = selectedRefs.map((r) => ({ folderId: r.folder.id, linkId: r.link.id }));
+    if (await api(action, { items, ...extra, password: adminPassword })) { showToast(done); clearSelection(); }
+  }
 
   async function moveLink(from: { folderId: string; linkId: string }, toFolderId: string, beforeLinkId: string | null) {
     setDrag(null);
@@ -633,16 +727,29 @@ export default function HomePage() {
     setCollapsed(next);
     writeLocal("collapsed", next);
   }
-  function openAllIn(folder: Folder, links: Link[]) {
+  function openAllIn(links: Link[]) {
     if (links.length > 5 && !confirm(`Open ${links.length} tabs at once?`)) return;
     links.forEach((l) => { const h = safeHref(l.url); if (h) window.open(h, "_blank", "noopener,noreferrer"); });
     showToast(`Opened ${links.length} tabs — allow pop-ups if some were blocked`);
   }
   function openTopResult() {
+    // an exact keyword ("calc") jumps straight to its link
+    const kw = search.trim().toLowerCase();
+    const keyed = kw ? allRefs.find((r) => r.link.keyword === kw) : undefined;
+    if (keyed) { trackAndOpen(keyed.folder, keyed.link, true); setSearch(""); searchRef.current?.blur(); return; }
     const first = folderViews.find((v) => v.links.length);
     if (!first) return;
     trackAndOpen(first.folder, first.links[0], true);
     searchRef.current?.blur();
+  }
+  function toggleFolderView(id: string) {
+    setFolderViewPrefs((prev) => {
+      const current = prev[id] || view;
+      const next = { ...prev, [id]: current === "grid" ? "list" : "grid" } as Record<string, "grid" | "list">;
+      if (next[id] === view) delete next[id]; // back to following the main setting
+      writeLocal("folderViews", next);
+      return next;
+    });
   }
   async function installApp() {
     setMoreMenu(false);
@@ -783,13 +890,41 @@ export default function HomePage() {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setShowCmd((s) => !s); return; }
     if (e.key === "Escape") {
       if (document.activeElement === searchRef.current && search) { setSearch(""); return; }
-      setShowCmd(false); setModal(null); setSuggest(null); setUserMenu(false);
+      if (cardMenu) { setCardMenu(null); return; }
+      if (!modal && !showCmd && !suggest && (selected.size || focusedId || expandedId)) {
+        clearSelection(); setFocusedId(null); setExpandedId(null); return;
+      }
+      setShowCmd(false); setModal(null); setSuggest(null); setUserMenu(false); setPrompt(null);
       return;
     }
     const t = e.target as HTMLElement;
     if (e.metaKey || e.ctrlKey || e.altKey || t.closest("input, textarea, select, [contenteditable]")) return;
-    if (modal || showCmd || suggest) return;
+    if (modal || showCmd || suggest || prompt || cardMenu) return;
     const k = e.key.toLowerCase();
+    // J / K walk through the cards; while one is picked, these keys act on it
+    if (k === "j" || k === "k") {
+      e.preventDefault();
+      if (!visibleOrder.length) return;
+      const i = focusedId ? visibleOrder.indexOf(focusedId) : -1;
+      const next = visibleOrder[Math.max(0, Math.min(visibleOrder.length - 1, i < 0 ? 0 : i + (k === "j" ? 1 : -1)))];
+      setFocusedId(next);
+      requestAnimationFrame(() => document.querySelector(`.card[data-link-id="${next}"]`)?.scrollIntoView({ block: "nearest", behavior: look.motion ? "smooth" : "auto" }));
+      return;
+    }
+    const focusedRef = focusedId ? allRefs.find((r) => r.link.id === focusedId) : undefined;
+    if (focusedRef) {
+      const { folder: f, link: l } = focusedRef;
+      const cardKeys: Record<string, () => void> = {
+        enter: () => trackAndOpen(f, l, true),
+        f: () => cardActions.star(f, l),
+        b: () => personal.setLinkPref(l.id, { later: !personal.links[l.id]?.later }),
+        d: () => personal.setLinkPref(l.id, { done: !personal.links[l.id]?.done }),
+        i: () => setExpandedId(expandedId === l.id ? null : l.id),
+        " ": () => toggleSelect(l.id, e.shiftKey),
+      };
+      if (/^[1-5]$/.test(k)) { e.preventDefault(); cardActions.rate(l.id, Number(k)); return; }
+      if (cardKeys[k]) { e.preventDefault(); cardKeys[k](); return; }
+    }
     const run: Record<string, () => void> = {
       "/": () => searchRef.current?.focus(),
       n: () => openAdd(),
@@ -811,6 +946,24 @@ export default function HomePage() {
     const handler = (e: KeyboardEvent) => keys.current?.(e);
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // paste a link anywhere on the page (not in a text box) to add it
+  const onPaste = useRef<(e: ClipboardEvent) => void>();
+  onPaste.current = (e: ClipboardEvent) => {
+    const t = e.target as HTMLElement;
+    if (t?.closest?.("input, textarea, [contenteditable]") || modal || suggest || showCmd || prompt) return;
+    const text = e.clipboardData?.getData("text") || "";
+    const found = urlsIn(text);
+    if (!found.length) return;
+    e.preventDefault();
+    if (found.length > 1) openAdd(activeFolder || undefined, undefined, found.join("\n"));
+    else openAdd(activeFolder || undefined, found[0]);
+  };
+  useEffect(() => {
+    const handler = (e: ClipboardEvent) => onPaste.current?.(e);
+    window.addEventListener("paste", handler);
+    return () => window.removeEventListener("paste", handler);
   }, []);
 
   // ---------- command palette ----------
@@ -853,6 +1006,26 @@ export default function HomePage() {
 
   // ---------- render ----------
   const title = data?.settings?.title || DEFAULT_TITLE;
+  const cardEnv: CardEnv = {
+    actions: cardActions,
+    me: user,
+    admin: adminUnlocked,
+    favorites: favoriteSet,
+    ratings: aggRatings,
+    myRatings: personal.ratings,
+    prefs: personal.links,
+    since,
+    descriptions: look.descriptions,
+    iconTint: look.iconTint,
+    selected,
+    focusedId,
+    expandedId,
+    setExpanded: setExpandedId,
+    query: search,
+    allRefs,
+    folderById,
+    lastOpened,
+  };
 
   if (loading) {
     return (
@@ -950,6 +1123,11 @@ export default function HomePage() {
                       <Icon name={theme === "dark" ? "sun" : "moon"} /> {theme === "dark" ? "Light mode" : "Dark mode"} <span className="kbd">T</span>
                     </button>
                     <button onClick={() => { setMoreMenu(false); toggleAll(); }}><Icon name="list" /> Collapse / expand all <span className="kbd">X</span></button>
+                    {(hiddenCount > 0 || showHidden) && (
+                      <button onClick={() => { setMoreMenu(false); setShowHidden((s) => !s); }}>
+                        <Icon name={showHidden ? "eyeOff" : "eye"} /> {showHidden ? "Hide my hidden websites" : `Show my hidden websites (${hiddenCount})`}
+                      </button>
+                    )}
                     <button onClick={() => { setMoreMenu(false); setModal({ type: "shortcuts" }); }}><Icon name="keyboard" /> Keyboard shortcuts <span className="kbd">?</span></button>
                     {canInstall && <button onClick={installApp}><Icon name="download" /> Install app</button>}
                   </div>
@@ -1051,6 +1229,7 @@ export default function HomePage() {
               <option value="newest">Newest first</option>
               <option value="clicks">Most visited</option>
               <option value="likes">Most liked</option>
+              {user && <option value="mine">My ratings</option>}
             </select>
             <div className="seg-toggle" role="group" aria-label="View">
               <button className={view === "grid" ? "on" : ""} onClick={() => changeView("grid")} title="Grid view"><Icon name="grid" /></button>
@@ -1097,7 +1276,7 @@ export default function HomePage() {
         ) : (
           <>
             <QuickTabs
-              lists={{ recent: recentOpened, starred: favorites, top: topRated, visited: mostVisited, new: recent }}
+              lists={{ recent: recentOpened, later: readLater, starred: favorites, top: topRated, visited: mostVisited, new: recent }}
               tab={quickTab}
               setTab={(t) => { setQuickTab(t); writeLocal("quickTab", t); }}
               onOpen={trackAndOpen}
@@ -1123,40 +1302,39 @@ export default function HomePage() {
               <button className="btn btn-secondary" onClick={() => setSuggest({ kind: "addLink" })}><Icon name="bulb" /> Suggest a website</button>
             </div>
           )}
-          {folderViews.map(({ folder, links }) => {
-            if (filtering && links.length === 0) return null;
-            return (
-              <FolderSection
-                key={folder.id}
-                folder={folder}
-                links={links}
-                totalLinks={folder.links.length}
-                collapsed={!filtering && !!collapsed[folder.id]}
-                query={search}
-                view={view}
-                admin={adminUnlocked}
-                me={user}
-                favorites={favoriteSet}
-                ratings={aggRatings}
-                myRatings={personal.ratings}
-                canAdd={!addingLocked}
-                dragEnabled={dragEnabled}
-                drag={drag}
-                setDrag={setDrag}
-                dropTarget={dropTarget}
-                setDropTarget={setDropTarget}
-                actions={cardActions}
-                onToggle={() => toggleCollapsed(folder.id)}
-                onAddHere={() => openAdd(folder.id)}
-                onOpenAll={() => openAllIn(folder, links)}
-                onEditFolder={() => setModal({ type: "folder", folder })}
-                onDeleteFolder={() => setModal({ type: "deleteFolder", folder })}
-                onShareFolder={() => shareFolder(folder)}
-                onMoveLink={moveLink}
-                onMoveFolder={moveFolder}
-              />
-            );
-          })}
+          <CardContext.Provider value={cardEnv}>
+            {folderViews.map(({ folder, links, shortcuts }) => {
+              if (filtering && links.length === 0 && shortcuts.length === 0) return null;
+              return (
+                <FolderSection
+                  key={folder.id}
+                  folder={folder}
+                  links={links}
+                  shortcuts={shortcuts}
+                  totalLinks={folder.links.filter(shown).length}
+                  collapsed={!filtering && !!collapsed[folder.id]}
+                  view={folderViewPrefs[folder.id] || view}
+                  canAdd={!addingLocked}
+                  dragEnabled={dragEnabled}
+                  drag={drag}
+                  setDrag={setDrag}
+                  dropTarget={dropTarget}
+                  setDropTarget={setDropTarget}
+                  onToggle={() => toggleCollapsed(folder.id)}
+                  onToggleView={() => toggleFolderView(folder.id)}
+                  onAddHere={() => openAdd(folder.id)}
+                  onOpenAll={() => openAllIn(links)}
+                  onEditFolder={() => setModal({ type: "folder", folder })}
+                  onDeleteFolder={() => setModal({ type: "deleteFolder", folder })}
+                  onShareFolder={() => shareFolder(folder)}
+                  onMoveLink={moveLink}
+                  onMoveFolder={moveFolder}
+                  onDropUrl={(folderId, url) => openAdd(folderId, url)}
+                />
+              );
+            })}
+            {cardMenu && <CardMenu state={cardMenu} onClose={() => setCardMenu(null)} />}
+          </CardContext.Provider>
           {dragEnabled && sortedFolders.length > 0 && (
             <p className="drag-hint"><Icon name="grip" /> Admin tip: drag websites between folders, or drag a folder header to reorder.</p>
           )}
@@ -1174,11 +1352,41 @@ export default function HomePage() {
           data={data}
           submitting={submitting}
           canCreateFolder={!addingLocked}
+          admin={adminUnlocked}
+          canFetch={!!user}
           onSubmit={saveLink}
+          onBulk={addMany}
           onCreateFolder={createFolderInline}
           onClose={() => setModal(null)}
         />
       )}
+      {prompt && (
+        <PromptModal
+          title={prompt.title}
+          initial={prompt.initial}
+          multiline={prompt.multiline}
+          placeholder={prompt.placeholder}
+          onSave={prompt.onSave}
+          onClose={() => setPrompt(null)}
+        />
+      )}
+      <SelectionBar
+        refs={selectedRefs}
+        folders={sortedFolders}
+        admin={adminUnlocked}
+        onCopy={copySelected}
+        onOpenAll={() => openAllIn(selectedRefs.map((r) => r.link))}
+        onFavorite={() => {
+          if (!user) { showToast("Log in to save favorites"); openLogin(); return; }
+          selectedRefs.filter((r) => !favoriteSet.has(r.link.id)).forEach((r) => personal.toggleFavorite(r.link.id));
+          showToast(`Favorited ${selectedRefs.length}`);
+        }}
+        onLater={() => { selectedRefs.forEach((r) => personal.setLinkPref(r.link.id, { later: true })); showToast(`Added ${selectedRefs.length} to Read later`); }}
+        onMove={(folderId) => bulkAdmin("bulkMove", { targetFolderId: folderId }, `Moved ${selectedRefs.length} websites`)}
+        onTag={(tag) => bulkAdmin("bulkTag", { tag }, `Tagged ${selectedRefs.length} websites #${tag}`)}
+        onDelete={() => { if (confirm(`Delete ${selectedRefs.length} websites for everyone?`)) bulkAdmin("bulkDelete", {}, `Deleted ${selectedRefs.length} websites`); }}
+        onClear={clearSelection}
+      />
       {modal?.type === "folder" && (
         <FolderModal folder={modal.folder} admin={adminUnlocked} submitting={submitting} onSubmit={saveFolder} onClose={() => setModal(null)} />
       )}

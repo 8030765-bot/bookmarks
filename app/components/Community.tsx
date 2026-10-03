@@ -248,8 +248,18 @@ export const PALETTES: { id: Palette; label: string; swatch: [string, string] }[
   { id: "sunset", label: "Sunset", swatch: ["#170b0b", "#3d1d17"] },
   { id: "light", label: "Light", swatch: ["#f4f5f8", "#dcdfe6"] },
 ];
-export interface Look { palette: Palette; accent: string; density: "comfy" | "compact"; motion: boolean; newTab: boolean }
-export const DEFAULT_LOOK: Look = { palette: "black", accent: "", density: "comfy", motion: true, newTab: true };
+export interface Look {
+  palette: Palette;
+  accent: string;
+  density: "comfy" | "compact" | "large";
+  motion: boolean;
+  newTab: boolean;
+  /** show each site's description under its name */
+  descriptions: boolean;
+  /** tint each card with the main colour of the site's icon */
+  iconTint: boolean;
+}
+export const DEFAULT_LOOK: Look = { palette: "black", accent: "", density: "comfy", motion: true, newTab: true, descriptions: false, iconTint: false };
 
 export function applyLook(look: Look) {
   const root = document.documentElement;
@@ -292,9 +302,24 @@ export function CustomizeModal({ look, onChange, onClose }: { look: Look; onChan
             ))}
           </div>
         </div>
+        <div className="form-group">
+          <label>Card size</label>
+          <div className="seg">
+            {(["compact", "comfy", "large"] as const).map((d) => (
+              <button key={d} type="button" className={look.density === d ? "on" : ""} onClick={() => onChange({ ...look, density: d })}>
+                {d === "compact" ? "Compact" : d === "comfy" ? "Comfortable" : "Large"}
+              </button>
+            ))}
+          </div>
+        </div>
         <label className="toggle-row compact">
-          <div><strong>Compact cards</strong><span>Fit more websites on screen.</span></div>
-          <input type="checkbox" role="switch" checked={look.density === "compact"} onChange={(e) => onChange({ ...look, density: e.target.checked ? "compact" : "comfy" })} />
+          <div><strong>Show descriptions</strong><span>A line about each site under its name.</span></div>
+          <input type="checkbox" role="switch" checked={look.descriptions} onChange={(e) => onChange({ ...look, descriptions: e.target.checked })} />
+          <span className="switch" aria-hidden="true" />
+        </label>
+        <label className="toggle-row compact">
+          <div><strong>Colour cards by their icon</strong><span>Each card gets a stripe in its site&apos;s colour.</span></div>
+          <input type="checkbox" role="switch" checked={look.iconTint} onChange={(e) => onChange({ ...look, iconTint: e.target.checked })} />
           <span className="switch" aria-hidden="true" />
         </label>
         <label className="toggle-row compact">

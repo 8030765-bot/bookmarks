@@ -1,30 +1,35 @@
 "use client";
+import { useState } from "react";
 import { Folder, Link } from "@/lib/types";
 import { Icon } from "./Icon";
-import LinkCard, { Highlight, LinkCardActions } from "./LinkCard";
+import LinkCard, { Highlight } from "./LinkCard";
+import { useCardEnv } from "./cardEnv";
+import type { LinkRef } from "./ui";
 
 export type Drag = { kind: "link"; folderId: string; linkId: string } | { kind: "folder"; folderId: string } | null;
+
+/** A link dragged in from another tab or the address bar. */
+function droppedUrl(e: React.DragEvent): string {
+  const uri = e.dataTransfer.getData("text/uri-list").split(/\r?\n/).find((l) => l && !l.startsWith("#"));
+  return uri || e.dataTransfer.getData("text/plain").trim();
+}
+const carriesUrl = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes("text/uri-list");
 
 export default function FolderSection({
   folder,
   links,
+  shortcuts,
   totalLinks,
   collapsed,
-  query,
   view,
-  admin,
-  me,
-  favorites,
-  ratings,
-  myRatings,
   canAdd,
   dragEnabled,
   drag,
   setDrag,
   dropTarget,
   setDropTarget,
-  actions,
   onToggle,
+  onToggleView,
   onAddHere,
   onOpenAll,
   onEditFolder,
@@ -32,26 +37,23 @@ export default function FolderSection({
   onShareFolder,
   onMoveLink,
   onMoveFolder,
+  onDropUrl,
 }: {
   folder: Folder;
   links: Link[];
+  /** links from other folders that are also shown here */
+  shortcuts: LinkRef[];
   totalLinks: number;
   collapsed: boolean;
-  query: string;
   view: "grid" | "list";
-  admin: boolean;
-  me: string | null;
-  favorites: Set<string>;
-  ratings: Record<string, { avg: number; count: number }>;
-  myRatings: Record<string, number>;
   canAdd: boolean;
   dragEnabled: boolean;
   drag: Drag;
   setDrag: (d: Drag) => void;
   dropTarget: string | null;
   setDropTarget: (id: string | null) => void;
-  actions: LinkCardActions;
   onToggle: () => void;
+  onToggleView: () => void;
   onAddHere: () => void;
   onOpenAll: () => void;
   onEditFolder: () => void;
@@ -59,27 +61,45 @@ export default function FolderSection({
   onShareFolder: () => void;
   onMoveLink: (from: { folderId: string; linkId: string }, toFolderId: string, beforeLinkId: string | null) => void;
   onMoveFolder: (folderId: string, beforeFolderId: string) => void;
+  onDropUrl: (folderId: string, url: string) => void;
 }) {
+  const { admin, query } = useCardEnv();
+  const [urlOver, setUrlOver] = useState(false);
   const filtered = links.length !== totalLinks;
   const linkDragging = drag?.kind === "link";
   const folderDragging = drag?.kind === "folder" && drag.folderId !== folder.id;
   const isFolderDrop = dropTarget === `folder:${folder.id}`;
   const isEndDrop = dropTarget === `end:${folder.id}`;
+  const count = links.length + shortcuts.length;
 
   return (
     <section
       id={`folder-${folder.id}`}
-      className={`folder-card ${folder.pinned ? "pinned" : ""} ${isEndDrop ? "drop-into" : ""}`}
+      className={`folder-card ${folder.pinned ? "pinned" : ""} ${isEndDrop || urlOver ? "drop-into" : ""}`}
       style={folder.color ? ({ "--folder-accent": folder.color } as React.CSSProperties) : undefined}
       onDragOver={(e) => {
+        if (!drag && canAdd && carriesUrl(e)) {
+          // a link dragged in from outside the page
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+          if (!urlOver) setUrlOver(true);
+          return;
+        }
         if (!linkDragging) return;
         e.preventDefault();
         if (dropTarget !== `end:${folder.id}` && !dropTarget?.startsWith("link:")) setDropTarget(`end:${folder.id}`);
       }}
       onDragLeave={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropTarget(null);
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) { setDropTarget(null); setUrlOver(false); }
       }}
       onDrop={(e) => {
+        if (!drag && carriesUrl(e)) {
+          e.preventDefault();
+          setUrlOver(false);
+          const url = droppedUrl(e);
+          if (url) onDropUrl(folder.id, url);
+          return;
+        }
         if (drag?.kind !== "link") return;
         e.preventDefault();
         onMoveLink(drag, folder.id, null);
@@ -116,6 +136,9 @@ export default function FolderSection({
         </button>
         <div className="fh-actions">
           {admin && dragEnabled && <span className="drag-handle" title="Drag to reorder folders"><Icon name="grip" /></span>}
+          <button className="btn-icon" title={view === "grid" ? "Show this folder as a list" : "Show this folder as a grid"} onClick={onToggleView}>
+            <Icon name={view === "grid" ? "list" : "grid"} />
+          </button>
           {canAdd && <button className="btn-icon" title={`Add a website to ${folder.name}`} onClick={onAddHere}><Icon name="plus" /></button>}
           {links.length > 0 && <button className="btn-icon" title="Open all in new tabs" onClick={onOpenAll}><Icon name="external" /></button>}
           <button className="btn-icon" title="Copy a link to this folder" onClick={onShareFolder}><Icon name="share" /></button>
@@ -124,14 +147,15 @@ export default function FolderSection({
         </div>
       </header>
 
+      {urlOver && <div className="url-drop-hint"><Icon name="plus" /> Drop to add this link to {folder.emoji} {folder.name}</div>}
       {!collapsed && (
-        links.length === 0 ? (
+        count === 0 ? (
           <div className="folder-empty">
             {filtered ? "Nothing in this folder matches." : (
               <>
                 This folder is empty.
                 {canAdd && <button className="btn btn-secondary btn-sm" onClick={onAddHere}><Icon name="plus" /> Add the first website</button>}
-                {admin && dragEnabled && <span className="hint">…or drag a website here.</span>}
+                {canAdd && <span className="hint">…or drag a link here from another tab.</span>}
               </>
             )}
           </div>
@@ -142,14 +166,6 @@ export default function FolderSection({
                 key={link.id}
                 folder={folder}
                 link={link}
-                query={query}
-                admin={admin}
-                me={me}
-                favorited={favorites.has(link.id)}
-                myRating={myRatings[link.id]}
-                avg={ratings[link.id]?.avg}
-                ratingCount={ratings[link.id]?.count}
-                actions={actions}
                 draggable={admin && dragEnabled}
                 dropBefore={dropTarget === `link:${link.id}`}
                 onDragStart={() => setDrag({ kind: "link", folderId: folder.id, linkId: link.id })}
@@ -166,6 +182,20 @@ export default function FolderSection({
                   e.stopPropagation();
                   if (drag.linkId !== link.id) onMoveLink(drag, folder.id, link.id);
                 }}
+              />
+            ))}
+            {shortcuts.map(({ folder: home, link }) => (
+              <LinkCard
+                key={`sc-${link.id}`}
+                folder={home}
+                link={link}
+                shortcutIn={folder}
+                draggable={false}
+                dropBefore={false}
+                onDragStart={() => {}}
+                onDragEnd={() => {}}
+                onDragOver={() => {}}
+                onDrop={() => {}}
               />
             ))}
           </div>

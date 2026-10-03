@@ -5,7 +5,7 @@ import { errorResponse } from "@/lib/http";
 import { rateLimit } from "@/lib/ratelimit";
 import {
   addMyStuff, getUserData, markNotificationsRead, recordAggregateRating, removeMyStuff,
-  setProfile, setRating, toggleFavorite,
+  setLinkPref, setProfile, setRating, toggleFavorite,
 } from "@/lib/userdata";
 
 export const dynamic = "force-dynamic";
@@ -44,6 +44,8 @@ export async function POST(req: NextRequest) {
       }
       case "removeMyStuff":
         return NextResponse.json({ myStuff: await removeMyStuff(user, String(body.id || "")) });
+      case "linkPref":
+        return NextResponse.json({ links: await setLinkPref(user, String(body.linkId || ""), (body.patch || {}) as Record<string, unknown>) });
       case "readNotifications":
         await markNotificationsRead(user);
         return NextResponse.json({ ok: true });

@@ -1,19 +1,32 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
-import { timeAgo } from "./ui";
+import { readLocal, timeAgo, writeLocal } from "./ui";
 import { useOnRevChange } from "./sync";
 
 export interface Notification { id: string; kind: string; text: string; at: string; read?: boolean; from?: string }
 export interface Profile { avatar?: string; color?: string; bio?: string }
+/** Your own extras on a shared link (private note, read later, done…). */
+export interface LinkPref { note?: string; later?: boolean; done?: boolean; rename?: string; hidden?: boolean; checks?: number[] }
 export interface Personal {
   user: string | null;
   favorites: string[];
   ratings: Record<string, number>;
   notifications: Notification[];
   profile: Profile;
+  links: Record<string, LinkPref>;
 }
-const EMPTY: Personal = { user: null, favorites: [], ratings: {}, notifications: [], profile: {} };
+const EMPTY: Personal = { user: null, favorites: [], ratings: {}, notifications: [], profile: {}, links: {} };
+const GUEST_KEY = "guestLinkPrefs";
+
+function mergePref(old: LinkPref | undefined, patch: Partial<LinkPref>): LinkPref | null {
+  const next: LinkPref = { ...(old || {}), ...patch };
+  (Object.keys(next) as (keyof LinkPref)[]).forEach((k) => {
+    const v = next[k];
+    if (v === undefined || v === false || v === "" || (Array.isArray(v) && !v.length)) delete next[k];
+  });
+  return Object.keys(next).length ? next : null;
+}
 
 export const AVATARS = ["😀", "😎", "🐸", "🐱", "🦊", "🐼", "🦄", "👾", "🤖", "👑", "⚡", "🔥", "🌟", "🎮", "🍕", "💀"];
 export const PROFILE_COLORS = ["#7c6cff", "#3dd68c", "#ffb84d", "#ff5c7a", "#4dabff", "#e879f9", "#2dd4bf", "#f97316"];
@@ -22,10 +35,11 @@ export const PROFILE_COLORS = ["#7c6cff", "#3dd68c", "#ffb84d", "#ff5c7a", "#4da
 export function usePersonal(user: string | null) {
   const [data, setData] = useState<Personal>(EMPTY);
   const load = useCallback(async () => {
-    if (!user) { setData(EMPTY); return; }
+    // guests keep their notes / read-later list on this device only
+    if (!user) { setData({ ...EMPTY, links: readLocal<Record<string, LinkPref>>(GUEST_KEY, {}) }); return; }
     try {
       const json = await fetch("/api/me", { cache: "no-store" }).then((r) => r.json());
-      if (json.user) setData({ user: json.user, favorites: json.favorites || [], ratings: json.ratings || {}, notifications: json.notifications || [], profile: json.profile || {} });
+      if (json.user) setData({ user: json.user, favorites: json.favorites || [], ratings: json.ratings || {}, notifications: json.notifications || [], profile: json.profile || {}, links: json.links || {} });
     } catch {}
   }, [user]);
   useEffect(() => { load(); }, [load]);
@@ -42,14 +56,29 @@ export function usePersonal(user: string | null) {
     post({ action: "favorite", linkId }).then((j) => j.favorites && setData((d) => ({ ...d, favorites: j.favorites }))).catch(() => {});
   }, [post]);
 
+  const ratingsRef = useRef(data.ratings);
+  ratingsRef.current = data.ratings;
   const rate = useCallback((linkId: string, stars: number) => {
+    // tapping your current rating again clears it
+    const next = ratingsRef.current[linkId] === stars ? 0 : stars;
     setData((d) => {
       const r = { ...d.ratings };
-      if (r[linkId] === stars) delete r[linkId]; else r[linkId] = stars;
+      if (next) r[linkId] = next; else delete r[linkId];
       return { ...d, ratings: r };
     });
-    post({ action: "rate", linkId, stars }).then((j) => j.ratings && setData((d) => ({ ...d, ratings: j.ratings }))).catch(() => {});
+    post({ action: "rate", linkId, stars: next }).then((j) => j.ratings && setData((d) => ({ ...d, ratings: j.ratings }))).catch(() => {});
   }, [post]);
+
+  const setLinkPref = useCallback((linkId: string, patch: Partial<LinkPref>) => {
+    setData((d) => {
+      const merged = mergePref(d.links[linkId], patch);
+      const links = { ...d.links };
+      if (merged) links[linkId] = merged; else delete links[linkId];
+      if (!user) writeLocal(GUEST_KEY, links);
+      return { ...d, links };
+    });
+    if (user) post({ action: "linkPref", linkId, patch }).then((j) => j.links && setData((d) => ({ ...d, links: j.links }))).catch(() => {});
+  }, [post, user]);
 
   const saveProfile = useCallback(async (profile: Profile) => {
     const j = await post({ action: "profile", profile });
@@ -62,7 +91,7 @@ export function usePersonal(user: string | null) {
     post({ action: "readNotifications" }).catch(() => {});
   }, [post]);
 
-  return { ...data, reload: load, toggleFavorite, rate, saveProfile, markRead };
+  return { ...data, reload: load, toggleFavorite, rate, saveProfile, markRead, setLinkPref };
 }
 
 const KIND_ICON: Record<string, string> = { like: "heart", mention: "chat", reply: "reply", suggestion: "bulb", comment: "chat", dm: "chat", role: "lock", system: "bell" };

@@ -1,44 +1,28 @@
 "use client";
+import { useEffect, useRef, useState } from "react";
 import { Folder, Link } from "@/lib/types";
 import { Icon } from "./Icon";
-import Favicon from "./Favicon";
-import { hostOf, isNew, safeHref, warmUp } from "./ui";
+import Favicon, { iconColor } from "./Favicon";
+import { hostOf, isExpired, isNewSince, isUpdatedSince, safeHref, timeAgo, warmUp } from "./ui";
 import { StarRating } from "./Personal";
+import { COST_LABEL, STATUS_LABEL, STICKER_LABEL, useCardEnv } from "./cardEnv";
+import LinkDetails from "./LinkDetails";
+
+export type { LinkCardActions } from "./cardEnv";
 
 /** Highlights every search word that appears in the text. */
 export function Highlight({ text, query }: { text: string; query: string }) {
-  const words = query.trim().split(/\s+/).filter(Boolean).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const words = query.trim().split(/\s+/).filter((w) => w && !w.includes(":") && !w.startsWith("-"))
+    .map((w) => w.replace(/^"|"$/g, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).filter(Boolean);
   if (!words.length) return <>{text}</>;
   const parts = text.split(new RegExp(`(${words.join("|")})`, "gi"));
   return <>{parts.map((p, i) => (i % 2 ? <mark key={i}>{p}</mark> : p))}</>;
 }
 
-export interface LinkCardActions {
-  /** open links in a new tab (user preference) */
-  newTab: boolean;
-  open: (folder: Folder, link: Link) => void;
-  star: (folder: Folder, link: Link) => void;
-  copy: (link: Link) => void;
-  edit: (folder: Folder, link: Link) => void;
-  remove: (folder: Folder, link: Link) => void;
-  suggest: (folder: Folder, link: Link) => void;
-  like: (folder: Folder, link: Link) => void;
-  filterTag: (tag: string) => void;
-  rate: (linkId: string, stars: number) => void;
-  openProfile: (username: string) => void;
-}
-
 export default function LinkCard({
   folder,
   link,
-  query,
-  admin,
-  me,
-  favorited,
-  myRating,
-  avg,
-  ratingCount,
-  actions,
+  shortcutIn,
   draggable,
   dropBefore,
   onDragStart,
@@ -48,15 +32,8 @@ export default function LinkCard({
 }: {
   folder: Folder;
   link: Link;
-  query: string;
-  admin: boolean;
-  /** logged-in username, for "you liked this" */
-  me: string | null;
-  favorited: boolean;
-  myRating?: number;
-  avg?: number;
-  ratingCount?: number;
-  actions: LinkCardActions;
+  /** set when this card is a shortcut shown in another folder */
+  shortcutIn?: Folder;
   draggable: boolean;
   dropBefore: boolean;
   onDragStart: () => void;
@@ -64,14 +41,61 @@ export default function LinkCard({
   onDragOver: (e: React.DragEvent) => void;
   onDrop: (e: React.DragEvent) => void;
 }) {
+  const env = useCardEnv();
+  const { actions, me, admin, query } = env;
   const href = safeHref(link.url);
+  const pref = env.prefs[link.id] || {};
+  const favorited = env.favorites.has(link.id);
   const likes = link.likes?.length || 0;
   const liked = !!me && !!link.likes?.includes(me.toLowerCase());
+  const agg = env.ratings[link.id];
+  const isNew = isNewSince(link, env.since) && link.addedBy?.toLowerCase() !== me?.toLowerCase();
+  const updated = isUpdatedSince(link, env.since);
+  const expired = isExpired(link);
+  const selected = env.selected.has(link.id);
+  const expanded = env.expandedId === link.id;
+  const focused = env.focusedId === link.id;
+  const opened = env.lastOpened.get(link.id);
+  const displayName = pref.rename || link.name;
+  const steps = link.checklist?.length || 0;
+  const ticked = pref.checks?.length || 0;
+
+  // optional stripe in the site's own colour (from its icon)
+  const [tint, setTint] = useState("");
+  useEffect(() => {
+    if (!env.iconTint || link.color) { setTint(""); return; }
+    let live = true;
+    iconColor(hostOf(link.url)).then((c) => live && setTint(c));
+    return () => { live = false; };
+  }, [env.iconTint, link.color, link.url]);
+  const accent = link.color || tint;
+
+  // admins can double-click the name to rename it right on the card
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState(link.name);
+  const renameRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (renaming) renameRef.current?.select(); }, [renaming]);
+  function commitRename() {
+    setRenaming(false);
+    const name = draft.trim();
+    if (name && name !== link.name) actions.adminEdit(folder, link, { name });
+  }
+
+  const showMeta = !!(link.sticker || link.tags?.length || link.clicks || link.notes || link.addedBy || me || agg?.count || link.status || link.cost ||
+    link.lang || link.mobile || link.tip || pref.note || pref.done || steps || link.readMins);
+  const title = [
+    link.notes || link.url,
+    link.addedBy ? `Added by ${link.addedBy}${link.createdAt ? ` · ${new Date(link.createdAt).toLocaleDateString()}` : ""}` : "",
+    "Ctrl/middle-click: open in a background tab · Right-click: more options",
+  ].filter(Boolean).join("\n");
+
   return (
     <div
-      className={`card ${favorited ? "fav" : ""} ${dropBefore ? "drop-before" : ""}`}
-      style={link.color ? ({ "--card-accent": link.color } as React.CSSProperties) : undefined}
-      draggable={draggable}
+      className={`card ${favorited ? "fav" : ""} ${dropBefore ? "drop-before" : ""} ${selected ? "selected" : ""} ${expanded ? "expanded" : ""} ${focused ? "kb-focus" : ""} ${pref.done ? "done" : ""} ${expired ? "expired" : ""} ${link.pinned ? "pinned" : ""}`}
+      style={accent ? ({ "--card-accent": accent } as React.CSSProperties) : undefined}
+      data-link-id={link.id}
+      data-folder-id={folder.id}
+      draggable={draggable && !renaming}
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData("text/plain", link.id);
@@ -80,41 +104,85 @@ export default function LinkCard({
       onDragEnd={onDragEnd}
       onDragOver={onDragOver}
       onDrop={onDrop}
+      onContextMenu={(e) => { e.preventDefault(); actions.menu(folder, link, { x: e.clientX, y: e.clientY }); }}
     >
+      <label className="card-check" title="Select (Shift-click to select a range)" onClick={(e) => e.stopPropagation()}>
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={() => {}}
+          onClick={(e) => actions.select(link.id, e.shiftKey)}
+          aria-label={`Select ${displayName}`}
+        />
+      </label>
       <a
         className="card-main"
         href={href}
         target={actions.newTab ? "_blank" : undefined}
         rel="noopener noreferrer"
-        onClick={() => actions.open(folder, link)}
+        onClick={(e) => { if (renaming) { e.preventDefault(); return; } actions.open(folder, link); }}
         onAuxClick={(e) => { if (e.button === 1) actions.open(folder, link); }}
         onMouseEnter={() => href && warmUp(href)}
         onFocus={() => href && warmUp(href)}
         draggable={false}
-        title={link.notes || link.url}
+        title={title}
       >
         <span className="card-icon">
-          <Favicon url={link.url} name={link.name} size={22} />
+          <Favicon url={link.url} name={displayName} size={22} />
+          {link.emoji && <span className="card-emoji" aria-hidden="true">{link.emoji}</span>}
         </span>
         <span className="card-body">
-          <span className="card-name">
-            <Highlight text={link.name} query={query} />
-            {isNew(link) && <span className="badge-new">New</span>}
+          <span className="card-name" onDoubleClick={(e) => { if (!admin) return; e.preventDefault(); setDraft(link.name); setRenaming(true); }}>
+            {renaming ? (
+              <input
+                ref={renameRef}
+                className="rename-input"
+                value={draft}
+                maxLength={100}
+                onChange={(e) => setDraft(e.target.value)}
+                onClick={(e) => e.preventDefault()}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter") { e.preventDefault(); commitRename(); }
+                  if (e.key === "Escape") { e.preventDefault(); setRenaming(false); }
+                }}
+              />
+            ) : (
+              <span className="card-title"><Highlight text={displayName} query={query} /></span>
+            )}
+            {link.pinned && <span className="badge-pin" title="Pinned to the top"><Icon name="pin" /></span>}
+            {link.verified && <span className="badge-verified" title="Checked by an admin"><Icon name="check" /></span>}
+            {expired ? <span className="badge-expired">Expired</span> : isNew ? <span className="badge-new">New</span> : updated ? <span className="badge-updated">Updated</span> : null}
           </span>
-          <span className="card-host"><Highlight text={hostOf(link.url)} query={query} /></span>
+          <span className="card-host">
+            <Highlight text={hostOf(link.url)} query={query} />
+            {pref.rename && <span className="muted-inline" title={`Real name: ${link.name}`}> · renamed</span>}
+            {shortcutIn && <span className="muted-inline"> · ↪ from {folder.emoji} {folder.name}</span>}
+            {opened && <span className="muted-inline"> · opened {timeAgo(new Date(opened).toISOString())}</span>}
+          </span>
+          {env.descriptions && link.notes && <span className="card-desc">{link.notes}</span>}
         </span>
       </a>
-      {(link.tags?.length || link.clicks || link.notes || link.addedBy || me || ratingCount) ? (
+      {showMeta ? (
         <div className="card-meta">
+          {link.sticker && <span className={`sticker sticker-${link.sticker}`}>{STICKER_LABEL[link.sticker]}</span>}
           {link.tags?.map((t) => (
-            <button key={t} className="tag" onClick={() => actions.filterTag(t)} title={`Show everything tagged ${t}`}>
-              {t}
-            </button>
+            <button key={t} className="tag" onClick={() => actions.filterTag(t)} title={`Show everything tagged ${t}`}>{t}</button>
           ))}
-          {link.notes && <span className="meta-note" title={link.notes}>📝 note</span>}
+          {link.status && link.status !== "works" && <span className={`label status-${link.status}`}>{STATUS_LABEL[link.status]}</span>}
+          {link.cost && link.cost !== "free" && <span className="label">{COST_LABEL[link.cost]}</span>}
+          {link.lang && <span className="label" title="Language">{link.lang.toUpperCase()}</span>}
+          {link.mobile && <span className="label" title="Works on phones">📱</span>}
+          {link.tip && <span className="meta-tip" title={link.tip}>💡 tip</span>}
+          {!env.descriptions && link.notes && <span className="meta-note" title={link.notes}>📝 note</span>}
+          {pref.note && <span className="meta-note mine" title={`Your private note: ${pref.note}`}>🔒 my note</span>}
+          {steps > 0 && <span className="meta-steps" title="Checklist">☑ {ticked}/{steps}</span>}
+          {link.readMins ? <span className="meta-clicks">{link.readMins} min read</span> : null}
           {(link.clicks || 0) > 0 && <span className="meta-clicks">{link.clicks} visit{link.clicks === 1 ? "" : "s"}</span>}
           {link.addedBy && <button className="meta-by" onClick={(e) => { e.preventDefault(); e.stopPropagation(); actions.openProfile(link.addedBy!); }}>by {link.addedBy}</button>}
-          <StarRating linkId={link.id} mine={myRating} avg={avg} count={ratingCount} canRate={!!me} onRate={actions.rate} />
+          {pref.done && <span className="meta-done" title="You marked this done"><Icon name="check" /> done</span>}
+          <StarRating linkId={link.id} mine={env.myRatings[link.id]} avg={agg?.avg} count={agg?.count} canRate={!!me} onRate={actions.rate} />
         </div>
       ) : null}
       <button
@@ -130,16 +198,19 @@ export default function LinkCard({
         <button className={`ca ${favorited ? "on" : ""}`} title={favorited ? "Remove from your favorites" : "Save to your favorites"} onClick={() => actions.star(folder, link)}>
           <Icon name="star" />
         </button>
-        <button className="ca" title="Copy link" onClick={() => actions.copy(link)}><Icon name="copy" /></button>
-        {admin ? (
-          <>
-            <button className="ca" title="Edit" onClick={() => actions.edit(folder, link)}><Icon name="edit" /></button>
-            <button className="ca danger" title="Delete" onClick={() => actions.remove(folder, link)}><Icon name="trash" /></button>
-          </>
-        ) : (
-          <button className="ca" title="Suggest a change" onClick={() => actions.suggest(folder, link)}><Icon name="bulb" /></button>
-        )}
+        <button className={`ca ${pref.later ? "on" : ""}`} title={pref.later ? "Remove from Read later" : "Read later"} onClick={() => actions.pref(link.id, { later: !pref.later })}>
+          <Icon name="clock" />
+        </button>
+        <button className={`ca ${expanded ? "on" : ""}`} title="Details" onClick={() => env.setExpanded(expanded ? null : link.id)}><Icon name="info" /></button>
+        <button
+          className="ca"
+          title={admin ? "Copy, edit, delete and more" : "Copy, suggest a change and more"}
+          onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); actions.menu(folder, link, { x: r.right, y: r.bottom + 4 }); }}
+        >
+          <Icon name="more" />
+        </button>
       </div>
+      {expanded && <LinkDetails folder={folder} link={link} />}
     </div>
   );
 }

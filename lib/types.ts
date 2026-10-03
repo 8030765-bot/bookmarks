@@ -14,7 +14,36 @@ export interface Link {
   addedBy?: string;
   /** lowercase usernames who liked it */
   likes?: string[];
+  /** emoji shown on the card next to the name */
+  emoji?: string;
+  /** shown first in its folder (admin) */
+  pinned?: boolean;
+  /** hidden from everyone but admins after this date (ISO) */
+  expiresAt?: string;
+  status?: LinkStatus;
+  /** language code, e.g. "en", "es" */
+  lang?: string;
+  cost?: "free" | "paid" | "account";
+  /** works well on phones */
+  mobile?: boolean;
+  /** an admin checked it (admin) */
+  verified?: boolean;
+  sticker?: "hot" | "new" | "essential";
+  /** typing this in search + Enter opens the link straight away */
+  keyword?: string;
+  /** public tip shown on the card, e.g. "sign in with Google first" */
+  tip?: string;
+  /** extra links that go with this one (article + video…) */
+  related?: { name: string; url: string }[];
+  /** steps people can tick off */
+  checklist?: string[];
+  /** also show this link in these folders (no duplicate) */
+  alsoIn?: string[];
+  /** estimated minutes to read, from the page's word count */
+  readMins?: number;
 }
+
+export type LinkStatus = "works" | "login" | "slow" | "broken";
 
 export interface Folder {
   id: string;

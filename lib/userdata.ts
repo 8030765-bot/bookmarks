@@ -24,15 +24,53 @@ export interface Notification {
   read?: boolean;
   from?: string;
 }
+/** Your own extras on a shared link — nobody else sees these. */
+export interface LinkPref {
+  note?: string; // private note
+  later?: boolean; // read-later list
+  done?: boolean; // ticked off
+  rename?: string; // your own name for it
+  hidden?: boolean; // hidden just for you
+  checks?: number[]; // ticked checklist steps
+}
 export interface UserData {
   profile: Profile;
   favorites: string[]; // link ids
   ratings: Record<string, number>; // linkId -> 1..5
   myStuff: PrivateLink[];
   notifications: Notification[];
+  links: Record<string, LinkPref>;
 }
 
-const EMPTY: UserData = { profile: {}, favorites: [], ratings: {}, myStuff: [], notifications: [] };
+const EMPTY: UserData = { profile: {}, favorites: [], ratings: {}, myStuff: [], notifications: [], links: {} };
+const MAX_LINK_PREFS = 2000;
+
+/** Keep only well-formed fields; drop the entry entirely when it's empty. */
+export function cleanLinkPref(p: Record<string, unknown>): LinkPref | null {
+  const out: LinkPref = {};
+  if (typeof p.note === "string" && p.note.trim()) out.note = p.note.trim().slice(0, 500);
+  if (p.later === true) out.later = true;
+  if (p.done === true) out.done = true;
+  if (typeof p.rename === "string" && p.rename.trim()) out.rename = p.rename.trim().slice(0, 100);
+  if (p.hidden === true) out.hidden = true;
+  if (Array.isArray(p.checks)) {
+    const checks = Array.from(new Set(p.checks.map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n < 12))).sort((a, b) => a - b);
+    if (checks.length) out.checks = checks;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+export async function setLinkPref(username: string, linkId: string, patch: Record<string, unknown>) {
+  if (!/^[\w-]{1,100}$/.test(linkId)) throw new Error("Invalid link");
+  const data = await getUserData(username);
+  const merged = cleanLinkPref({ ...(data.links[linkId] || {}), ...patch });
+  if (merged) data.links[linkId] = merged;
+  else delete data.links[linkId];
+  const ids = Object.keys(data.links);
+  if (ids.length > MAX_LINK_PREFS) throw new Error("That's a lot of notes — remove some first");
+  await save(username, data);
+  return data.links;
+}
 const key = (username: string) => `userdata:${username.toLowerCase()}`;
 const MAX_NOTIFS = 50;
 const MAX_MYSTUFF = 200;
@@ -43,7 +81,7 @@ function getRedis() {
 
 export async function getUserData(username: string): Promise<UserData> {
   const raw = await getRedis().get<UserData>(key(username));
-  return { ...EMPTY, ...(raw || {}), profile: raw?.profile || {} };
+  return { ...EMPTY, ...(raw || {}), profile: raw?.profile || {}, links: raw?.links || {} };
 }
 
 async function save(username: string, data: UserData) {
@@ -117,25 +155,29 @@ export async function notify(toUsername: string, n: Omit<Notification, "id" | "a
 
 /* ---------- aggregate star ratings (public) ---------- */
 // Stored separately so everyone can see averages without reading every user blob.
-const RATINGS_KEY = "ratings:agg"; // hash: linkId -> "sum,count"
+// hash: linkId -> "sum,count,n1,n2,n3,n4,n5" (older entries only have "sum,count")
+const RATINGS_KEY = "ratings:agg";
 export async function recordAggregateRating(linkId: string, oldStars: number | undefined, newStars: number | undefined) {
   const redis = getRedis();
   const raw = (await redis.hget<string>(RATINGS_KEY, linkId)) || "0,0";
-  let [sum, count] = raw.split(",").map(Number);
-  if (oldStars) { sum -= oldStars; count -= 1; }
-  if (newStars) { sum += newStars; count += 1; }
+  const parts = String(raw).split(",").map(Number);
+  let [sum, count] = parts;
+  const hist = [1, 2, 3, 4, 5].map((_, i) => parts[i + 2] || 0);
+  if (oldStars) { sum -= oldStars; count -= 1; hist[oldStars - 1] = Math.max(0, hist[oldStars - 1] - 1); }
+  if (newStars) { sum += newStars; count += 1; hist[newStars - 1] += 1; }
   if (count <= 0) await redis.hdel(RATINGS_KEY, linkId);
-  else await redis.hset(RATINGS_KEY, { [linkId]: `${sum},${count}` });
+  else await redis.hset(RATINGS_KEY, { [linkId]: [sum, count, ...hist].join(",") });
   await bumpRev(REV_KEYS.ratings);
 }
 
-export interface RatingAgg { avg: number; count: number }
+export interface RatingAgg { avg: number; count: number; hist: number[] }
 export async function getAggregateRatings(): Promise<Record<string, RatingAgg>> {
   const raw = (await getRedis().hgetall<Record<string, string>>(RATINGS_KEY)) || {};
   const out: Record<string, RatingAgg> = {};
   for (const [linkId, v] of Object.entries(raw)) {
-    const [sum, count] = String(v).split(",").map(Number);
-    if (count > 0) out[linkId] = { avg: Math.round((sum / count) * 10) / 10, count };
+    const parts = String(v).split(",").map(Number);
+    const [sum, count] = parts;
+    if (count > 0) out[linkId] = { avg: Math.round((sum / count) * 10) / 10, count, hist: [1, 2, 3, 4, 5].map((_, i) => parts[i + 2] || 0) };
   }
   return out;
 }

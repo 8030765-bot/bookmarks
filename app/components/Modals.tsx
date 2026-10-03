@@ -122,6 +122,48 @@ export function ConfirmModal({
   );
 }
 
+/** Ask for one piece of text (a note, a new name…). */
+export function PromptModal({
+  title,
+  initial,
+  multiline,
+  placeholder,
+  onSave,
+  onClose,
+}: {
+  title: string;
+  initial: string;
+  multiline?: boolean;
+  placeholder?: string;
+  onSave: (value: string) => void;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const save = (e: React.FormEvent) => { e.preventDefault(); onSave(value); onClose(); };
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2>{title}</h2>
+        <form onSubmit={save}>
+          <div className="form-group">
+            {multiline ? (
+              <textarea value={value} onChange={(e) => setValue(e.target.value)} placeholder={placeholder} maxLength={500} autoFocus
+                onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) save(e); }} />
+            ) : (
+              <input value={value} onChange={(e) => setValue(e.target.value)} placeholder={placeholder} maxLength={100} autoFocus onFocus={(e) => e.target.select()} />
+            )}
+          </div>
+          <div className="modal-actions">
+            {initial && <button type="button" className="btn btn-secondary" onClick={() => { onSave(""); onClose(); }}>Clear</button>}
+            <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn btn-primary">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 const SHORTCUTS: [string, string][] = [
   ["Ctrl K", "Command menu"],
   ["/", "Search"],
@@ -139,6 +181,19 @@ const SHORTCUTS: [string, string][] = [
   ["T", "Light / dark theme"],
   ["Esc", "Close / clear search"],
   ["?", "This list"],
+  ["Ctrl V", "Paste a link anywhere to add it"],
+];
+const CARD_SHORTCUTS: [string, string][] = [
+  ["J / K", "Move to the next / previous website"],
+  ["Enter", "Open it"],
+  ["F", "Favorite"],
+  ["1 – 5", "Rate it"],
+  ["B", "Read later"],
+  ["D", "Mark done"],
+  ["I", "Details"],
+  ["Space", "Select (for copying or moving several)"],
+  ["Ctrl-click", "Open in a background tab"],
+  ["Right-click", "More options"],
 ];
 
 export function ShortcutsModal({ onClose }: { onClose: () => void }) {
@@ -148,6 +203,15 @@ export function ShortcutsModal({ onClose }: { onClose: () => void }) {
         <h2>Keyboard shortcuts</h2>
         <div className="shortcut-list">
           {SHORTCUTS.map(([k, label]) => (
+            <div key={k} className="shortcut-row">
+              <span>{label}</span>
+              <span className="kbd">{k}</span>
+            </div>
+          ))}
+        </div>
+        <div className="admin-h">On a website (after pressing J)</div>
+        <div className="shortcut-list">
+          {CARD_SHORTCUTS.map(([k, label]) => (
             <div key={k} className="shortcut-row">
               <span>{label}</span>
               <span className="kbd">{k}</span>

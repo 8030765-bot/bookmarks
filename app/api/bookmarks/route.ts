@@ -8,7 +8,7 @@ import { clientIp, rateLimit } from "@/lib/ratelimit";
 export const dynamic = "force-dynamic";
 
 // everyday actions that don't belong in the admin audit log
-const NOT_AUDITED = new Set(["trackClick", "toggleFavorite", "toggleLike", "votePoll", "verifyAdmin", "addLink", "addFolder"]);
+const NOT_AUDITED = new Set(["trackClick", "toggleFavorite", "toggleLike", "votePoll", "verifyAdmin", "addLink", "addLinks", "addFolder"]);
 
 export async function GET(req: NextRequest) {
   try {

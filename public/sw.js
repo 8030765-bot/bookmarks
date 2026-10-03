@@ -30,6 +30,10 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(req.url);
 
   if (url.origin === self.location.origin) {
+    if (url.pathname === "/api/icon") {
+      event.respondWith(iconCache(req));
+      return;
+    }
     if (url.pathname.startsWith("/api/")) return; // always live
     if (url.pathname.startsWith("/_next/static/")) {
       event.respondWith(cacheFirst(req, STATIC)); // file names change with every build
@@ -40,10 +44,6 @@ self.addEventListener("fetch", (event) => {
       return;
     }
     return;
-  }
-
-  if (url.hostname === "www.google.com" && url.pathname.startsWith("/s2/favicons")) {
-    event.respondWith(iconCache(req));
   }
 });
 
@@ -75,7 +75,7 @@ async function networkFirst(req, name) {
 async function iconCache(req) {
   const cache = await caches.open(ICONS);
   const hit = await cache.match(req.url);
-  const refresh = fetch(req.url, { mode: "cors", credentials: "omit" })
+  const refresh = fetch(req)
     .then(async (res) => {
       if (res.ok) {
         await cache.put(req.url, res.clone());
@@ -85,8 +85,7 @@ async function iconCache(req) {
     })
     .catch(() => null);
   if (hit) return hit;
-  // first time: wait for the network (fall back to a plain no-cors fetch if CORS is refused)
-  return (await refresh) || fetch(req);
+  return (await refresh) || new Response(null, { status: 504 });
 }
 
 async function trim(cache) {

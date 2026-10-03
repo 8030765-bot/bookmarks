@@ -1,5 +1,5 @@
 import { Redis } from "@upstash/redis";
-import { BookmarksData, ActivityEntry, Folder } from "./types";
+import { BookmarksData, ActivityEntry, Folder, Link, LinkStatus } from "./types";
 import { defaultData } from "./defaultData";
 import { v4 as uuid } from "uuid";
 import { normalizeUrl } from "./url";
@@ -32,6 +32,62 @@ function cleanTags(v: unknown): string[] {
 }
 function cleanColor(v: unknown) {
   return typeof v === "string" && /^#[0-9a-f]{3,8}$/i.test(v) ? v : undefined;
+}
+
+const STATUSES: LinkStatus[] = ["works", "login", "slow", "broken"];
+const STICKERS = ["hot", "new", "essential"] as const;
+const COSTS = ["free", "paid", "account"] as const;
+/**
+ * The optional extras on a link. Anyone adding a link can set the
+ * descriptive ones; pins, stickers, "verified", keywords, expiry and
+ * extra folders are admin-only.
+ */
+function applyExtras(data: BookmarksData, link: Link, body: Record<string, unknown>, admin: boolean) {
+  if (typeof body.emoji === "string") link.emoji = cleanName(body.emoji, 8) || undefined;
+  if (typeof body.lang === "string") link.lang = /^[a-z]{2}(-[a-z]{2})?$/i.test(body.lang) ? body.lang.toLowerCase() : undefined;
+  if (typeof body.cost === "string") link.cost = (COSTS as readonly string[]).includes(body.cost) ? (body.cost as Link["cost"]) : undefined;
+  if (typeof body.mobile === "boolean") link.mobile = body.mobile || undefined;
+  if (typeof body.tip === "string") link.tip = body.tip.trim().slice(0, 200) || undefined;
+  if (typeof body.readMins === "number" && Number.isFinite(body.readMins)) {
+    link.readMins = body.readMins > 0 ? Math.min(600, Math.max(1, Math.round(body.readMins))) : undefined;
+  }
+  if (Array.isArray(body.related)) {
+    const related: { name: string; url: string }[] = [];
+    for (const r of body.related.slice(0, 5) as Record<string, unknown>[]) {
+      try {
+        const url = cleanUrl(r?.url);
+        if (url) related.push({ name: cleanName(r?.name, 60) || url, url });
+      } catch {
+        // skip anything that isn't a web link
+      }
+    }
+    link.related = related.length ? related : undefined;
+  }
+  if (Array.isArray(body.checklist)) {
+    const steps = body.checklist.map((s) => cleanName(s, 120)).filter(Boolean).slice(0, 12);
+    link.checklist = steps.length ? steps : undefined;
+  }
+  if (!admin) return;
+  if (typeof body.pinned === "boolean") link.pinned = body.pinned || undefined;
+  if (typeof body.verified === "boolean") link.verified = body.verified || undefined;
+  if (typeof body.status === "string") link.status = STATUSES.includes(body.status as LinkStatus) ? (body.status as LinkStatus) : undefined;
+  if (typeof body.sticker === "string") link.sticker = (STICKERS as readonly string[]).includes(body.sticker) ? (body.sticker as Link["sticker"]) : undefined;
+  if (typeof body.expiresAt === "string") {
+    const t = Date.parse(body.expiresAt);
+    link.expiresAt = body.expiresAt && Number.isFinite(t) ? new Date(t).toISOString() : undefined;
+  }
+  if (typeof body.keyword === "string") {
+    const kw = body.keyword.trim().toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 20);
+    if (kw && data.folders.some((f) => f.links.some((l) => l.keyword === kw && l.id !== link.id))) {
+      throw new Error(`The keyword “${kw}” is already used by another link`);
+    }
+    link.keyword = kw || undefined;
+  }
+  if (Array.isArray(body.alsoIn)) {
+    const ids = new Set(data.folders.map((f) => f.id));
+    const also = Array.from(new Set(body.alsoIn.map(String))).filter((id) => ids.has(id)).slice(0, 5);
+    link.alsoIn = also.length ? also : undefined;
+  }
 }
 
 /** Adds the separately-stored visit counts onto a copy of the data for the client. */
@@ -136,6 +192,7 @@ export async function handleAction(
   const password = typeof body.password === "string" ? body.password : undefined;
   // role-aware admin check: admin accounts pass; the shared password only until an owner exists
   const requireAdmin = (pw?: string) => checkAdmin(authFrom(body), pw);
+  const isAdmin = () => { try { requireAdmin(password); return true; } catch { return false; } };
   const me = authFrom(body).user || undefined;
   switch (action) {
     case "verifyAdmin": {
@@ -154,7 +211,7 @@ export async function handleAction(
       const tags = cleanTags(body.tags);
       const user = me;
       const addedBy = typeof body.suggestedBy === "string" && body.suggestedBy ? body.suggestedBy : user;
-      folder.links.push({
+      const link: Link = {
         addedBy,
         id: uuid(),
         name,
@@ -164,8 +221,34 @@ export async function handleAction(
         createdAt: new Date().toISOString(),
         color: cleanColor(body.color),
         notes: typeof body.notes === "string" && body.notes.trim() ? body.notes.trim().slice(0, 500) : undefined,
-      });
+      };
+      applyExtras(data, link, body, isAdmin());
+      folder.links.push(link);
       pushActivity(data, "add", `Added link “${name}”${credit(body)}`);
+      await saveBookmarks(data);
+      return data;
+    }
+    case "addLinks": {
+      // paste a list of links: one save instead of one per link
+      if (data.settings?.lockAdding) requireAdmin(password);
+      const folder = data.folders.find((f) => f.id === String(body.folderId || ""));
+      if (!folder) throw new Error("Folder not found");
+      const incoming = Array.isArray(body.links) ? (body.links as Record<string, unknown>[]).slice(0, 50) : [];
+      const existing = new Set(data.folders.flatMap((f) => f.links.map((l) => l.url)));
+      let added = 0;
+      for (const item of incoming) {
+        let url = "";
+        try { url = cleanUrl(item?.url); } catch { continue; }
+        if (!url || existing.has(url)) continue;
+        existing.add(url);
+        folder.links.push({
+          id: uuid(), name: cleanName(item?.name) || url, url, tags: cleanTags(body.tags), clicks: 0,
+          createdAt: new Date().toISOString(), addedBy: me,
+        });
+        added++;
+      }
+      if (!added) throw new Error("No new links to add (they may already be on the site)");
+      pushActivity(data, "add", `Added ${added} links to “${folder.name}”`);
       await saveBookmarks(data);
       return data;
     }
@@ -182,6 +265,7 @@ export async function handleAction(
       if (Array.isArray(body.tags) || typeof body.tags === "string") link.tags = cleanTags(body.tags);
       if (typeof body.color === "string") link.color = cleanColor(body.color);
       if (typeof body.notes === "string") link.notes = body.notes.trim().slice(0, 500) || undefined;
+      applyExtras(data, link, body, true);
       link.updatedAt = new Date().toISOString();
       pushActivity(data, "edit", `Edited link “${link.name}”${credit(body)}`);
       await saveBookmarks(data);
@@ -197,6 +281,7 @@ export async function handleAction(
       folder.links = folder.links.filter((l) => l.id !== linkId);
       pushActivity(data, "delete", `Deleted link “${before?.name || linkId}”${credit(body)}`);
       await saveBookmarks(data);
+      await getRedis().hdel(CLICKS_KEY, linkId).catch(() => {});
       return data;
     }
     case "addFolder": {

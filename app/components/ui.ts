@@ -93,6 +93,57 @@ export function isNew(link: Link) {
   return !!link.createdAt && Date.now() - new Date(link.createdAt).getTime() < NEW_DAYS * 86400_000;
 }
 
+/** Added since you were last here (or in the last few days, on a first visit). */
+export function isNewSince(link: Link, since: number) {
+  if (!link.createdAt) return false;
+  const t = new Date(link.createdAt).getTime();
+  return since ? t > since : Date.now() - t < NEW_DAYS * 86400_000;
+}
+export function isUpdatedSince(link: Link, since: number) {
+  if (!link.updatedAt || !since) return false;
+  return new Date(link.updatedAt).getTime() > since && !isNewSince(link, since);
+}
+export function isExpired(link: Link) {
+  return !!link.expiresAt && new Date(link.expiresAt).getTime() < Date.now();
+}
+
+/** "3 months ago" style, for older dates than timeAgo handles nicely. */
+export function ageLabel(iso?: string) {
+  if (!iso) return "";
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400_000);
+  if (days < 1) return "today";
+  if (days < 2) return "yesterday";
+  if (days < 14) return `${days} days ago`;
+  if (days < 60) return `${Math.round(days / 7)} weeks ago`;
+  if (days < 365) return `${Math.round(days / 30)} months ago`;
+  const years = Math.round(days / 365);
+  return `${years} year${years === 1 ? "" : "s"} ago`;
+}
+
+/* ---------- copying a link in different formats ---------- */
+const MONTHS = ["Jan.", "Feb.", "Mar.", "Apr.", "May", "June", "July", "Aug.", "Sept.", "Oct.", "Nov.", "Dec."];
+function siteName(url: string) {
+  const h = hostOf(url).split(".");
+  const main = h.length > 2 && h[0].length > 3 ? h[0] : h[h.length - 2] || h[0];
+  return main ? main.charAt(0).toUpperCase() + main.slice(1) : url;
+}
+export function citeMLA(link: Link, now = new Date()) {
+  return `“${link.name}.” ${siteName(link.url)}, ${link.url.replace(/^https?:\/\//, "")}. Accessed ${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}.`;
+}
+export function citeAPA(link: Link, now = new Date()) {
+  const date = now.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  return `${siteName(link.url)}. (n.d.). ${link.name}. Retrieved ${date}, from ${link.url}`;
+}
+export function asMarkdown(link: Link) {
+  return `[${link.name.replace(/([[\]])/g, "\\$1")}](${link.url})`;
+}
+
+/** Every http(s) link in a block of pasted text. */
+export function urlsIn(text: string): string[] {
+  const found = text.match(/https?:\/\/[^\s<>"')]+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s<>"')]*)?/gi) || [];
+  return Array.from(new Set(found.map((u) => u.replace(/[.,;]+$/, ""))));
+}
+
 export function readLocal<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);

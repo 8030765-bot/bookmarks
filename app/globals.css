@@ -683,3 +683,81 @@ button.meta-by:hover{color:var(--text)}
 .status-dot.good{background:var(--success);box-shadow:0 0 0 3px var(--success-dim)}
 .status-dot.bad{background:var(--danger);box-shadow:0 0 0 3px var(--danger-dim)}
 .status-meta{text-align:center;font-size:.78rem;color:var(--text-muted);margin-top:.8rem}
+/* ===== link cards: badges, labels, details, menu, selection ===== */
+.cards{align-items:start}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.muted-inline{color:var(--text-muted);font-weight:400;font-size:inherit}
+.card-title{overflow:hidden;text-overflow:ellipsis;min-width:0}
+.card-emoji{position:absolute;right:-3px;bottom:-3px;z-index:2;font-size:.8rem;line-height:1;filter:drop-shadow(0 1px 1px rgba(0,0,0,.5))}
+.card-desc{font-size:.74rem;color:var(--text-muted);margin-top:.15rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal}
+.badge-pin,.badge-verified{display:inline-flex;flex-shrink:0}
+.badge-pin svg,.badge-verified svg{width:12px;height:12px}
+.badge-pin{color:var(--warning)}
+.badge-verified{color:var(--success)}
+.badge-updated,.badge-expired{flex-shrink:0;font-size:.58rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:.08rem .35rem;border-radius:5px}
+.badge-updated{background:var(--accent-dim);color:var(--accent)}
+.badge-expired{background:var(--danger-dim);color:var(--danger)}
+.sticker{flex-shrink:0;font-size:.62rem;font-weight:650;padding:.05rem .35rem;border-radius:5px;background:var(--surface-hover);border:1px solid var(--border-light)}
+.sticker-hot{color:#ff8a5c}.sticker-essential{color:var(--warning)}
+.label{font-size:.64rem;font-weight:600;padding:.08rem .4rem;border-radius:5px;background:var(--surface-hover);color:var(--text-muted);border:1px solid var(--border)}
+.label.status-broken{color:var(--danger);border-color:rgba(255,92,122,.35)}
+.label.status-login,.label.status-slow{color:var(--warning);border-color:rgba(255,184,77,.35)}
+.meta-tip,.meta-steps{font-size:.68rem;color:var(--text-muted)}
+.meta-note.mine{color:var(--accent)}
+.meta-done{display:inline-flex;align-items:center;gap:.15rem;font-size:.68rem;color:var(--success);font-weight:600}
+.meta-done svg{width:11px;height:11px}
+.card.done .card-title{opacity:.75}
+.card.expired{opacity:.55}
+.card.pinned{border-color:var(--border-light)}
+.card.kb-focus{outline:2px solid var(--accent);outline-offset:2px}
+.card.selected{border-color:var(--accent);background:var(--accent-dim)}
+.rename-input{padding:.15rem .35rem!important;font-size:.88rem!important;font-weight:600;height:auto;border-radius:6px!important}
+/* select tick: shows on hover, stays while anything is selected */
+.card-check{position:absolute;top:.4rem;left:.4rem;z-index:3;display:flex;opacity:0;transition:opacity .12s}
+.card-check input{width:15px;height:15px;accent-color:var(--accent);cursor:pointer}
+.card:hover .card-check,.card.selected .card-check,.card.kb-focus .card-check{opacity:1}
+@media (hover:none){.card-check{display:none}}
+/* details ("back of the card") */
+.card.expanded{grid-column:1/-1;border-color:var(--border-light);animation:flipIn .22s ease}
+@keyframes flipIn{0%{transform:perspective(800px) rotateX(-8deg);opacity:.6}to{transform:none;opacity:1}}
+.card-details{border-top:1px solid var(--border);margin-top:.2rem;padding-top:.65rem;display:flex;flex-direction:column;gap:.6rem;font-size:.84rem;cursor:default}
+.cd-desc{white-space:pre-wrap;overflow-wrap:anywhere}
+.cd-tip{color:var(--warning);font-size:.82rem}
+.cd-labels{display:flex;flex-wrap:wrap;gap:.3rem}
+.cd-facts{display:flex;flex-wrap:wrap;gap:.25rem .9rem;font-size:.75rem;color:var(--text-muted)}
+.cd-section{display:flex;flex-direction:column;gap:.3rem}
+.cd-h{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted)}
+.cd-step{display:flex;align-items:center;gap:.5rem;font-size:.84rem;cursor:pointer}
+.cd-step input{width:15px;height:15px;accent-color:var(--success)}
+.cd-step.on{color:var(--text-muted);text-decoration:line-through}
+.cd-link{display:flex;align-items:center;gap:.45rem;padding:.3rem .45rem;border-radius:8px;font-size:.84rem;color:var(--text)}
+.cd-link:hover{background:var(--surface-hover)}
+.cd-link .muted-inline{margin-left:auto;font-size:.72rem}
+.cd-bar{display:grid;grid-template-columns:2rem 1fr 1.5rem;align-items:center;gap:.5rem;font-size:.74rem;color:var(--text-muted)}
+.cd-bar .bar>span{background:var(--warning)}
+.cd-note{min-height:60px;font-size:.84rem;padding:.5rem .6rem}
+.cd-actions{display:flex;flex-wrap:wrap;gap:.35rem}
+.cd-actions .pick{font-size:.78rem;padding:.3rem .6rem}
+/* right-click menu */
+.card-menu{min-width:230px;max-height:calc(100vh - 16px);overflow-y:auto;z-index:130}
+.menu-sub{font-size:.72rem!important;font-weight:500;color:var(--text-muted)!important;margin-top:.1rem}
+.menu-sep{height:1px;background:var(--border);margin:.3rem .2rem}
+.menu button.danger{color:var(--danger)}
+.menu button:focus-visible{outline:none;background:var(--surface-hover)}
+/* bar that appears when cards are selected */
+.selection-bar{position:fixed;left:50%;bottom:1.25rem;transform:translateX(-50%);z-index:95;display:flex;align-items:center;flex-wrap:wrap;justify-content:center;gap:.4rem;max-width:calc(100vw - 2rem);padding:.5rem .6rem .5rem .9rem;background:var(--bg2);border:1px solid var(--border-light);border-radius:14px;box-shadow:0 20px 50px rgba(0,0,0,.55);animation:slideUp .15s ease;font-size:.85rem}
+.selection-bar select{width:auto;padding:.32rem .5rem;font-size:.8rem}
+.sel-tag input{width:84px;padding:.32rem .5rem;font-size:.8rem}
+/* dropping a link in from another tab */
+.url-drop-hint{display:flex;align-items:center;gap:.4rem;justify-content:center;padding:.5rem;font-size:.82rem;color:var(--accent);background:var(--accent-dim);border-bottom:1px solid var(--border)}
+.url-drop-hint svg{width:14px;height:14px}
+.bulk-input{min-height:160px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.82rem}
+.link-btn.hint{display:inline-block;margin-top:.4rem}
+/* large cards */
+:root[data-density=large] .cards{grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:.8rem}
+:root[data-density=large] .card{padding:1rem 1rem .9rem;gap:.6rem}
+:root[data-density=large] .card-icon{width:46px;height:46px}
+:root[data-density=large] .card-name{font-size:1rem}
+:root[data-density=large] .card-meta{padding-left:calc(46px + .7rem)}
+.card-check{top:.3rem;left:.3rem;padding:2px;border-radius:5px;background:var(--bg2);box-shadow:0 0 0 1px var(--border-light)}
+.card-check input{width:13px;height:13px;margin:0}
