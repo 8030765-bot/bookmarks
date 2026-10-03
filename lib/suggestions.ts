@@ -3,6 +3,7 @@ import { v4 as uuid } from "uuid";
 import { Suggestion, SuggestionKind } from "./types";
 import { getBookmarks, handleAction } from "./store";
 import { normalizeUrl } from "./url";
+import { notify } from "./userdata";
 
 const KEY = "suggestions"; // hash: id -> Suggestion
 const MAX_PENDING_PER_USER = 10;
@@ -124,6 +125,7 @@ export async function approveSuggestion(id: string, auth: { password?: string; _
   }
   const done: Suggestion = { ...s, status: "approved", resolvedAt: new Date().toISOString() };
   await getRedis().hset(KEY, { [id]: done });
+  notify(s.user, { kind: "suggestion", text: `Your suggestion was approved${name ? `: “${name}”` : ""}` }).catch(() => {});
   return done;
 }
 
@@ -136,6 +138,7 @@ export async function rejectSuggestion(id: string, reason?: string) {
     resolvedNote: clean(reason, 300) || undefined,
   };
   await getRedis().hset(KEY, { [id]: done });
+  notify(s.user, { kind: "suggestion", text: `Your suggestion was declined${done.resolvedNote ? `: “${done.resolvedNote}”` : ""}` }).catch(() => {});
   return done;
 }
 

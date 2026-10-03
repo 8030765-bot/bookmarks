@@ -3,6 +3,7 @@ import { Folder, Link } from "@/lib/types";
 import { Icon } from "../CommandPalette";
 import Favicon from "./Favicon";
 import { hostOf, isNew, safeHref } from "./ui";
+import { StarRating } from "./Personal";
 
 /** Highlights every search word that appears in the text. */
 export function Highlight({ text, query }: { text: string; query: string }) {
@@ -23,6 +24,8 @@ export interface LinkCardActions {
   suggest: (folder: Folder, link: Link) => void;
   like: (folder: Folder, link: Link) => void;
   filterTag: (tag: string) => void;
+  rate: (linkId: string, stars: number) => void;
+  openProfile: (username: string) => void;
 }
 
 export default function LinkCard({
@@ -31,6 +34,10 @@ export default function LinkCard({
   query,
   admin,
   me,
+  favorited,
+  myRating,
+  avg,
+  ratingCount,
   actions,
   draggable,
   dropBefore,
@@ -45,6 +52,10 @@ export default function LinkCard({
   admin: boolean;
   /** logged-in username, for "you liked this" */
   me: string | null;
+  favorited: boolean;
+  myRating?: number;
+  avg?: number;
+  ratingCount?: number;
   actions: LinkCardActions;
   draggable: boolean;
   dropBefore: boolean;
@@ -58,7 +69,7 @@ export default function LinkCard({
   const liked = !!me && !!link.likes?.includes(me.toLowerCase());
   return (
     <div
-      className={`card ${link.favorite ? "fav" : ""} ${dropBefore ? "drop-before" : ""}`}
+      className={`card ${favorited ? "fav" : ""} ${dropBefore ? "drop-before" : ""}`}
       style={link.color ? ({ "--card-accent": link.color } as React.CSSProperties) : undefined}
       draggable={draggable}
       onDragStart={(e) => {
@@ -91,7 +102,7 @@ export default function LinkCard({
           <span className="card-host"><Highlight text={hostOf(link.url)} query={query} /></span>
         </span>
       </a>
-      {(link.tags?.length || link.clicks || link.notes || link.addedBy) ? (
+      {(link.tags?.length || link.clicks || link.notes || link.addedBy || me || ratingCount) ? (
         <div className="card-meta">
           {link.tags?.map((t) => (
             <button key={t} className="tag" onClick={() => actions.filterTag(t)} title={`Show everything tagged ${t}`}>
@@ -100,7 +111,8 @@ export default function LinkCard({
           ))}
           {link.notes && <span className="meta-note" title={link.notes}>📝 note</span>}
           {(link.clicks || 0) > 0 && <span className="meta-clicks">{link.clicks} visit{link.clicks === 1 ? "" : "s"}</span>}
-          {link.addedBy && <span className="meta-by">by {link.addedBy}</span>}
+          {link.addedBy && <button className="meta-by" onClick={(e) => { e.preventDefault(); e.stopPropagation(); actions.openProfile(link.addedBy!); }}>by {link.addedBy}</button>}
+          <StarRating linkId={link.id} mine={myRating} avg={avg} count={ratingCount} canRate={!!me} onRate={actions.rate} />
         </div>
       ) : null}
       <button
@@ -113,7 +125,7 @@ export default function LinkCard({
         {likes > 0 && <span>{likes}</span>}
       </button>
       <div className="card-actions">
-        <button className={`ca ${link.favorite ? "on" : ""}`} title={link.favorite ? "Unstar" : "Star"} onClick={() => actions.star(folder, link)}>
+        <button className={`ca ${favorited ? "on" : ""}`} title={favorited ? "Remove from your favorites" : "Save to your favorites"} onClick={() => actions.star(folder, link)}>
           <Icon name="star" />
         </button>
         <button className="ca" title="Copy link" onClick={() => actions.copy(link)}><Icon name="copy" /></button>

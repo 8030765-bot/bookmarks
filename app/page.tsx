@@ -10,6 +10,9 @@ import { LinkCardActions } from "./components/LinkCard";
 import LinkModal, { LinkModalMode, LinkValues } from "./components/LinkModal";
 import { ConfirmModal, FolderModal, FolderValues, ShortcutsModal } from "./components/Modals";
 import Favicon from "./components/Favicon";
+import {
+  NotificationBell, NotificationPanel, ProfileCard, ProfileModal, usePersonal,
+} from "./components/Personal";
 import { LinkRef, isNew, readLocal, safeHref, writeLocal } from "./components/ui";
 import {
   CustomizeModal, DEFAULT_LOOK, LeaderboardModal, Look, OnlinePill, Palette, PollCards, SpinWheel, WhatsNew, applyLook, usePresence,
@@ -32,6 +35,7 @@ type Modal =
   | { type: "customize" }
   | { type: "spin" }
   | { type: "whatsnew" }
+  | { type: "profileEdit" }
   | null;
 interface Toast {
   msg: string;
@@ -128,6 +132,9 @@ export default function HomePage() {
   const [adminOpen, setAdminOpen] = useState(false);
   const [user, setUser] = useState<string | null>(null);
   const [role, setRole] = useState<"owner" | "admin" | "mod" | null>(null);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [profileView, setProfileView] = useState<string | null>(null);
+  const [aggRatings, setAggRatings] = useState<Record<string, { avg: number; count: number }>>({});
   const [ownerExists, setOwnerExists] = useState(true);
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [fUsername, setFUsername] = useState("");
@@ -265,6 +272,16 @@ export default function HomePage() {
   }, [applyIfNewer]);
 
   const presence = usePresence(user);
+  const personal = usePersonal(user);
+  const favoriteSet = useMemo(() => new Set(personal.favorites), [personal.favorites]);
+
+  // live-ish average ratings
+  useEffect(() => {
+    const load = () => fetch("/api/ratings", { cache: "no-store" }).then((r) => r.json()).then((j) => setAggRatings(j.ratings || {})).catch(() => {});
+    load();
+    const id = setInterval(() => { if (document.visibilityState === "visible") load(); }, 15000);
+    return () => clearInterval(id);
+  }, []);
 
   // highlight the folder chip for whichever folder is on screen
   const folderIds = (data?.folders || []).map((f) => f.id).join(",");
@@ -385,7 +402,7 @@ export default function HomePage() {
     allRefs.forEach(({ link }) => link.tags?.forEach((t) => counts.set(t, (counts.get(t) || 0) + 1)));
     return Array.from(counts).sort((a, b) => b[1] - a[1]);
   }, [allRefs]);
-  const favorites = allRefs.filter((r) => r.link.favorite);
+  const favorites = allRefs.filter((r) => favoriteSet.has(r.link.id));
   const mostVisited = [...allRefs].filter((r) => (r.link.clicks || 0) > 0).sort((a, b) => (b.link.clicks || 0) - (a.link.clicks || 0)).slice(0, 8);
   const topRated = allRefs.filter((r) => (r.link.likes?.length || 0) > 0).sort((a, b) => (b.link.likes?.length || 0) - (a.link.likes?.length || 0)).slice(0, 8);
   const latestActivity = data?.activity?.[0]?.id ?? null;
@@ -509,7 +526,7 @@ export default function HomePage() {
   const cardActions: LinkCardActions = {
     newTab: look.newTab,
     open: (f, l) => trackAndOpen(f, l),
-    star: (f, l) => { api("toggleFavorite", { folderId: f.id, linkId: l.id }); },
+    star: (_f, l) => { if (!user) { showToast("Log in to save favorites"); openLogin(); return; } personal.toggleFavorite(l.id); },
     copy: (l) => navigator.clipboard.writeText(l.url).then(() => showToast("Link copied")).catch(() => showToast("Couldn't copy")),
     edit: (f, l) => setModal({ type: "link", mode: { kind: "edit", folder: f, link: l } }),
     remove: async (f, l) => {
@@ -523,6 +540,8 @@ export default function HomePage() {
       api("toggleLike", { folderId: f.id, linkId: l.id });
     },
     filterTag: (t) => { setTagFilter(t === tagFilter ? "" : t); window.scrollTo({ top: 0, behavior: "smooth" }); },
+    rate: (linkId, stars) => { if (!user) { showToast("Log in to rate"); openLogin(); return; } personal.rate(linkId, stars); },
+    openProfile: (u) => setProfileView(u),
   };
 
   async function moveLink(from: { folderId: string; linkId: string }, toFolderId: string, beforeLinkId: string | null) {
@@ -817,7 +836,7 @@ export default function HomePage() {
           <div className="top-actions">
             <button className="icon-btn" title="Spin the wheel (S)" onClick={() => setModal({ type: "spin" })}><Icon name="shuffle" /></button>
             <button className="icon-btn" title="Community (L)" onClick={() => setModal({ type: "leaderboard" })}><Icon name="trophy" /></button>
-            <button className={`icon-btn ${hasNews ? "dot" : ""}`} title="What's new (W)" onClick={openWhatsNew}><Icon name="bell" /></button>
+            {user && <NotificationBell notifications={personal.notifications} open={notifOpen} onOpen={() => { setNotifOpen(true); personal.markRead(); }} />}
             <div className="user-menu">
               <button className={`icon-btn ${moreMenu ? "on" : ""}`} title="More" aria-expanded={moreMenu} onClick={() => setMoreMenu((o) => !o)}>
                 <Icon name="more" />
@@ -830,6 +849,8 @@ export default function HomePage() {
                     <button className="phone-only" onClick={() => { setMoreMenu(false); setModal({ type: "leaderboard" }); }}><Icon name="trophy" /> Community</button>
                     <button onClick={() => { setMoreMenu(false); setShowCmd(true); }}><Icon name="search" /> Command menu <span className="kbd">Ctrl K</span></button>
                     <button onClick={() => { setMoreMenu(false); setSuggest({}); }}><Icon name="bulb" /> Suggest a change</button>
+                    {user && <button onClick={() => { setMoreMenu(false); setModal({ type: "profileEdit" }); }}><Icon name="user" /> Edit profile</button>}
+                    <button onClick={() => { setMoreMenu(false); openWhatsNew(); }}><Icon name="chart" /> What&apos;s new {hasNews && <span className="dot-inline" />}<span className="kbd">W</span></button>
                     <button onClick={() => { setMoreMenu(false); setModal({ type: "customize" }); }}><Icon name="palette" /> Customize look <span className="kbd">P</span></button>
                     <button onClick={() => { setMoreMenu(false); changeTheme(theme === "dark" ? "light" : "dark"); }}>
                       <Icon name={theme === "dark" ? "sun" : "moon"} /> {theme === "dark" ? "Light mode" : "Dark mode"} <span className="kbd">T</span>
@@ -1008,6 +1029,9 @@ export default function HomePage() {
                 view={view}
                 admin={adminUnlocked}
                 me={user}
+                favorites={favoriteSet}
+                ratings={aggRatings}
+                myRatings={personal.ratings}
                 canAdd={!addingLocked}
                 dragEnabled={dragEnabled}
                 drag={drag}
@@ -1160,6 +1184,13 @@ export default function HomePage() {
           showToast={showToast}
         />
       )}
+      {notifOpen && (
+        <NotificationPanel notifications={personal.notifications} onClose={() => setNotifOpen(false)} onOpenChat={() => { setNotifOpen(false); setChatOpen(true); }} />
+      )}
+      {modal?.type === "profileEdit" && (
+        <ProfileModal profile={personal.profile} onSave={personal.saveProfile} onClose={() => setModal(null)} />
+      )}
+      {profileView && <ProfileCard username={profileView} onClose={() => setProfileView(null)} />}
       <ChatPanel
         open={chatOpen}
         setOpen={setChatOpen}

@@ -4,6 +4,7 @@ import { defaultData } from "./defaultData";
 import { v4 as uuid } from "uuid";
 import { normalizeUrl } from "./url";
 import { AuthContext, checkAdmin } from "./roles";
+import { notify } from "./userdata";
 const KEY = "bookmarks:shared";
 const PREV_KEY = "bookmarks:shared:prev";
 function getRedis() {
@@ -248,10 +249,15 @@ export async function handleAction(
       if (!user) throw new Error("Log in to like websites");
       const { link } = findLink(data, String(body.folderId || ""), String(body.linkId || ""));
       const likes = new Set(link.likes || []);
-      if (likes.has(user)) likes.delete(user);
-      else likes.add(user);
+      const adding = !likes.has(user);
+      if (adding) likes.add(user);
+      else likes.delete(user);
       link.likes = Array.from(likes);
       await saveBookmarks(data, { snapshot: false });
+      // tell the person who added it (not yourself)
+      if (adding && link.addedBy && link.addedBy.toLowerCase() !== user) {
+        notify(link.addedBy, { kind: "like", from: me, text: `${me} liked your link “${link.name}”` }).catch(() => {});
+      }
       return data;
     }
     case "createPoll": {

@@ -1,6 +1,7 @@
 import { Redis } from "@upstash/redis";
 import { v4 as uuid } from "uuid";
 import { ChatMessage } from "./types";
+import { notify } from "./userdata";
 
 const MESSAGES_KEY = "chat:messages";
 const DELETED_KEY = "chat:deleted";
@@ -47,6 +48,15 @@ export async function postMessage(username: string, text: string, replyToId?: st
   }
   await redis.lpush(MESSAGES_KEY, msg);
   await redis.ltrim(MESSAGES_KEY, 0, MAX_MESSAGES - 1);
+  // notify @mentions and the person being replied to (never yourself)
+  const targets = new Set<string>();
+  for (const m of trimmed.matchAll(/@([a-zA-Z0-9_]{3,20})/g)) targets.add(m[1].toLowerCase());
+  if (msg.replyTo) targets.add(msg.replyTo.user.toLowerCase());
+  targets.delete(username.toLowerCase());
+  for (const t of targets) {
+    const reply = msg.replyTo && t === msg.replyTo.user.toLowerCase();
+    notify(t, { kind: reply ? "reply" : "mention", from: username, text: `${username} ${reply ? "replied to you" : "mentioned you"}: ${trimmed.slice(0, 60)}` }).catch(() => {});
+  }
   return msg;
 }
 

@@ -14,6 +14,9 @@ export default function FolderSection({
   view,
   admin,
   me,
+  favorites,
+  ratings,
+  myRatings,
   canAdd,
   dragEnabled,
   drag,
@@ -38,6 +41,9 @@ export default function FolderSection({
   view: "grid" | "list";
   admin: boolean;
   me: string | null;
+  favorites: Set<string>;
+  ratings: Record<string, { avg: number; count: number }>;
+  myRatings: Record<string, number>;
   canAdd: boolean;
   dragEnabled: boolean;
   drag: Drag;
@@ -139,6 +145,10 @@ export default function FolderSection({
                 query={query}
                 admin={admin}
                 me={me}
+                favorited={favorites.has(link.id)}
+                myRating={myRatings[link.id]}
+                avg={ratings[link.id]?.avg}
+                ratingCount={ratings[link.id]?.count}
                 actions={actions}
                 draggable={admin && dragEnabled}
                 dropBefore={dropTarget === `link:${link.id}`}
