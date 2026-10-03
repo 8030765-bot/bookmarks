@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { login, logout, setSessionCookie, signup } from "@/lib/auth";
-import { getAuthContext } from "@/lib/roles";
+import { getAuthContext, getRole, ownerExists } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +31,9 @@ export async function POST(req: NextRequest) {
     }
     const session = action === "signup" ? await signup(username, password) : await login(username, password);
     setSessionCookie(session.token);
-    return NextResponse.json({ user: session.username });
+    // include role + ownerExists so the client unlocks admin immediately (no refresh needed)
+    const [role, hasOwner] = await Promise.all([getRole(session.username), ownerExists()]);
+    return NextResponse.json({ user: session.username, role, ownerExists: hasOwner });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Request failed";
     const status = message.startsWith("Wrong") ? 401 : message.startsWith("Too many") ? 429 : 400;

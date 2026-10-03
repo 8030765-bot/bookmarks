@@ -324,7 +324,7 @@ export default function HomePage() {
       setUser(j.user || null);
       setRole(j.role || null);
       setOwnerExists(!!j.ownerExists);
-      if (j.role === "owner" || j.role === "admin") { setAdminUnlocked(true); setAdminPassword(""); }
+      if (j.role) { setAdminUnlocked(true); setAdminPassword(""); }
     }).catch(() => {});
     let saved: string | null = null;
     try { saved = sessionStorage.getItem(ADMIN_PW_KEY); } catch {}
@@ -635,7 +635,7 @@ export default function HomePage() {
   }
   function lockAdmin() {
     // role-holders are always admins; this just closes the panel for them
-    if (role === "owner" || role === "admin") { setAdminOpen(false); return; }
+    if (role) { setAdminOpen(false); return; }
     setAdminUnlocked(false);
     setAdminPassword("");
     setAdminOpen(false);
@@ -660,7 +660,7 @@ export default function HomePage() {
       setUser(json.user);
       setRole(json.role || null);
       setOwnerExists((o) => o || json.role === "owner");
-      if (json.role === "owner" || json.role === "admin") { setAdminUnlocked(true); setAdminPassword(""); }
+      if (json.role) { setAdminUnlocked(true); setAdminPassword(""); }
       setFUsername(""); setFPassword("");
       setModal(null);
       showToast(authMode === "signup" ? `Welcome, ${json.user}!` : `Logged in as ${json.user}`);
