@@ -7,6 +7,7 @@ import { AuthContext, checkAdmin } from "./roles";
 import { notify } from "./userdata";
 import { REV_KEYS } from "./revs";
 import { fansKey } from "./social";
+import { getClub, isMember } from "./clubs";
 const KEY = "bookmarks:shared";
 const PREV_KEY = "bookmarks:shared:prev";
 // visit counts live in their own hash (HINCRBY) so a click never rewrites the whole list
@@ -263,9 +264,13 @@ export async function handleAction(
   const requireAdmin = (pw?: string) => checkAdmin(authFrom(body), pw);
   const isAdmin = () => { try { requireAdmin(password); return true; } catch { return false; } };
   const me = authFrom(body).user || undefined;
-  // folder maintainers can manage the links in their own folder
+  // folder maintainers (and a club's members, for its folder) can manage the links in it
   const maintains = (folder: Folder) => !!me && !!folder.maintainers?.includes(me.toLowerCase());
-  const requireFolderEditor = (folder: Folder) => { if (!maintains(folder)) requireAdmin(password); };
+  const requireFolderEditor = async (folder: Folder) => {
+    if (maintains(folder)) return;
+    if (folder.clubId && me && isMember(await getClub(folder.clubId), me)) return;
+    requireAdmin(password);
+  };
   const findFolder = (id: unknown) => {
     const folder = data.folders.find((f) => f.id === String(id || ""));
     if (!folder) throw new Error("Folder not found");
@@ -284,7 +289,7 @@ export async function handleAction(
       const url = cleanUrl(body.url);
       if (!folderId || !name || !url) throw new Error("Missing fields");
       const folder = findFolder(folderId);
-      if (data.settings?.lockAdding) requireFolderEditor(folder);
+      if (data.settings?.lockAdding) await requireFolderEditor(folder);
       if (folder.rule) throw new Error("Smart folders fill themselves — add the link to a normal folder");
       const tags = cleanTags(body.tags);
       const user = me;
@@ -311,7 +316,7 @@ export async function handleAction(
     case "addLinks": {
       // paste a list of links: one save instead of one per link
       const folder = findFolder(body.folderId);
-      if (data.settings?.lockAdding) requireFolderEditor(folder);
+      if (data.settings?.lockAdding) await requireFolderEditor(folder);
       if (folder.rule) throw new Error("Smart folders fill themselves — add the links to a normal folder");
       const incoming = Array.isArray(body.links) ? (body.links as Record<string, unknown>[]).slice(0, 50) : [];
       const existing = new Set(data.folders.flatMap((f) => f.links.map((l) => l.url)));
@@ -336,7 +341,7 @@ export async function handleAction(
     }
     case "editLink": {
       const { folder, link } = findLink(data, String(body.folderId || ""), String(body.linkId || ""));
-      requireFolderEditor(folder);
+      await requireFolderEditor(folder);
       if (typeof body.name === "string" && body.name.trim()) link.name = cleanName(body.name);
       if (typeof body.url === "string" && body.url.trim()) link.url = cleanUrl(body.url);
       if (Array.isArray(body.tags) || typeof body.tags === "string") link.tags = cleanTags(body.tags);
@@ -350,7 +355,7 @@ export async function handleAction(
     }
     case "deleteLink": {
       const folder = findFolder(body.folderId);
-      requireFolderEditor(folder);
+      await requireFolderEditor(folder);
       const linkId = String(body.linkId || "");
       const before = folder.links.find((l) => l.id === linkId);
       folder.links = folder.links.filter((l) => l.id !== linkId);
@@ -380,7 +385,7 @@ export async function handleAction(
     }
     case "editFolder": {
       const folder = findFolder(body.folderId || body.id);
-      requireFolderEditor(folder);
+      await requireFolderEditor(folder);
       const admin = isAdmin();
       if (typeof body.name === "string" && body.name.trim()) folder.name = cleanName(body.name, 60);
       if (typeof body.emoji === "string" && body.emoji.trim()) folder.emoji = cleanName(body.emoji, 8);
@@ -654,6 +659,23 @@ export async function handleAction(
       if (typeof patch.startFolderId === "string") {
         s.startFolderId = data.folders.some((f) => f.id === patch.startFolderId) ? (patch.startFolderId as string) : undefined;
       }
+      // chat rules
+      if (patch.chatShortcodes && typeof patch.chatShortcodes === "object") {
+        const out: Record<string, string> = {};
+        for (const [k, v] of Object.entries(patch.chatShortcodes as Record<string, unknown>).slice(0, 50)) {
+          const name = k.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 20);
+          if (name && typeof v === "string" && v.trim()) out[name] = v.trim().slice(0, 20);
+        }
+        s.chatShortcodes = Object.keys(out).length ? out : undefined;
+      }
+      if (Array.isArray(patch.chatLinkAllow)) {
+        const list = patch.chatLinkAllow.map((d) => String(d).trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0])
+          .filter((d) => /^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)).slice(0, 50);
+        s.chatLinkAllow = list.length ? list : undefined;
+      }
+      if (typeof patch.chatMaxLen === "number") {
+        s.chatMaxLen = Math.min(500, Math.max(50, Math.round(patch.chatMaxLen)));
+      }
       pushActivity(data, "settings", "Updated site settings");
       await saveBookmarks(data);
       return data;
@@ -668,7 +690,7 @@ export async function handleAction(
     }
     case "reorderLink": {
       const { folder, index } = findLink(data, String(body.folderId || ""), String(body.linkId || ""));
-      requireFolderEditor(folder);
+      await requireFolderEditor(folder);
       moveItem(folder.links, index, Number(body.dir) < 0 ? -1 : 1);
       await saveBookmarks(data);
       return data;
@@ -745,8 +767,8 @@ export async function handleAction(
       const { folder: src, index } = findLink(data, String(body.folderId || ""), String(body.linkId || ""));
       const dst = findFolder(body.targetFolderId);
       // maintainers can reorder inside their folder; moving between folders needs both
-      requireFolderEditor(src);
-      requireFolderEditor(dst);
+      await requireFolderEditor(src);
+      await requireFolderEditor(dst);
       if (dst.rule) throw new Error("Smart folders fill themselves — pick a normal folder");
       const [link] = src.links.splice(index, 1);
       const before = body.beforeLinkId ? dst.links.findIndex((l) => l.id === String(body.beforeLinkId)) : -1;

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminSetPassword, deleteUser, listUsers, rebuildUserIndex } from "@/lib/auth";
-import { clearChat, getBanned, getMessages, setBanned } from "@/lib/chat";
+import { clearChat, getAllMessages, getBanned, setBanned } from "@/lib/chat";
 import { getBookmarks, withClicks } from "@/lib/store";
 import { approveSuggestion, deleteSuggestion, listSuggestions, rejectSuggestion } from "@/lib/suggestions";
 import {
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
         checkMod(ctx, password);
         const isAdmin = ctx.role === "owner" || ctx.role === "admin" || !ctx.ownerExists;
         const [users, messages, banned, suggestions, roles, auditLog] = await Promise.all([
-          listUsers(), getMessages(), getBanned(), listSuggestions(), listRoles(), isAdmin ? listAudit() : Promise.resolve([]),
+          listUsers(), getAllMessages(), getBanned(), listSuggestions(), listRoles(), isAdmin ? listAudit() : Promise.resolve([]),
         ]);
         return NextResponse.json({ users, banned, messageCount: messages.length, suggestions, roles, audit: auditLog, me: ctx });
       }

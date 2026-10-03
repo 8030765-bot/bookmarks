@@ -13,6 +13,7 @@ import SearchBox from "./components/SearchBox";
 import MyStuff from "./components/MyStuff";
 import { PasswordStrength } from "./components/People";
 const AccountModal = dynamic(() => import("./components/Account"), { ssr: false });
+const ClubsModal = dynamic(() => import("./components/Clubs"), { ssr: false });
 import ScrollMap from "./components/ScrollMap";
 import type { ChatMessage } from "@/lib/types";
 import { CardContext, CardEnv, LinkCardActions } from "./components/cardEnv";
@@ -31,7 +32,7 @@ import {
   NotificationBell, ProfileCard, ProfileModal, usePersonal,
 } from "./components/Personal";
 import { NotificationPanel, WeeklyDigest, disablePush, enablePush, playPing } from "./components/Notifications";
-import { LinkRef, asMarkdown, isExpired, isNewSince, newOpId, readLocal, safeHref, suggestionSummary, urlsIn, writeLocal } from "./components/ui";
+import { LinkRef, asMarkdown, isExpired, isNewSince, newOpId, normUrl, readLocal, safeHref, suggestionSummary, urlsIn, writeLocal } from "./components/ui";
 import {
   CustomizeModal, DEFAULT_LOOK, LeaderboardModal, Look, OnlinePill, Palette, PollCards, SpinWheel, WhatsNew, applyLook, usePresence,
 } from "./components/Community";
@@ -50,6 +51,7 @@ type Modal =
   | { type: "folder"; folder?: Folder; smart?: boolean }
   | { type: "tags" }
   | { type: "account" }
+  | { type: "saved" }
   | { type: "deleteFolder"; folder: Folder }
   | { type: "adminLogin" }
   | { type: "login" }
@@ -145,6 +147,10 @@ export default function HomePage() {
   const [toastLog, setToastLog] = useState<{ msg: string; at: number }[]>([]);
   const [digestOpen, setDigestOpen] = useState(false);
   const [pingOn, setPingOn] = useState(true);
+  const [pingName, setPingName] = useState("classic");
+  const [clubsOpen, setClubsOpen] = useState(false);
+  // where chat should open: a channel / message from a link or notification, or text to share
+  const [chatTarget, setChatTarget] = useState<{ channel?: string; msg?: string; text?: string } | null>(null);
   const [modal, setModal] = useState<Modal>(null);
   const [submitting, setSubmitting] = useState(false);
   const [search, setSearch] = useState("");
@@ -185,7 +191,7 @@ export default function HomePage() {
   // 2-step login: the password was right, now waiting for the 6-digit code
   const [ticket, setTicket] = useState<string | null>(null);
   const [fTotp, setFTotp] = useState("");
-  const [myStuffOpen, setMyStuffOpen] = useState(true);
+  const [myStuffOpen, setMyStuffOpen] = useState(false);
   const [userMenu, setUserMenu] = useState(false);
   const [drag, setDrag] = useState<Drag>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -423,10 +429,13 @@ export default function HomePage() {
     if (unreadCount) nav.setAppBadge?.(unreadCount).catch(() => {});
     else nav.clearAppBadge?.().catch(() => {});
   }, [unreadCount]);
-  useEffect(() => { setPingOn(readLocal("pingSound", true)); }, []);
+  useEffect(() => { setPingOn(readLocal("pingSound", true)); setPingName(readLocal("pingName", "classic")); }, []);
   const quietNow = !!personal.dndUntil && Date.parse(personal.dndUntil) > Date.now();
   useEffect(() => {
-    if (new URLSearchParams(location.search).get("chat") === "open") setChatOpen(true);
+    const params = new URLSearchParams(location.search);
+    if (params.get("chat") !== "open") return;
+    setChatOpen(true);
+    setChatTarget({ channel: params.get("ch") || undefined, msg: params.get("msg") || undefined });
   }, []);
 
   // ?edit=profile (from your profile page) opens the profile editor
@@ -622,6 +631,14 @@ export default function HomePage() {
   const hiddenCount = allRefs.filter((r) => personal.links[r.link.id]?.hidden).length;
   const lastOpened = useMemo(() => new Map(history.map((h) => [h.linkId, h.at])), [history]);
   const folderById = useMemo(() => new Map((data?.folders || []).map((f) => [f.id, f])), [data]);
+  // a link pasted in chat that's already on the site shows as a bookmark card
+  const knownByUrl = useMemo(() => {
+    const m = new Map<string, { name: string; url: string; folder: string; emoji: string }>();
+    allRefs.forEach(({ folder, link }) => m.set(normUrl(link.url), { name: link.name, url: link.url, folder: folder.name, emoji: folder.emoji }));
+    return m;
+  }, [allRefs]);
+  const knownLink = useCallback((url: string) => knownByUrl.get(normUrl(url)), [knownByUrl]);
+  const savedMsgIds = useMemo(() => new Set(personal.savedMessages.map((m) => m.id)), [personal.savedMessages]);
   const totalClicks = allRefs.reduce((n, r) => n + (r.link.clicks || 0), 0);
   const parsed = useMemo(() => parseQuery(search), [search]);
   const q = search.trim().toLowerCase();
@@ -1020,6 +1037,11 @@ export default function HomePage() {
     select: (linkId, shift) => toggleSelect(linkId, shift),
     prompt: (title, initial, onSave, opts) => setPrompt({ title, initial, onSave, ...opts }),
     toast: (msg) => showToast(msg),
+    shareToChat: (l) => {
+      if (!user) { showToast("Log in to chat"); openLogin(); return; }
+      setChatTarget({ text: `${l.name} ${l.url}` });
+      setChatOpen(true);
+    },
   };
 
   // ---------- picking several cards ----------
@@ -1545,6 +1567,8 @@ export default function HomePage() {
                       <button onClick={() => { setUserMenu(false); setModal({ type: "account" }); }}><Icon name="lock" /> Account &amp; security</button>
                       <button onClick={() => { setUserMenu(false); setMyStuffOpen(true); requestAnimationFrame(() => document.querySelector(".my-stuff")?.scrollIntoView({ behavior: "smooth" })); }}><Icon name="folder" /> My Stuff (private)</button>
                       <a href="/people" className="menu-link"><Icon name="users" /> People</a>
+                      <button onClick={() => { setUserMenu(false); setClubsOpen(true); }}><Icon name="tag" /> Clubs</button>
+                      <button onClick={() => { setUserMenu(false); setModal({ type: "saved" }); }}><Icon name="star" /> Saved messages</button>
                       <button onClick={() => { setUserMenu(false); setSuggest({}); }}><Icon name="bulb" /> My suggestions</button>
                       <button onClick={() => { setUserMenu(false); setChatOpen(true); }}><Icon name="chat" /> Open chat</button>
                       <button onClick={handleLogout}><Icon name="logout" /> Log out</button>
@@ -2209,10 +2233,15 @@ export default function HomePage() {
         <NotificationPanel
           notifications={personal.notifications}
           toasts={toastLog}
-          settings={{ prefs: personal.notifyPrefs, dndUntil: personal.dndUntil, sound: pingOn, push: personal.push, pushAvailable: !!personal.pushKey }}
+          settings={{ prefs: personal.notifyPrefs, dndUntil: personal.dndUntil, sound: pingOn, soundName: pingName, push: personal.push, pushAvailable: !!personal.pushKey }}
           onOpen={(n) => {
             setNotifOpen(false);
-            if (["mention", "reply", "dm"].includes(n.kind) || n.link?.includes("chat=open")) { setChatOpen(true); return; }
+            if (["mention", "reply", "dm"].includes(n.kind) || n.link?.includes("chat=open")) {
+              const params = new URLSearchParams((n.link || "").split("?")[1] || "");
+              setChatTarget({ channel: params.get("ch") || undefined, msg: params.get("msg") || undefined });
+              setChatOpen(true);
+              return;
+            }
             const m = n.link?.match(/#(link|folder)-(.+)$/);
             if (m && m[1] === "folder") jumpToFolder(m[2]);
             else if (m) openCard(m[2]);
@@ -2223,7 +2252,10 @@ export default function HomePage() {
           onClearAll={() => personal.removeNotification()}
           onPrefs={personal.setNotifyPrefs}
           onDnd={personal.setDnd}
-          onSound={(on) => { setPingOn(on); writeLocal("pingSound", on); if (on) playPing(); }}
+          onSound={(on, name) => {
+            setPingOn(on); writeLocal("pingSound", on);
+            if (name) { setPingName(name); writeLocal("pingName", name); } else if (on) playPing(pingName);
+          }}
           onPush={async (on) => {
             try {
               if (on) { await enablePush(personal.pushKey!); personal.setPushOn(true); showToast("Notifications turned on for this device"); }
@@ -2233,6 +2265,36 @@ export default function HomePage() {
           onDigest={() => { setNotifOpen(false); setDigestOpen(true); }}
           onClose={() => setNotifOpen(false)}
         />
+      )}
+      {clubsOpen && (
+        <ClubsModal
+          me={user}
+          staff={!!role}
+          onOpenChannel={(ch) => { setChatTarget({ channel: ch }); setChatOpen(true); }}
+          onOpenFolder={(id) => jumpToFolder(id)}
+          onChanged={() => load()}
+          toast={showToast}
+          onClose={() => setClubsOpen(false)}
+        />
+      )}
+      {modal?.type === "saved" && (
+        <div className="modal-overlay" onClick={() => setModal(null)}>
+          <div className="modal wide" onClick={(e) => e.stopPropagation()}>
+            <h2>⭐ Saved messages</h2>
+            {personal.savedMessages.length === 0 && <div className="admin-empty">Nothing saved yet. Use ⋯ → Save for later on any chat message.</div>}
+            <div className="notif-list">
+              {personal.savedMessages.map((m) => (
+                <div key={m.id} className="notif read">
+                  <button className="notif-main" onClick={() => { setModal(null); setChatTarget({ channel: m.channel, msg: m.id }); setChatOpen(true); }}>
+                    <span className="notif-text"><strong>{m.user}</strong> {m.text}<span className="notif-time">#{m.channel} · {new Date(m.at).toLocaleString()}</span></span>
+                  </button>
+                  <span className="notif-tools"><button className="btn-icon sm" title="Remove" onClick={() => personal.saveMessage(m, false)}><Icon name="x" /></button></span>
+                </div>
+              ))}
+            </div>
+            <div className="modal-actions"><button className="btn btn-secondary" onClick={() => setModal(null)}>Close</button></div>
+          </div>
+        </div>
       )}
       {digestOpen && data && (
         <WeeklyDigest data={data} ratings={aggRatings} onOpenLink={(f, l) => { const r = allRefs.find((x) => x.link.id === l); if (r) trackAndOpen(r.folder, r.link); }} onClose={() => setDigestOpen(false)} />
@@ -2283,7 +2345,13 @@ export default function HomePage() {
         blocked={personal.blocked}
         onBlock={(u) => { personal.block(u, true); showToast(`Hid messages from ${u}`); }}
         quiet={quietNow}
-        onMention={() => { if (pingOn) playPing(); }}
+        onMention={() => { if (pingOn) playPing(pingName); }}
+        isAdmin={role === "owner" || role === "admin"}
+        known={knownLink}
+        savedIds={savedMsgIds}
+        onSave={(m, on) => { personal.saveMessage({ id: m.id, channel: m.channel, user: m.user, text: m.text, at: m.at }, on); showToast(on ? "Saved — find it under Saved in the ⋯ menu" : "Removed from saved"); }}
+        onOpenClubs={user ? () => setClubsOpen(true) : undefined}
+        target={chatTarget}
       />
       {showCmd && (
         <CommandPalette

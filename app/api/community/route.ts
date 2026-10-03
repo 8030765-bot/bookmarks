@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { listUsers } from "@/lib/auth";
-import { getMessages } from "@/lib/chat";
+import { getAllMessages } from "@/lib/chat";
 import { getBookmarks } from "@/lib/store";
 import { listSuggestions } from "@/lib/suggestions";
 import { Contributor } from "@/lib/types";
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const [data, users, messages, suggestions] = await Promise.all([
-      getBookmarks(), listUsers(), getMessages(), listSuggestions(),
+      getBookmarks(), listUsers(), getAllMessages(), listSuggestions(),
     ]);
     const map = new Map<string, Contributor>();
     const get = (name: string) => {

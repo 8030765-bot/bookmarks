@@ -78,6 +78,7 @@ export default function CardMenu({ state, onClose }: { state: CardMenuState; onC
         <button onClick={copy(asMarkdown(link), "Markdown link")}><Icon name="link" /> Copy as Markdown</button>
         <button onClick={copy(citeMLA(link), "MLA citation")}><Icon name="quote" /> Copy MLA citation</button>
         <button onClick={copy(citeAPA(link), "APA citation")}><Icon name="quote" /> Copy APA citation</button>
+        {actions.shareToChat && <button onClick={run(() => actions.shareToChat!(link))}><Icon name="chat" /> Share to chat</button>}
         {canShare && (
           <button onClick={run(() => { navigator.share({ title: link.name, url: link.url }).catch(() => {}); })}><Icon name="share" /> Share…</button>
         )}

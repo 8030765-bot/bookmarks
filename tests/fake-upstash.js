@@ -62,6 +62,15 @@ function run(cmd) {
     case "lpush": { const e = live(a[0]) || { v: [], exp: 0 }; for (const x of a.slice(1)) e.v.unshift(str(x)); kv.set(a[0], e); return e.v.length; }
     case "rpush": { const e = live(a[0]) || { v: [], exp: 0 }; for (const x of a.slice(1)) e.v.push(str(x)); kv.set(a[0], e); return e.v.length; }
     case "llen": return (live(a[0])?.v || []).length;
+    case "lset": {
+      const e = live(a[0]);
+      if (!e) throw new Error("ERR no such key");
+      let i = Number(a[1]);
+      if (i < 0) i = e.v.length + i;
+      if (i < 0 || i >= e.v.length) throw new Error("ERR index out of range");
+      e.v[i] = str(a[2]);
+      return "OK";
+    }
     case "lrange": { const l = live(a[0])?.v || []; const s = Number(a[1]); let t = Number(a[2]); if (t < 0) t = l.length + t; return l.slice(s, t + 1); }
     case "ltrim": { const e = live(a[0]); if (e) { let t = Number(a[2]); if (t < 0) t = e.v.length + t; e.v = e.v.slice(Number(a[1]), t + 1); } return "OK"; }
     case "lrem": { const e = live(a[0]); if (!e) return 0; const before = e.v.length; e.v = e.v.filter((x) => x !== str(a[2])); return before - e.v.length; }

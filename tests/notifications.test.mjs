@@ -26,7 +26,7 @@ ok("switched-off kinds don't arrive", (await inbox("nia")).filter((x) => x.kind 
 await call("pat", "/api/chat", { text: "hey @nia" });
 n = await inbox("nia");
 const mention = n.find((x) => x.kind === "mention");
-ok("mention links to chat", mention?.link === "/?chat=open");
+ok("mention links to the message in chat", /^\/\?chat=open&ch=general&msg=/.test(mention?.link || ""), mention?.link);
 r = await me("nia", { action: "readNotifications", id: mention.id });
 ok("mark one as read", r.json.notifications.find((x) => x.id === mention.id)?.read && r.json.notifications.some((x) => !x.read));
 r = await me("nia", { action: "clearNotifications", id: mention.id });

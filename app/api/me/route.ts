@@ -12,7 +12,7 @@ import { addPushSub, hasPush, pushConfigured, pushPublicKey, removePushSub } fro
 import {
   clearNotifications, setDnd, setNotifyPrefs,
   addMyStuff, getUserData, importMyStuff, markNotificationsRead, moveMyStuff, recordAggregateRating, removeMyStuff, renameMyStuffFolder,
-  deleteView, saveSettings, saveView, setBlocked, setFolderOrder, setFolderPref, setLinkPref, setProfile, setRating, toggleFavorite,
+  deleteView, saveMessage, saveSettings, saveView, setBlocked, setFolderOrder, setFolderPref, setLinkPref, setProfile, setRating, toggleFavorite,
 } from "@/lib/userdata";
 import { Redis } from "@upstash/redis";
 import { followersKey } from "@/lib/store";
@@ -146,6 +146,8 @@ export async function POST(req: NextRequest) {
         if (!(await listUsers()).some((u) => u.username.toLowerCase() === target.toLowerCase())) throw new Error("No such account");
         return NextResponse.json(await giveKudos(user, target));
       }
+      case "saveMessage":
+        return NextResponse.json({ savedMessages: await saveMessage(user, (body.message || {}) as Record<string, unknown>, body.on !== false) });
       case "block":
         return NextResponse.json({ blocked: await setBlocked(user, String(body.username || ""), body.on !== false) });
 

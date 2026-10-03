@@ -70,6 +70,8 @@ export interface Folder {
   sort?: FolderSort;
   /** lowercase usernames who can manage just this folder */
   maintainers?: string[];
+  /** belongs to a club: its members can manage the links */
+  clubId?: string;
 }
 
 export type FolderSort = "manual" | "name" | "newest" | "clicks" | "rating";
@@ -92,6 +94,44 @@ export interface ChatMessage {
   replyTo?: { id: string; user: string; text: string };
   /** emoji -> lowercase usernames (merged in when listing) */
   reactions?: Record<string, string[]>;
+  channel?: string;
+  edited?: boolean;
+  /** "me" = /me action, "announce" = highlighted admin message, "poll", "roll" = dice result */
+  kind?: "text" | "me" | "announce" | "poll" | "roll" | "system";
+  poll?: { question: string; options: string[]; votes?: Record<string, string[]>; closed?: boolean };
+  /** a #help question someone marked as answered */
+  answered?: boolean;
+  /** how many replies point at this message (merged in when listing) */
+  replies?: number;
+}
+
+export interface ChatChannel {
+  id: string;
+  name: string;
+  emoji: string;
+  topic?: string;
+  /** shown pinned at the top of the channel */
+  rules?: string;
+  /** seconds people must wait between messages */
+  slow?: number;
+  /** a club's private-ish channel (members, plus moderators) */
+  clubId?: string;
+  createdAt?: string;
+}
+
+export interface Club {
+  id: string;
+  name: string;
+  emoji: string;
+  description?: string;
+  owner: string;
+  /** lowercase usernames */
+  members: string[];
+  /** the club's shared folder */
+  folderId?: string;
+  /** anyone can join (otherwise the owner adds people) */
+  open: boolean;
+  createdAt: string;
 }
 
 export type SuggestionKind = "addLink" | "editLink" | "removeLink" | "other";
@@ -128,6 +168,12 @@ export interface SiteSettings {
   tagColors?: Record<string, string>;
   /** folder shown to first-time visitors */
   startFolderId?: string;
+  /** chat: extra :shortcodes: (name -> emoji or text) */
+  chatShortcodes?: Record<string, string>;
+  /** chat: if set, links are only allowed to these websites */
+  chatLinkAllow?: string[];
+  /** chat: longest message allowed */
+  chatMaxLen?: number;
 }
 
 export interface Poll {

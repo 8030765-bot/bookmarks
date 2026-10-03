@@ -37,6 +37,7 @@ export interface Personal {
   myStuff: PrivateLink[];
   notifyPrefs: Record<string, boolean>;
   dndUntil: string | null;
+  savedMessages: { id: string; channel: string; user: string; text: string; at: string; savedAt: string }[];
   /** this account has push turned on somewhere */
   push: boolean;
   /** the site's push key (null = push isn't set up) */
@@ -46,7 +47,7 @@ export interface Personal {
 }
 const EMPTY: Personal = {
   user: null, favorites: [], ratings: {}, notifications: [], profile: {}, links: {}, folders: {}, folderOrder: [], views: [],
-  following: [], blocked: [], settings: {}, myStuff: [], notifyPrefs: {}, dndUntil: null, push: false, pushKey: null, loaded: false,
+  following: [], blocked: [], settings: {}, myStuff: [], notifyPrefs: {}, dndUntil: null, savedMessages: [], push: false, pushKey: null, loaded: false,
 };
 const GUEST_KEY = "guestLinkPrefs";
 const GUEST_FOLDERS = "guestFolderPrefs";
@@ -88,7 +89,7 @@ export function usePersonal(user: string | null) {
           user: json.user, favorites: json.favorites || [], ratings: json.ratings || {}, notifications: json.notifications || [],
           profile: json.profile || {}, links: json.links || {}, folders: json.folders || {}, folderOrder: json.folderOrder || [],
           views: json.views || [], following: json.following || [], blocked: json.blocked || [], settings: json.settings || {},
-          myStuff: json.myStuff || [], notifyPrefs: json.notifyPrefs || {}, dndUntil: json.dndUntil || null,
+          myStuff: json.myStuff || [], notifyPrefs: json.notifyPrefs || {}, dndUntil: json.dndUntil || null, savedMessages: json.savedMessages || [],
           push: !!json.push, pushKey: json.pushKey || null, loaded: true,
         });
       }
@@ -155,6 +156,9 @@ export function usePersonal(user: string | null) {
     post({ action: "dnd", until }).then((j) => setData((d) => ({ ...d, dndUntil: j.dndUntil ?? null }))).catch(() => {});
   }, [post]);
   const setPushOn = useCallback((on: boolean) => setData((d) => ({ ...d, push: on })), []);
+  const saveMessage = useCallback((message: { id: string; channel?: string; user: string; text: string; at: string }, on: boolean) => {
+    post({ action: "saveMessage", message, on }).then((j) => j.savedMessages && setData((d) => ({ ...d, savedMessages: j.savedMessages }))).catch(() => {});
+  }, [post]);
 
   const setFolderPref = useCallback((folderId: string, patch: Partial<FolderPref>) => {
     setData((d) => {
@@ -221,7 +225,7 @@ export function usePersonal(user: string | null) {
 
   return {
     ...data, reload: load, toggleFavorite, rate, saveProfile, markRead, setLinkPref, setFolderPref, setFolderOrder, saveView, deleteView,
-    follow, block, saveSettings, myStuffAction, removeNotification, setNotifyPrefs, setDnd, setPushOn,
+    follow, block, saveSettings, myStuffAction, removeNotification, setNotifyPrefs, setDnd, setPushOn, saveMessage,
   };
 }
 

@@ -34,6 +34,8 @@ export interface LinkCardActions {
   /** ask for a line of text (private note, rename…) */
   prompt: (title: string, initial: string, onSave: (value: string) => void, opts?: { multiline?: boolean; placeholder?: string }) => void;
   toast: (msg: string) => void;
+  /** drop the link into a chat message */
+  shareToChat?: (link: Link) => void;
 }
 
 /** Everything a card needs that's the same for every card on the page. */

@@ -95,9 +95,12 @@ export interface UserData {
   notifyPrefs: NotifyPrefs;
   /** do-not-disturb until (ISO): notifications still arrive, quietly */
   dndUntil?: string;
+  /** chat messages you saved for later */
+  savedMessages: SavedMessage[];
 }
+export interface SavedMessage { id: string; channel: string; user: string; text: string; at: string; savedAt: string }
 
-const EMPTY: UserData = { profile: {}, favorites: [], ratings: {}, myStuff: [], notifications: [], links: {}, folders: {}, folderOrder: [], views: [], settings: {}, blocked: [], notifyPrefs: {} };
+const EMPTY: UserData = { profile: {}, favorites: [], ratings: {}, myStuff: [], notifications: [], links: {}, folders: {}, folderOrder: [], views: [], settings: {}, blocked: [], notifyPrefs: {}, savedMessages: [] };
 const FOLDER_SORTS = ["manual", "name", "newest", "clicks", "rating", "mine"];
 
 export async function setFolderPref(username: string, folderId: string, patch: Record<string, unknown>) {
@@ -185,7 +188,7 @@ export async function getUserData(username: string): Promise<UserData> {
   return {
     ...EMPTY, ...(raw || {}),
     profile: raw?.profile || {}, links: raw?.links || {}, folders: raw?.folders || {}, folderOrder: raw?.folderOrder || [], views: raw?.views || [],
-    settings: raw?.settings || {}, blocked: raw?.blocked || [], notifyPrefs: raw?.notifyPrefs || {},
+    settings: raw?.settings || {}, blocked: raw?.blocked || [], notifyPrefs: raw?.notifyPrefs || {}, savedMessages: raw?.savedMessages || [],
   };
 }
 
@@ -249,6 +252,22 @@ export async function saveSettings(username: string, patch: Record<string, unkno
   if (JSON.stringify(data.settings).length > 20_000) throw new Error("Those settings are too big to save");
   await save(username, data);
   return data.settings;
+}
+
+export async function saveMessage(username: string, m: Record<string, unknown>, on: boolean) {
+  const data = await getUserData(username);
+  const id = String(m.id || "");
+  if (!/^[\w-]{1,64}$/.test(id)) throw new Error("Invalid message");
+  data.savedMessages = data.savedMessages.filter((x) => x.id !== id);
+  if (on) {
+    data.savedMessages.unshift({
+      id, channel: String(m.channel || "general").slice(0, 40), user: String(m.user || "").slice(0, 20),
+      text: String(m.text || "").slice(0, 500), at: String(m.at || ""), savedAt: new Date().toISOString(),
+    });
+  }
+  data.savedMessages = data.savedMessages.slice(0, 50);
+  await save(username, data);
+  return data.savedMessages;
 }
 
 export async function setBlocked(username: string, target: string, block: boolean) {

@@ -24,6 +24,8 @@ export interface NotifySettings {
   prefs: Record<string, boolean>;
   dndUntil: string | null;
   sound: boolean;
+  /** which ping */
+  soundName: string;
   push: boolean;
   /** push is set up on this site */
   pushAvailable: boolean;
@@ -55,12 +57,30 @@ export function NotificationPanel({
   onClearAll: () => void;
   onPrefs: (patch: Record<string, boolean>) => void;
   onDnd: (until: string | null) => void;
-  onSound: (on: boolean) => void;
+  onSound: (on: boolean, name?: string) => void;
   onPush: (on: boolean) => void;
   onDigest: () => void;
   onClose: () => void;
 }) {
   const [filter, setFilter] = useState("all");
+  const [replying, setReplying] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState("");
+  const [replyMsg, setReplyMsg] = useState("");
+  /** Reply to a chat message straight from its notification. */
+  async function sendReply(n: Notification) {
+    const params = new URLSearchParams((n.link || "").split("?")[1] || "");
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ch: params.get("ch") || "general", text: replyText, replyTo: params.get("msg") || undefined }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) { setReplyMsg(j.error || "Couldn't send"); return; }
+    setReplyText("");
+    setReplying(null);
+    setReplyMsg("");
+    onReadOne(n.id);
+  }
   const [tab, setTab] = useState<"inbox" | "toasts" | "settings">("inbox");
   const kinds = FILTERS.find((f) => f.id === filter)?.kinds || [];
   const list = kinds.length ? notifications.filter((n) => kinds.includes(n.kind)) : notifications;
@@ -103,9 +123,19 @@ export function NotificationPanel({
                       <span className="notif-text">{n.text}<span className="notif-time">{timeAgo(n.at)}</span></span>
                     </button>
                     <span className="notif-tools">
+                      {(n.kind === "mention" || n.kind === "reply") && n.link?.includes("msg=") && (
+                        <button className="btn-icon sm" title="Reply" onClick={() => { setReplying(replying === n.id ? null : n.id); setReplyMsg(""); }}><Icon name="reply" /></button>
+                      )}
                       {!n.read && <button className="btn-icon sm" title="Mark as read" onClick={() => onReadOne(n.id)}><Icon name="check" /></button>}
                       <button className="btn-icon sm" title="Remove" onClick={() => onRemove(n.id)}><Icon name="x" /></button>
                     </span>
+                    {replying === n.id && (
+                      <form className="notif-reply" onSubmit={(e) => { e.preventDefault(); if (replyText.trim()) sendReply(n); }}>
+                        <input value={replyText} onChange={(e) => setReplyText(e.target.value)} placeholder={`Reply to ${n.from || "them"}…`} autoFocus maxLength={500} />
+                        <button className="btn btn-primary btn-sm" disabled={!replyText.trim()}>Send</button>
+                        {replyMsg && <span className="field-warn">{replyMsg}</span>}
+                      </form>
+                    )}
                   </div>
                 ))}
               </div>
@@ -146,6 +176,13 @@ export function NotificationPanel({
                 <input type="checkbox" role="switch" checked={settings.sound} onChange={(e) => onSound(e.target.checked)} />
                 <span className="switch" aria-hidden="true" />
               </label>
+              {settings.sound && (
+                <div className="chip-grid sound-pick">
+                  {SOUNDS.map(([v, l]) => (
+                    <button key={v} className={`pick ${settings.soundName === v ? "on" : ""}`} onClick={() => { onSound(true, v); playPing(v); }}>🔊 {l}</button>
+                  ))}
+                </div>
+              )}
               <label className={`toggle-row compact ${settings.pushAvailable ? "" : "disabled"}`}>
                 <div><strong>Phone / browser notifications</strong><span>{settings.pushAvailable ? "Get alerts even when the site isn't open (install it as an app on iPhone first)." : "Not set up on this site yet — an admin needs to add push keys."}</span></div>
                 <input type="checkbox" role="switch" checked={settings.push} disabled={!settings.pushAvailable} onChange={(e) => onPush(e.target.checked)} />
@@ -248,18 +285,26 @@ export function WeeklyDigest({ data, ratings, onOpenLink, onClose }: {
   );
 }
 
-/** A short two-note ping (no sound file needed). */
-export function playPing() {
+export const SOUNDS: [string, string][] = [["classic", "Classic ping"], ["bubble", "Bubble"], ["chime", "Chime"], ["retro", "Retro beep"]];
+const SOUND_NOTES: Record<string, { notes: number[]; type: OscillatorType }> = {
+  classic: { notes: [880, 1320], type: "sine" },
+  bubble: { notes: [520, 780, 1040], type: "triangle" },
+  chime: { notes: [1318, 1046, 1568], type: "sine" },
+  retro: { notes: [660, 660], type: "square" },
+};
+/** A short ping (no sound file needed). */
+export function playPing(variant = "classic") {
   try {
     const Ctx = window.AudioContext || (window as any).webkitAudioContext;
     const ctx = new Ctx();
-    [880, 1320].forEach((freq, i) => {
+    const sound = SOUND_NOTES[variant] || SOUND_NOTES.classic;
+    sound.notes.forEach((freq, i) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.frequency.value = freq;
-      osc.type = "sine";
+      osc.type = sound.type;
       gain.gain.setValueAtTime(0.0001, ctx.currentTime + i * 0.12);
-      gain.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + i * 0.12 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(sound.type === "square" ? 0.05 : 0.15, ctx.currentTime + i * 0.12 + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + i * 0.12 + 0.2);
       osc.connect(gain).connect(ctx.destination);
       osc.start(ctx.currentTime + i * 0.12);
