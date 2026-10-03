@@ -30,6 +30,13 @@ export interface ActivityEntry {
   at: string;
 }
 
+export interface ChatMessage {
+  id: string;
+  user: string;
+  text: string;
+  at: string;
+}
+
 export interface SiteSettings {
   announcement?: string;
   theme?: "dark" | "light" | "auto";

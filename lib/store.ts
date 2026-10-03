@@ -56,7 +56,7 @@ export async function saveBookmarks(data: BookmarksData): Promise<void> {
   }
   await redis.set(KEY, normalized);
 }
-function requireAdmin(password?: string) {
+export function requireAdmin(password?: string) {
   const expected = process.env.ADMIN_PASSWORD || process.env.BOOKMARKS_ADMIN_PASSWORD || "";
   if (!expected) {
     // If no password configured, allow (dev) — production should set ADMIN_PASSWORD

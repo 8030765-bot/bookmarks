@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { BookmarksData, Folder, Link } from "@/lib/types";
+import ChatPanel from "./ChatPanel";
 function faviconUrl(url: string) {
   try {
     const host = new URL(url).hostname;
@@ -37,6 +38,7 @@ type Modal =
   | { type: "adminLogin" }
   | { type: "admin" }
   | { type: "moveLink"; folderId: string; link: Link }
+  | { type: "login" }
   | null;
 export default function HomePage() {
   const [data, setData] = useState<BookmarksData | null>(null);
@@ -64,6 +66,9 @@ export default function HomePage() {
   const [fColor, setFColor] = useState("");
   const [fPassword, setFPassword] = useState("");
   const [fAnnounce, setFAnnounce] = useState("");
+  const [user, setUser] = useState<string | null>(null);
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [fUsername, setFUsername] = useState("");
   const cmdRef = useRef<HTMLInputElement>(null);
   const showToast = (msg: string) => {
     setToast(msg);
@@ -96,6 +101,12 @@ export default function HomePage() {
     }
   }, [fFolderId, setSafeData]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    fetch("/api/auth", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => setUser(j.user || null))
+      .catch(() => {});
+  }, []);
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
@@ -258,6 +269,41 @@ export default function HomePage() {
       showToast("Admin unlocked");
     }
   }
+  async function handleAuth(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: authMode, username: fUsername, password: fPassword }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Could not log in");
+      setUser(json.user);
+      setFUsername(""); setFPassword("");
+      setModal(null);
+      showToast(authMode === "signup" ? `Welcome, ${json.user}!` : `Logged in as ${json.user}`);
+    } catch (err: any) {
+      showToast(err.message || "Could not log in");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+  async function handleLogout() {
+    await fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "logout" }),
+    }).catch(() => {});
+    setUser(null);
+    showToast("Logged out");
+  }
+  function openLogin() {
+    setFPassword("");
+    setAuthMode("login");
+    setModal({ type: "login" });
+  }
   async function handleMoveLink(e: React.FormEvent) {
     e.preventDefault();
     if (modal?.type !== "moveLink") return;
@@ -358,9 +404,10 @@ export default function HomePage() {
     if (!q || "add website".includes(q)) results.unshift({ label: "＋ Add Website", action: () => { setShowCmd(false); setModal({ type: "addLink" }); } });
     if (!q || "new folder".includes(q)) results.unshift({ label: "📁 New Folder", action: () => { setShowCmd(false); setModal({ type: "addFolder" }); } });
     if (!q || "admin".includes(q)) results.unshift({ label: "🔐 Admin Menu", action: () => { setShowCmd(false); setModal(adminUnlocked ? { type: "admin" } : { type: "adminLogin" }); } });
+    if (!q || "chat login".includes(q)) results.unshift({ label: user ? `👤 Log out (${user})` : "👤 Log in", action: () => { setShowCmd(false); if (user) handleLogout(); else openLogin(); } });
     if (!q || "random".includes(q)) results.unshift({ label: "🎲 Random Bookmark", action: () => { setShowCmd(false); randomBookmark(); } });
     return results.slice(0, 12);
-  }, [data, cmdQuery, adminUnlocked]);
+  }, [data, cmdQuery, adminUnlocked, user]);
 
   if (loading) return <div className="status"><p>Loading shared bookmarks…</p></div>;
   if (error && !data) {
@@ -411,6 +458,13 @@ export default function HomePage() {
         >
           🔐 Admin
         </button>
+        {user ? (
+          <button className="btn btn-secondary" onClick={handleLogout} title="Log out">
+            👤 {user} · Log out
+          </button>
+        ) : (
+          <button className="btn btn-secondary" onClick={openLogin}>👤 Log in</button>
+        )}
       </div>
       <div className="search-bar">
         <input
@@ -848,6 +902,48 @@ export default function HomePage() {
           </div>
         </div>
       )}
+      {modal?.type === "login" && (
+        <div className="modal-overlay" onClick={() => !submitting && setModal(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>{authMode === "login" ? "👤 Log in" : "👤 Create account"}</h2>
+            <div className="auth-tabs">
+              <button type="button" className={authMode === "login" ? "on" : ""} onClick={() => setAuthMode("login")}>Log in</button>
+              <button type="button" className={authMode === "signup" ? "on" : ""} onClick={() => setAuthMode("signup")}>Sign up</button>
+            </div>
+            <form onSubmit={handleAuth}>
+              <div className="form-group">
+                <label>Username</label>
+                <input value={fUsername} onChange={(e) => setFUsername(e.target.value)} required autoFocus autoComplete="username" maxLength={20} />
+                {authMode === "signup" && <div className="hint">3–20 letters, numbers or _. This is the name others see in chat.</div>}
+              </div>
+              <div className="form-group">
+                <label>Password</label>
+                <input
+                  type="password"
+                  value={fPassword}
+                  onChange={(e) => setFPassword(e.target.value)}
+                  required
+                  minLength={6}
+                  autoComplete={authMode === "signup" ? "new-password" : "current-password"}
+                />
+                {authMode === "signup" && <div className="hint">At least 6 characters. Don&apos;t reuse a password from another site.</div>}
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setModal(null)}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={submitting}>
+                  {submitting ? "…" : authMode === "login" ? "Log in" : "Create account"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      <ChatPanel
+        user={user}
+        adminPassword={adminUnlocked ? adminPassword : null}
+        onNeedLogin={openLogin}
+        showToast={showToast}
+      />
       {showCmd && (
         <div className="cmd-overlay" onClick={() => setShowCmd(false)}>
           <div className="cmd-box" onClick={(e) => e.stopPropagation()}>
