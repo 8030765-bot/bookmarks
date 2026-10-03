@@ -67,10 +67,10 @@ export async function POST(req: NextRequest) {
   } catch (e: unknown) {
     // the change failed, so a retry with the same id should be allowed to run
     if (opKey) await Redis.fromEnv().del(opKey).catch(() => {});
+    // our own checks explain what was wrong with the request (400); only
+    // network/database trouble or the overwrite guard are real server errors
     const message = e instanceof Error ? e.message : "";
-    const known = message === "Unknown action" || message.startsWith("Missing") || message.includes("not found") ||
-      message.includes("Invalid") || message.includes("closed") || message.startsWith("A poll") ||
-      message.startsWith("No web links") || message.includes("URL") || message.includes("link") || message.startsWith("Name");
-    return errorResponse(e, known ? 400 : 500);
+    const serverFault = !message || /fetch failed|ECONN|ETIMEDOUT|socket|network|Upstash|Refusing to overwrite|Unexpected token/i.test(message);
+    return errorResponse(e, serverFault ? 500 : 400);
   }
 }

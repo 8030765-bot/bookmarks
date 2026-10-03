@@ -18,7 +18,7 @@ export interface PrivateLink {
 }
 export interface Notification {
   id: string;
-  kind: "mention" | "reply" | "suggestion" | "like" | "comment" | "dm" | "role" | "system";
+  kind: "mention" | "reply" | "suggestion" | "like" | "comment" | "dm" | "role" | "system" | "follow";
   text: string;
   at: string;
   read?: boolean;
@@ -33,6 +33,22 @@ export interface LinkPref {
   hidden?: boolean; // hidden just for you
   checks?: number[]; // ticked checklist steps
 }
+/** Your own settings for a shared folder. */
+export interface FolderPref {
+  hidden?: boolean; // hidden just for you
+  fav?: boolean; // a favourite folder
+  follow?: boolean; // get told about new links
+  sort?: string; // your own order of links
+}
+/** A search + filters you saved to reopen in one click. */
+export interface SavedView {
+  id: string;
+  name: string;
+  q: string;
+  tags: string[];
+  tagMode: "any" | "all";
+  sort?: string;
+}
 export interface UserData {
   profile: Profile;
   favorites: string[]; // link ids
@@ -40,9 +56,59 @@ export interface UserData {
   myStuff: PrivateLink[];
   notifications: Notification[];
   links: Record<string, LinkPref>;
+  folders: Record<string, FolderPref>;
+  /** your own arrangement of the folders (ids, top first) */
+  folderOrder: string[];
+  views: SavedView[];
 }
 
-const EMPTY: UserData = { profile: {}, favorites: [], ratings: {}, myStuff: [], notifications: [], links: {} };
+const EMPTY: UserData = { profile: {}, favorites: [], ratings: {}, myStuff: [], notifications: [], links: {}, folders: {}, folderOrder: [], views: [] };
+const FOLDER_SORTS = ["manual", "name", "newest", "clicks", "rating", "mine"];
+
+export async function setFolderPref(username: string, folderId: string, patch: Record<string, unknown>) {
+  if (!/^[\w-]{1,100}$/.test(folderId)) throw new Error("Invalid folder");
+  const data = await getUserData(username);
+  const next: FolderPref = { ...(data.folders[folderId] || {}) };
+  for (const k of ["hidden", "fav", "follow"] as const) if (typeof patch[k] === "boolean") next[k] = patch[k] as boolean;
+  if (typeof patch.sort === "string") next.sort = FOLDER_SORTS.includes(patch.sort) ? patch.sort : undefined;
+  (Object.keys(next) as (keyof FolderPref)[]).forEach((k) => { if (!next[k]) delete next[k]; });
+  if (Object.keys(next).length) data.folders[folderId] = next;
+  else delete data.folders[folderId];
+  if (Object.keys(data.folders).length > 500) throw new Error("Too many folder settings");
+  await save(username, data);
+  return data.folders;
+}
+
+export async function setFolderOrder(username: string, order: unknown) {
+  const data = await getUserData(username);
+  data.folderOrder = Array.isArray(order) ? Array.from(new Set(order.map(String).filter((id) => /^[\w-]{1,100}$/.test(id)))).slice(0, 500) : [];
+  await save(username, data);
+  return data.folderOrder;
+}
+
+export async function saveView(username: string, v: Record<string, unknown>) {
+  const data = await getUserData(username);
+  const name = String(v.name || "").trim().slice(0, 40);
+  if (!name) throw new Error("Give the view a name");
+  const view: SavedView = {
+    id: typeof v.id === "string" && /^[\w-]{1,40}$/.test(v.id) ? v.id : uuid(),
+    name,
+    q: String(v.q || "").slice(0, 200),
+    tags: Array.isArray(v.tags) ? v.tags.map(String).slice(0, 10) : [],
+    tagMode: v.tagMode === "all" ? "all" : "any",
+    sort: typeof v.sort === "string" ? v.sort.slice(0, 20) : undefined,
+  };
+  data.views = [view, ...data.views.filter((x) => x.id !== view.id)].slice(0, 20);
+  await save(username, data);
+  return data.views;
+}
+
+export async function deleteView(username: string, id: string) {
+  const data = await getUserData(username);
+  data.views = data.views.filter((x) => x.id !== id);
+  await save(username, data);
+  return data.views;
+}
 const MAX_LINK_PREFS = 2000;
 
 /** Keep only well-formed fields; drop the entry entirely when it's empty. */
@@ -81,7 +147,10 @@ function getRedis() {
 
 export async function getUserData(username: string): Promise<UserData> {
   const raw = await getRedis().get<UserData>(key(username));
-  return { ...EMPTY, ...(raw || {}), profile: raw?.profile || {}, links: raw?.links || {} };
+  return {
+    ...EMPTY, ...(raw || {}),
+    profile: raw?.profile || {}, links: raw?.links || {}, folders: raw?.folders || {}, folderOrder: raw?.folderOrder || [], views: raw?.views || [],
+  };
 }
 
 async function save(username: string, data: UserData) {

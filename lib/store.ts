@@ -1,5 +1,5 @@
 import { Redis } from "@upstash/redis";
-import { BookmarksData, ActivityEntry, Folder, Link, LinkStatus } from "./types";
+import { BookmarksData, ActivityEntry, Folder, FolderSort, Link, LinkStatus } from "./types";
 import { defaultData } from "./defaultData";
 import { v4 as uuid } from "uuid";
 import { normalizeUrl } from "./url";
@@ -32,6 +32,43 @@ function cleanTags(v: unknown): string[] {
 }
 function cleanColor(v: unknown) {
   return typeof v === "string" && /^#[0-9a-f]{3,8}$/i.test(v) ? v : undefined;
+}
+
+const FOLDER_SORTS: FolderSort[] = ["manual", "name", "newest", "clicks", "rating"];
+/**
+ * Folder extras. Descriptions, guides and default sort: admins and the
+ * folder's maintainers. Spaces, smart rules, archiving, maintainers and
+ * moving folders: admins (anyone adding a folder can put it inside another).
+ */
+function applyFolderFields(data: BookmarksData, folder: Folder, body: Record<string, unknown>, admin: boolean) {
+  if (typeof body.description === "string") folder.description = body.description.trim().slice(0, 300) || undefined;
+  if (typeof body.guide === "string") folder.guide = body.guide.trim().slice(0, 5000) || undefined;
+  if (typeof body.sort === "string") {
+    folder.sort = FOLDER_SORTS.includes(body.sort as FolderSort) && body.sort !== "manual" ? (body.sort as FolderSort) : undefined;
+  }
+  const creating = !data.folders.includes(folder);
+  if (typeof body.parentId === "string" && (admin || creating)) {
+    const pid = body.parentId;
+    if (!pid) folder.parentId = undefined;
+    else {
+      const parent = data.folders.find((f) => f.id === pid);
+      if (!parent || parent.id === folder.id) throw new Error("Pick a different folder to put it in");
+      if (parent.parentId) throw new Error("Sub-folders can only go one level deep");
+      if (data.folders.some((f) => f.parentId === folder.id)) throw new Error("This folder has its own sub-folders, so it can't go inside another");
+      folder.parentId = pid;
+    }
+  }
+  if (!admin) return;
+  if (typeof body.space === "string") folder.space = cleanName(body.space, 30) || undefined;
+  if (typeof body.rule === "string") {
+    folder.rule = body.rule.trim().slice(0, 200) || undefined;
+    if (folder.rule && folder.links.length) throw new Error("Only an empty folder can become a smart folder");
+  }
+  if (typeof body.archived === "boolean") folder.archived = body.archived || undefined;
+  if (Array.isArray(body.maintainers)) {
+    const names = Array.from(new Set(body.maintainers.map((u) => String(u).trim().toLowerCase()).filter((u) => /^[a-z0-9_]{3,20}$/.test(u)))).slice(0, 5);
+    folder.maintainers = names.length ? names : undefined;
+  }
 }
 
 const STATUSES: LinkStatus[] = ["works", "login", "slow", "broken"];
@@ -121,9 +158,23 @@ function normalize(data: BookmarksData | null | undefined): BookmarksData {
   }
   return data;
 }
-function pushActivity(data: BookmarksData, action: string, detail: string) {
-  const entry: ActivityEntry = { id: uuid(), action, detail, at: new Date().toISOString() };
-  data.activity = [entry, ...(data.activity || [])].slice(0, 50);
+const ACTIVITY_MAX = 150;
+function pushActivity(data: BookmarksData, action: string, detail: string, extra: { folderId?: string; by?: string } = {}) {
+  const entry: ActivityEntry = { id: uuid(), action, detail, at: new Date().toISOString(), ...extra };
+  data.activity = [entry, ...(data.activity || [])].slice(0, ACTIVITY_MAX);
+}
+
+/* ---------- following a folder ---------- */
+export const followersKey = (folderId: string) => `followers:${folderId}`;
+/** Tell everyone following a folder that something new arrived (never the person who added it). */
+async function notifyFollowers(folder: Folder, text: string, except?: string) {
+  try {
+    const followers = await getRedis().smembers(followersKey(folder.id));
+    const skip = except?.toLowerCase();
+    await Promise.all(followers.filter((u) => u !== skip).slice(0, 200).map((u) => notify(u, { kind: "follow", text, from: except })));
+  } catch {
+    // a missed heads-up isn't worth failing the save over
+  }
 }
 export async function getBookmarks(): Promise<BookmarksData> {
   const redis = getRedis();
@@ -146,8 +197,8 @@ export async function saveBookmarks(data: BookmarksData, { snapshot = true } = {
   ) {
     throw new Error("Refusing to overwrite saved bookmarks with the default set.");
   }
-  if (data.activity && data.activity.length > 50) {
-    data.activity = data.activity.slice(0, 50);
+  if (data.activity && data.activity.length > ACTIVITY_MAX) {
+    data.activity = data.activity.slice(0, ACTIVITY_MAX);
   }
   const normalized = normalize(data);
   normalized.rev = (existing?.rev || 0) + 1;
@@ -194,6 +245,15 @@ export async function handleAction(
   const requireAdmin = (pw?: string) => checkAdmin(authFrom(body), pw);
   const isAdmin = () => { try { requireAdmin(password); return true; } catch { return false; } };
   const me = authFrom(body).user || undefined;
+  // folder maintainers can manage the links in their own folder
+  const maintains = (folder: Folder) => !!me && !!folder.maintainers?.includes(me.toLowerCase());
+  const requireFolderEditor = (folder: Folder) => { if (!maintains(folder)) requireAdmin(password); };
+  const findFolder = (id: unknown) => {
+    const folder = data.folders.find((f) => f.id === String(id || ""));
+    if (!folder) throw new Error("Folder not found");
+    return folder;
+  };
+  const log = (action: string, detail: string, folderId?: string) => pushActivity(data, action, detail, { folderId, by: me });
   switch (action) {
     case "verifyAdmin": {
       requireAdmin(password);
@@ -201,13 +261,13 @@ export async function handleAction(
       return data;
     }
     case "addLink": {
-      if (data.settings?.lockAdding) requireAdmin(password);
       const folderId = String(body.folderId || "");
       const name = cleanName(body.name);
       const url = cleanUrl(body.url);
       if (!folderId || !name || !url) throw new Error("Missing fields");
-      const folder = data.folders.find((f) => f.id === folderId);
-      if (!folder) throw new Error("Folder not found");
+      const folder = findFolder(folderId);
+      if (data.settings?.lockAdding) requireFolderEditor(folder);
+      if (folder.rule) throw new Error("Smart folders fill themselves — add the link to a normal folder");
       const tags = cleanTags(body.tags);
       const user = me;
       const addedBy = typeof body.suggestedBy === "string" && body.suggestedBy ? body.suggestedBy : user;
@@ -224,15 +284,16 @@ export async function handleAction(
       };
       applyExtras(data, link, body, isAdmin());
       folder.links.push(link);
-      pushActivity(data, "add", `Added link “${name}”${credit(body)}`);
+      log("add", `Added link “${name}”${credit(body)}`, folder.id);
       await saveBookmarks(data);
+      await notifyFollowers(folder, `New in ${folder.emoji} ${folder.name}: “${name}”`, addedBy);
       return data;
     }
     case "addLinks": {
       // paste a list of links: one save instead of one per link
-      if (data.settings?.lockAdding) requireAdmin(password);
-      const folder = data.folders.find((f) => f.id === String(body.folderId || ""));
-      if (!folder) throw new Error("Folder not found");
+      const folder = findFolder(body.folderId);
+      if (data.settings?.lockAdding) requireFolderEditor(folder);
+      if (folder.rule) throw new Error("Smart folders fill themselves — add the links to a normal folder");
       const incoming = Array.isArray(body.links) ? (body.links as Record<string, unknown>[]).slice(0, 50) : [];
       const existing = new Set(data.folders.flatMap((f) => f.links.map((l) => l.url)));
       let added = 0;
@@ -248,38 +309,32 @@ export async function handleAction(
         added++;
       }
       if (!added) throw new Error("No new links to add (they may already be on the site)");
-      pushActivity(data, "add", `Added ${added} links to “${folder.name}”`);
+      log("add", `Added ${added} links to “${folder.name}”`, folder.id);
       await saveBookmarks(data);
+      await notifyFollowers(folder, `${added} new links in ${folder.emoji} ${folder.name}`, me);
       return data;
     }
     case "editLink": {
-      requireAdmin(password);
-      const folderId = String(body.folderId || "");
-      const linkId = String(body.linkId || "");
-      const folder = data.folders.find((f) => f.id === folderId);
-      if (!folder) throw new Error("Folder not found");
-      const link = folder.links.find((l) => l.id === linkId);
-      if (!link) throw new Error("Link not found");
+      const { folder, link } = findLink(data, String(body.folderId || ""), String(body.linkId || ""));
+      requireFolderEditor(folder);
       if (typeof body.name === "string" && body.name.trim()) link.name = cleanName(body.name);
       if (typeof body.url === "string" && body.url.trim()) link.url = cleanUrl(body.url);
       if (Array.isArray(body.tags) || typeof body.tags === "string") link.tags = cleanTags(body.tags);
       if (typeof body.color === "string") link.color = cleanColor(body.color);
       if (typeof body.notes === "string") link.notes = body.notes.trim().slice(0, 500) || undefined;
-      applyExtras(data, link, body, true);
+      applyExtras(data, link, body, isAdmin());
       link.updatedAt = new Date().toISOString();
-      pushActivity(data, "edit", `Edited link “${link.name}”${credit(body)}`);
+      log("edit", `Edited link “${link.name}”${credit(body)}`, folder.id);
       await saveBookmarks(data);
       return data;
     }
     case "deleteLink": {
-      requireAdmin(password);
-      const folderId = String(body.folderId || "");
+      const folder = findFolder(body.folderId);
+      requireFolderEditor(folder);
       const linkId = String(body.linkId || "");
-      const folder = data.folders.find((f) => f.id === folderId);
-      if (!folder) throw new Error("Folder not found");
       const before = folder.links.find((l) => l.id === linkId);
       folder.links = folder.links.filter((l) => l.id !== linkId);
-      pushActivity(data, "delete", `Deleted link “${before?.name || linkId}”${credit(body)}`);
+      log("delete", `Deleted link “${before?.name || linkId}”${credit(body)}`, folder.id);
       await saveBookmarks(data);
       await getRedis().hdel(CLICKS_KEY, linkId).catch(() => {});
       return data;
@@ -289,28 +344,30 @@ export async function handleAction(
       const name = cleanName(body.name, 60);
       const emoji = cleanName(body.emoji, 8) || "📁";
       if (!name) throw new Error("Name required");
-      data.folders.push({
+      const folder: Folder = {
         id: uuid(),
         name,
         emoji,
         links: [],
         color: cleanColor(body.color),
         createdAt: new Date().toISOString(),
-      });
-      pushActivity(data, "add", `Added folder “${name}”`);
+      };
+      applyFolderFields(data, folder, body, isAdmin());
+      data.folders.push(folder);
+      log("add", `Added ${folder.rule ? "smart " : ""}folder “${name}”`, folder.id);
       await saveBookmarks(data);
       return data;
     }
     case "editFolder": {
-      requireAdmin(password);
-      const folderId = String(body.folderId || body.id || "");
-      const folder = data.folders.find((f) => f.id === folderId);
-      if (!folder) throw new Error("Folder not found");
+      const folder = findFolder(body.folderId || body.id);
+      requireFolderEditor(folder);
+      const admin = isAdmin();
       if (typeof body.name === "string" && body.name.trim()) folder.name = cleanName(body.name, 60);
       if (typeof body.emoji === "string" && body.emoji.trim()) folder.emoji = cleanName(body.emoji, 8);
       if (typeof body.color === "string") folder.color = cleanColor(body.color);
-      if (typeof body.pinned === "boolean") folder.pinned = body.pinned;
-      pushActivity(data, "edit", `Edited folder “${folder.name}”`);
+      if (admin && typeof body.pinned === "boolean") folder.pinned = body.pinned || undefined;
+      applyFolderFields(data, folder, body, admin);
+      log("edit", `Edited folder “${folder.name}”`, folder.id);
       await saveBookmarks(data);
       return data;
     }
@@ -319,8 +376,103 @@ export async function handleAction(
       const folderId = String(body.folderId || "");
       const before = data.folders.find((f) => f.id === folderId);
       data.folders = data.folders.filter((f) => f.id !== folderId);
-      pushActivity(data, "delete", `Deleted folder “${before?.name || folderId}”`);
+      // its sub-folders move up a level instead of vanishing
+      data.folders.forEach((f) => { if (f.parentId === folderId) f.parentId = undefined; });
+      log("delete", `Deleted folder “${before?.name || folderId}”`);
       await saveBookmarks(data);
+      return data;
+    }
+    case "mergeFolder": {
+      // move every link from one folder into another, then remove the empty one
+      requireAdmin(password);
+      const from = findFolder(body.folderId);
+      const into = findFolder(body.intoId);
+      if (from === into) throw new Error("Pick a different folder to merge into");
+      const have = new Set(into.links.map((l) => l.url));
+      let moved = 0;
+      for (const l of from.links) if (!have.has(l.url)) { into.links.push(l); moved++; }
+      data.folders = data.folders.filter((f) => f !== from);
+      data.folders.forEach((f) => { if (f.parentId === from.id) f.parentId = into.parentId ? undefined : into.id; });
+      log("move", `Merged “${from.name}” into “${into.name}” (${moved} links)`, into.id);
+      await saveBookmarks(data);
+      return data;
+    }
+    case "duplicateFolder": {
+      requireAdmin(password);
+      const src = findFolder(body.folderId);
+      const copy: Folder = {
+        ...structuredClone(src),
+        id: uuid(),
+        name: `${src.name} (copy)`.slice(0, 60),
+        pinned: undefined,
+        createdAt: new Date().toISOString(),
+        links: src.links.map((l) => ({ ...structuredClone(l), id: uuid(), clicks: 0, likes: [], keyword: undefined, createdAt: new Date().toISOString() })),
+      };
+      data.folders.splice(data.folders.indexOf(src) + 1, 0, copy);
+      log("add", `Copied folder “${src.name}”`, copy.id);
+      await saveBookmarks(data);
+      return data;
+    }
+    case "splitFolder": {
+      // a long folder: move everything with one tag into its own folder
+      requireAdmin(password);
+      const src = findFolder(body.folderId);
+      const tag = cleanTags([body.tag])[0];
+      if (!tag) throw new Error("Pick a tag to split by");
+      const moving = src.links.filter((l) => l.tags?.includes(tag));
+      if (!moving.length) throw new Error(`Nothing in “${src.name}” is tagged #${tag}`);
+      const name = cleanName(body.name, 60) || tag.charAt(0).toUpperCase() + tag.slice(1);
+      const created: Folder = { id: uuid(), name, emoji: src.emoji, links: moving, color: src.color, createdAt: new Date().toISOString(), space: src.space };
+      src.links = src.links.filter((l) => !l.tags?.includes(tag));
+      data.folders.splice(data.folders.indexOf(src) + 1, 0, created);
+      log("move", `Split ${moving.length} #${tag} links out of “${src.name}” into “${name}”`, created.id);
+      await saveBookmarks(data);
+      return data;
+    }
+    case "renameTag": {
+      // rename a tag everywhere (renaming onto an existing tag merges them)
+      requireAdmin(password);
+      const from = cleanTags([body.from])[0];
+      const to = cleanTags([body.to])[0];
+      if (!from || !to) throw new Error("Missing tag");
+      let changed = 0;
+      for (const f of data.folders) for (const l of f.links) {
+        if (!l.tags?.includes(from)) continue;
+        l.tags = Array.from(new Set(l.tags.map((t) => (t === from ? to : t))));
+        changed++;
+      }
+      const colors = data.settings?.tagColors;
+      if (colors?.[from] && !colors[to]) colors[to] = colors[from];
+      if (colors) delete colors[from];
+      log("edit", `Renamed #${from} to #${to} on ${changed} links`);
+      await saveBookmarks(data);
+      return data;
+    }
+    case "deleteTag": {
+      requireAdmin(password);
+      const tag = cleanTags([body.tag])[0];
+      if (!tag) throw new Error("Missing tag");
+      let changed = 0;
+      for (const f of data.folders) for (const l of f.links) {
+        if (!l.tags?.includes(tag)) continue;
+        l.tags = l.tags.filter((t) => t !== tag);
+        changed++;
+      }
+      if (data.settings?.tagColors) delete data.settings.tagColors[tag];
+      log("delete", `Removed #${tag} from ${changed} links`);
+      await saveBookmarks(data);
+      return data;
+    }
+    case "setTagColor": {
+      requireAdmin(password);
+      const tag = cleanTags([body.tag])[0];
+      if (!tag) throw new Error("Missing tag");
+      const s = (data.settings ||= {});
+      const colors = (s.tagColors ||= {});
+      const color = cleanColor(body.color);
+      if (color) colors[tag] = color;
+      else delete colors[tag];
+      await saveBookmarks(data, { snapshot: false });
       return data;
     }
     case "moveLink": {
@@ -479,6 +631,9 @@ export async function handleAction(
       for (const key of ["lockAdding", "chatEnabled"] as const) {
         if (typeof patch[key] === "boolean") s[key] = patch[key] as boolean;
       }
+      if (typeof patch.startFolderId === "string") {
+        s.startFolderId = data.folders.some((f) => f.id === patch.startFolderId) ? (patch.startFolderId as string) : undefined;
+      }
       pushActivity(data, "settings", "Updated site settings");
       await saveBookmarks(data);
       return data;
@@ -492,8 +647,8 @@ export async function handleAction(
       return data;
     }
     case "reorderLink": {
-      requireAdmin(password);
       const { folder, index } = findLink(data, String(body.folderId || ""), String(body.linkId || ""));
+      requireFolderEditor(folder);
       moveItem(folder.links, index, Number(body.dir) < 0 ? -1 : 1);
       await saveBookmarks(data);
       return data;
@@ -550,6 +705,7 @@ export async function handleAction(
       requireAdmin(password);
       const dst = data.folders.find((f) => f.id === String(body.targetFolderId || ""));
       if (!dst) throw new Error("Folder not found");
+      if (dst.rule) throw new Error("Smart folders fill themselves — pick a normal folder");
       const ids = new Set(linkRefs(body).map((r) => r.linkId));
       let moved = 0;
       for (const f of data.folders) {
@@ -566,15 +722,17 @@ export async function handleAction(
     }
     case "moveLinkTo": {
       // drag & drop: put a link into a folder, before another link (or at the end)
-      requireAdmin(password);
       const { folder: src, index } = findLink(data, String(body.folderId || ""), String(body.linkId || ""));
-      const dst = data.folders.find((f) => f.id === String(body.targetFolderId || ""));
-      if (!dst) throw new Error("Folder not found");
+      const dst = findFolder(body.targetFolderId);
+      // maintainers can reorder inside their folder; moving between folders needs both
+      requireFolderEditor(src);
+      requireFolderEditor(dst);
+      if (dst.rule) throw new Error("Smart folders fill themselves — pick a normal folder");
       const [link] = src.links.splice(index, 1);
       const before = body.beforeLinkId ? dst.links.findIndex((l) => l.id === String(body.beforeLinkId)) : -1;
       if (before < 0) dst.links.push(link);
       else dst.links.splice(before, 0, link);
-      if (src !== dst) pushActivity(data, "move", `Moved “${link.name}” to “${dst.name}”`);
+      if (src !== dst) log("move", `Moved “${link.name}” to “${dst.name}”`, dst.id);
       await saveBookmarks(data);
       return data;
     }

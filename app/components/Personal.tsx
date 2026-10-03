@@ -8,6 +8,10 @@ export interface Notification { id: string; kind: string; text: string; at: stri
 export interface Profile { avatar?: string; color?: string; bio?: string }
 /** Your own extras on a shared link (private note, read later, done…). */
 export interface LinkPref { note?: string; later?: boolean; done?: boolean; rename?: string; hidden?: boolean; checks?: number[] }
+/** Your own settings for a shared folder. */
+export interface FolderPref { hidden?: boolean; fav?: boolean; follow?: boolean; sort?: string }
+/** A saved search + tag filter. */
+export interface SavedView { id: string; name: string; q: string; tags: string[]; tagMode: "any" | "all"; sort?: string }
 export interface Personal {
   user: string | null;
   favorites: string[];
@@ -15,9 +19,15 @@ export interface Personal {
   notifications: Notification[];
   profile: Profile;
   links: Record<string, LinkPref>;
+  folders: Record<string, FolderPref>;
+  folderOrder: string[];
+  views: SavedView[];
 }
-const EMPTY: Personal = { user: null, favorites: [], ratings: {}, notifications: [], profile: {}, links: {} };
+const EMPTY: Personal = { user: null, favorites: [], ratings: {}, notifications: [], profile: {}, links: {}, folders: {}, folderOrder: [], views: [] };
 const GUEST_KEY = "guestLinkPrefs";
+const GUEST_FOLDERS = "guestFolderPrefs";
+const GUEST_ORDER = "guestFolderOrder";
+const GUEST_VIEWS = "guestViews";
 
 function mergePref(old: LinkPref | undefined, patch: Partial<LinkPref>): LinkPref | null {
   const next: LinkPref = { ...(old || {}), ...patch };
@@ -36,10 +46,19 @@ export function usePersonal(user: string | null) {
   const [data, setData] = useState<Personal>(EMPTY);
   const load = useCallback(async () => {
     // guests keep their notes / read-later list on this device only
-    if (!user) { setData({ ...EMPTY, links: readLocal<Record<string, LinkPref>>(GUEST_KEY, {}) }); return; }
+    if (!user) {
+      setData({
+        ...EMPTY,
+        links: readLocal<Record<string, LinkPref>>(GUEST_KEY, {}),
+        folders: readLocal<Record<string, FolderPref>>(GUEST_FOLDERS, {}),
+        folderOrder: readLocal<string[]>(GUEST_ORDER, []),
+        views: readLocal<SavedView[]>(GUEST_VIEWS, []),
+      });
+      return;
+    }
     try {
       const json = await fetch("/api/me", { cache: "no-store" }).then((r) => r.json());
-      if (json.user) setData({ user: json.user, favorites: json.favorites || [], ratings: json.ratings || {}, notifications: json.notifications || [], profile: json.profile || {}, links: json.links || {} });
+      if (json.user) setData({ user: json.user, favorites: json.favorites || [], ratings: json.ratings || {}, notifications: json.notifications || [], profile: json.profile || {}, links: json.links || {}, folders: json.folders || {}, folderOrder: json.folderOrder || [], views: json.views || [] });
     } catch {}
   }, [user]);
   useEffect(() => { load(); }, [load]);
@@ -91,7 +110,44 @@ export function usePersonal(user: string | null) {
     post({ action: "readNotifications" }).catch(() => {});
   }, [post]);
 
-  return { ...data, reload: load, toggleFavorite, rate, saveProfile, markRead, setLinkPref };
+  const setFolderPref = useCallback((folderId: string, patch: Partial<FolderPref>) => {
+    setData((d) => {
+      const next: FolderPref = { ...(d.folders[folderId] || {}), ...patch };
+      (Object.keys(next) as (keyof FolderPref)[]).forEach((k) => { if (!next[k]) delete next[k]; });
+      const folders = { ...d.folders };
+      if (Object.keys(next).length) folders[folderId] = next; else delete folders[folderId];
+      if (!user) writeLocal(GUEST_FOLDERS, folders);
+      return { ...d, folders };
+    });
+    if (user) post({ action: "folderPref", folderId, patch }).then((j) => j.folders && setData((d) => ({ ...d, folders: j.folders }))).catch(() => {});
+  }, [post, user]);
+
+  const setFolderOrder = useCallback((order: string[]) => {
+    setData((d) => ({ ...d, folderOrder: order }));
+    if (user) post({ action: "folderOrder", order }).catch(() => {});
+    else writeLocal(GUEST_ORDER, order);
+  }, [post, user]);
+
+  const saveView = useCallback((view: Omit<SavedView, "id"> & { id?: string }) => {
+    if (user) { post({ action: "saveView", view }).then((j) => j.views && setData((d) => ({ ...d, views: j.views }))).catch(() => {}); return; }
+    setData((d) => {
+      const v: SavedView = { ...view, id: view.id || Math.random().toString(36).slice(2, 10) };
+      const views = [v, ...d.views.filter((x) => x.id !== v.id)].slice(0, 20);
+      writeLocal(GUEST_VIEWS, views);
+      return { ...d, views };
+    });
+  }, [post, user]);
+
+  const deleteView = useCallback((id: string) => {
+    setData((d) => {
+      const views = d.views.filter((x) => x.id !== id);
+      if (!user) writeLocal(GUEST_VIEWS, views);
+      return { ...d, views };
+    });
+    if (user) post({ action: "deleteView", id }).catch(() => {});
+  }, [post, user]);
+
+  return { ...data, reload: load, toggleFavorite, rate, saveProfile, markRead, setLinkPref, setFolderPref, setFolderOrder, saveView, deleteView };
 }
 
 const KIND_ICON: Record<string, string> = { like: "heart", mention: "chat", reply: "reply", suggestion: "bulb", comment: "chat", dm: "chat", role: "lock", system: "bell" };

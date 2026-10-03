@@ -1,10 +1,25 @@
 "use client";
-import { useState } from "react";
+import { ReactNode, useState } from "react";
 import { Folder, Link } from "@/lib/types";
 import { Icon } from "./Icon";
 import LinkCard, { Highlight } from "./LinkCard";
 import { useCardEnv } from "./cardEnv";
+import { hostOf, timeAgo } from "./ui";
 import type { LinkRef } from "./ui";
+
+/** Extra facts shown in a folder's header. */
+export interface FolderMeta {
+  /** newest add/edit in the folder (ms) */
+  updatedAt: number;
+  /** last time you opened something from it, on this device (ms) */
+  visitedAt?: number;
+  /** links added since your last visit */
+  unread: number;
+  /** links you've marked done */
+  done: number;
+  fav?: boolean;
+  follow?: boolean;
+}
 
 export type Drag = { kind: "link"; folderId: string; linkId: string } | { kind: "folder"; folderId: string } | null;
 
@@ -29,7 +44,6 @@ export default function FolderSection({
   dropTarget,
   setDropTarget,
   onToggle,
-  onToggleView,
   onAddHere,
   onOpenAll,
   onEditFolder,
@@ -38,6 +52,13 @@ export default function FolderSection({
   onMoveLink,
   onMoveFolder,
   onDropUrl,
+  onMenu,
+  meta,
+  sub,
+  children,
+  editor,
+  virtual,
+  onSplit,
 }: {
   folder: Folder;
   links: Link[];
@@ -53,7 +74,6 @@ export default function FolderSection({
   dropTarget: string | null;
   setDropTarget: (id: string | null) => void;
   onToggle: () => void;
-  onToggleView: () => void;
   onAddHere: () => void;
   onOpenAll: () => void;
   onEditFolder: () => void;
@@ -62,10 +82,32 @@ export default function FolderSection({
   onMoveLink: (from: { folderId: string; linkId: string }, toFolderId: string, beforeLinkId: string | null) => void;
   onMoveFolder: (folderId: string, beforeFolderId: string) => void;
   onDropUrl: (folderId: string, url: string) => void;
+  onMenu: (at: { x: number; y: number }) => void;
+  meta: FolderMeta;
+  /** drawn as a sub-folder inside its parent */
+  sub?: boolean;
+  /** this folder's sub-folders */
+  children?: ReactNode;
+  /** admin, or one of this folder's maintainers */
+  editor: boolean;
+  /** a built-in list ("Most popular"…) rather than a real folder */
+  virtual?: boolean;
+  /** admin hint for very long folders */
+  onSplit?: () => void;
 }) {
   const { admin, query } = useCardEnv();
   const [urlOver, setUrlOver] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filter, setFilter] = useState("");
+  const f = filter.trim().toLowerCase();
+  if (f) {
+    // the quick filter inside one folder
+    links = links.filter((l) => `${l.name} ${hostOf(l.url)} ${(l.tags || []).join(" ")}`.toLowerCase().includes(f));
+    shortcuts = shortcuts.filter((r) => `${r.link.name} ${hostOf(r.link.url)}`.toLowerCase().includes(f));
+  }
   const filtered = links.length !== totalLinks;
+  const smart = !!folder.rule;
+  const progress = totalLinks ? Math.round((meta.done / totalLinks) * 100) : 0;
   const linkDragging = drag?.kind === "link";
   const folderDragging = drag?.kind === "folder" && drag.folderId !== folder.id;
   const isFolderDrop = dropTarget === `folder:${folder.id}`;
@@ -75,10 +117,10 @@ export default function FolderSection({
   return (
     <section
       id={`folder-${folder.id}`}
-      className={`folder-card ${folder.pinned ? "pinned" : ""} ${isEndDrop || urlOver ? "drop-into" : ""}`}
+      className={`folder-card ${folder.pinned ? "pinned" : ""} ${isEndDrop || urlOver ? "drop-into" : ""} ${sub ? "sub-folder" : ""} ${folder.archived ? "archived" : ""}`}
       style={folder.color ? ({ "--folder-accent": folder.color } as React.CSSProperties) : undefined}
       onDragOver={(e) => {
-        if (!drag && canAdd && carriesUrl(e)) {
+        if (!drag && canAdd && !smart && carriesUrl(e)) {
           // a link dragged in from outside the page
           e.preventDefault();
           e.dataTransfer.dropEffect = "copy";
@@ -107,7 +149,7 @@ export default function FolderSection({
     >
       <header
         className={`fh ${isFolderDrop ? "drop-before" : ""}`}
-        draggable={admin && dragEnabled}
+        draggable={admin && dragEnabled && !sub}
         onDragStart={(e) => {
           e.dataTransfer.effectAllowed = "move";
           e.dataTransfer.setData("text/plain", folder.id);
@@ -132,26 +174,63 @@ export default function FolderSection({
           <span className="fh-emoji">{folder.emoji}</span>
           <span className="fh-name"><Highlight text={folder.name} query={query} /></span>
           <span className="fh-count">{filtered ? `${links.length}/${totalLinks}` : totalLinks}</span>
+          {meta.unread > 0 && <span className="fh-unread" title={`${meta.unread} new since your last visit`}>{meta.unread} new</span>}
           {folder.pinned && <span className="fh-pin" title="Pinned"><Icon name="pin" /></span>}
+          {meta.fav && <span className="fh-fav" title="One of your favorite folders"><Icon name="star" /></span>}
+          {meta.follow && <span className="fh-follow" title="You follow this folder"><Icon name="bell" /></span>}
+          {smart && <span className="pill smart" title={`Shows everything matching: ${folder.rule}`}>smart</span>}
+          {folder.archived && <span className="pill warn">archived</span>}
+          <span className="fh-when">
+            {meta.updatedAt ? `updated ${timeAgo(new Date(meta.updatedAt).toISOString())}` : ""}
+            {meta.visitedAt ? ` · you: ${timeAgo(new Date(meta.visitedAt).toISOString())}` : ""}
+          </span>
         </button>
         <div className="fh-actions">
-          {admin && dragEnabled && <span className="drag-handle" title="Drag to reorder folders"><Icon name="grip" /></span>}
-          <button className="btn-icon" title={view === "grid" ? "Show this folder as a list" : "Show this folder as a grid"} onClick={onToggleView}>
-            <Icon name={view === "grid" ? "list" : "grid"} />
-          </button>
-          {canAdd && <button className="btn-icon" title={`Add a website to ${folder.name}`} onClick={onAddHere}><Icon name="plus" /></button>}
-          {links.length > 0 && <button className="btn-icon" title="Open all in new tabs" onClick={onOpenAll}><Icon name="external" /></button>}
-          <button className="btn-icon" title="Copy a link to this folder" onClick={onShareFolder}><Icon name="share" /></button>
-          {admin && <button className="btn-icon" title="Edit folder" onClick={onEditFolder}><Icon name="edit" /></button>}
-          {admin && <button className="btn-icon danger" title="Delete folder" onClick={onDeleteFolder}><Icon name="trash" /></button>}
+          {admin && dragEnabled && !sub && <span className="drag-handle" title="Drag to reorder folders"><Icon name="grip" /></span>}
+          {totalLinks > 8 && (
+            <button className={`btn-icon ${filterOpen ? "on" : ""}`} title="Filter this folder" onClick={() => { setFilterOpen(!filterOpen); if (filterOpen) setFilter(""); }}>
+              <Icon name="search" />
+            </button>
+          )}
+          {canAdd && !smart && !virtual && <button className="btn-icon" title={`Add a website to ${folder.name}`} onClick={onAddHere}><Icon name="plus" /></button>}
+          {links.length + shortcuts.length > 0 && <button className="btn-icon" title="Open all in new tabs" onClick={onOpenAll}><Icon name="external" /></button>}
+          {!virtual && <button className="btn-icon" title="Copy a link to this folder" onClick={onShareFolder}><Icon name="share" /></button>}
+          {editor && !virtual && <button className="btn-icon" title="Edit folder" onClick={onEditFolder}><Icon name="edit" /></button>}
+          {admin && !virtual && <button className="btn-icon danger" title="Delete folder" onClick={onDeleteFolder}><Icon name="trash" /></button>}
+          {!virtual && <button
+            className="btn-icon"
+            title="More: sort, follow, favorite, about…"
+            onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); onMenu({ x: r.right, y: r.bottom + 4 }); }}
+          >
+            <Icon name="more" />
+          </button>}
         </div>
       </header>
+      {(folder.description || (meta.done > 0 && totalLinks > 0) || (onSplit && totalLinks > 40)) && !collapsed && (
+        <div className="fh-sub">
+          {folder.description && <span className="fh-desc">{folder.description}</span>}
+          {onSplit && totalLinks > 40 && (
+            <button className="link-btn fh-long" onClick={onSplit} title="Admins only">Long folder — split some out by tag?</button>
+          )}
+          {meta.done > 0 && totalLinks > 0 && (
+            <span className="fh-progress" title={`You've done ${meta.done} of ${totalLinks}`}>
+              <span className="bar"><span style={{ width: `${progress}%` }} /></span> {meta.done}/{totalLinks} done
+            </span>
+          )}
+        </div>
+      )}
+      {filterOpen && !collapsed && (
+        <div className="fh-filter">
+          <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={`Filter ${folder.name}…`} autoFocus
+            onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setFilter(""); setFilterOpen(false); } }} />
+        </div>
+      )}
 
       {urlOver && <div className="url-drop-hint"><Icon name="plus" /> Drop to add this link to {folder.emoji} {folder.name}</div>}
       {!collapsed && (
-        count === 0 ? (
+        count === 0 ? (children && !filtered ? null :
           <div className="folder-empty">
-            {filtered ? "Nothing in this folder matches." : (
+            {smart ? <>Nothing matches <code>{folder.rule}</code> yet.</> : filtered ? "Nothing in this folder matches." : (
               <>
                 This folder is empty.
                 {canAdd && <button className="btn btn-secondary btn-sm" onClick={onAddHere}><Icon name="plus" /> Add the first website</button>}
@@ -201,6 +280,7 @@ export default function FolderSection({
           </div>
         )
       )}
+      {!collapsed && children && <div className="sub-folders">{children}</div>}
     </section>
   );
 }

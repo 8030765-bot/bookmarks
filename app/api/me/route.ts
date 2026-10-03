@@ -5,8 +5,10 @@ import { errorResponse } from "@/lib/http";
 import { rateLimit } from "@/lib/ratelimit";
 import {
   addMyStuff, getUserData, markNotificationsRead, recordAggregateRating, removeMyStuff,
-  setLinkPref, setProfile, setRating, toggleFavorite,
+  deleteView, saveView, setFolderOrder, setFolderPref, setLinkPref, setProfile, setRating, toggleFavorite,
 } from "@/lib/userdata";
+import { Redis } from "@upstash/redis";
+import { followersKey } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +46,24 @@ export async function POST(req: NextRequest) {
       }
       case "removeMyStuff":
         return NextResponse.json({ myStuff: await removeMyStuff(user, String(body.id || "")) });
+      case "folderPref": {
+        const folderId = String(body.folderId || "");
+        const patch = (body.patch || {}) as Record<string, unknown>;
+        const folders = await setFolderPref(user, folderId, patch);
+        // followers are also kept in a set per folder, so adding a link can notify them cheaply
+        if (typeof patch.follow === "boolean") {
+          const redis = Redis.fromEnv();
+          if (patch.follow) await redis.sadd(followersKey(folderId), user.toLowerCase());
+          else await redis.srem(followersKey(folderId), user.toLowerCase());
+        }
+        return NextResponse.json({ folders });
+      }
+      case "folderOrder":
+        return NextResponse.json({ folderOrder: await setFolderOrder(user, body.order) });
+      case "saveView":
+        return NextResponse.json({ views: await saveView(user, (body.view || {}) as Record<string, unknown>) });
+      case "deleteView":
+        return NextResponse.json({ views: await deleteView(user, String(body.id || "")) });
       case "linkPref":
         return NextResponse.json({ links: await setLinkPref(user, String(body.linkId || ""), (body.patch || {}) as Record<string, unknown>) });
       case "readNotifications":

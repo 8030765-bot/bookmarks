@@ -54,13 +54,34 @@ export interface Folder {
   color?: string;
   collapsed?: boolean;
   createdAt?: string;
+  /** one line under the folder name */
+  description?: string;
+  /** longer write-up (simple formatting) shown in the folder's guide */
+  guide?: string;
+  /** sub-folder: lives inside this folder (one level deep) */
+  parentId?: string;
+  /** groups folders into tabs at the top */
+  space?: string;
+  /** smart folder: shows every link matching this search instead of its own */
+  rule?: string;
+  /** hidden from members, kept for admins */
+  archived?: boolean;
+  /** default order of links (admin) */
+  sort?: FolderSort;
+  /** lowercase usernames who can manage just this folder */
+  maintainers?: string[];
 }
+
+export type FolderSort = "manual" | "name" | "newest" | "clicks" | "rating";
 
 export interface ActivityEntry {
   id: string;
   action: string;
   detail: string;
   at: string;
+  /** which folder it happened in, for the folder's history */
+  folderId?: string;
+  by?: string;
 }
 
 export interface ChatMessage {
@@ -103,6 +124,10 @@ export interface SiteSettings {
   theme?: "dark" | "light" | "auto";
   viewMode?: "grid" | "list";
   sortBy?: "name" | "newest" | "clicks" | "manual";
+  /** tag -> colour */
+  tagColors?: Record<string, string>;
+  /** folder shown to first-time visitors */
+  startFolderId?: string;
 }
 
 export interface Poll {

@@ -41,6 +41,10 @@ export interface CardEnv {
   actions: LinkCardActions;
   me: string | null;
   admin: boolean;
+  /** folders you look after as a maintainer (you can edit their links) */
+  editable: Set<string>;
+  /** tag -> colour, set by admins */
+  tagColors: Record<string, string>;
   favorites: Set<string>;
   ratings: Record<string, RatingAgg>;
   myRatings: Record<string, number>;

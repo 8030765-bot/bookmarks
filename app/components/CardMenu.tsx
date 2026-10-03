@@ -10,8 +10,9 @@ export interface CardMenuState { folder: Folder; link: Link; x: number; y: numbe
 /** Right-click (or ⋯) menu for a link card. */
 export default function CardMenu({ state, onClose }: { state: CardMenuState; onClose: () => void }) {
   const env = useCardEnv();
-  const { actions, admin } = env;
+  const { actions } = env;
   const { folder, link } = state;
+  const admin = env.admin || env.editable.has(folder.id);
   const pref = env.prefs[link.id] || {};
   const favorited = env.favorites.has(link.id);
   const ref = useRef<HTMLDivElement>(null);
@@ -82,7 +83,7 @@ export default function CardMenu({ state, onClose }: { state: CardMenuState; onC
         <div className="menu-sep" />
         {admin ? (
           <>
-            <button onClick={run(() => actions.adminEdit(folder, link, { pinned: !link.pinned }))}><Icon name="pin" /> {link.pinned ? "Unpin" : "Pin to top of folder"}</button>
+            {env.admin && <button onClick={run(() => actions.adminEdit(folder, link, { pinned: !link.pinned }))}><Icon name="pin" /> {link.pinned ? "Unpin" : "Pin to top of folder"}</button>}
             <button className="danger" onClick={run(() => actions.remove(folder, link))}><Icon name="trash" /> Delete</button>
           </>
         ) : (

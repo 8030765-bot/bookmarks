@@ -42,7 +42,9 @@ export default function LinkCard({
   onDrop: (e: React.DragEvent) => void;
 }) {
   const env = useCardEnv();
-  const { actions, me, admin, query } = env;
+  const { actions, me, query } = env;
+  // admins, and maintainers of this folder, can edit its links
+  const admin = env.admin || env.editable.has(folder.id);
   const href = safeHref(link.url);
   const pref = env.prefs[link.id] || {};
   const favorited = env.favorites.has(link.id);
@@ -168,7 +170,13 @@ export default function LinkCard({
         <div className="card-meta">
           {link.sticker && <span className={`sticker sticker-${link.sticker}`}>{STICKER_LABEL[link.sticker]}</span>}
           {link.tags?.map((t) => (
-            <button key={t} className="tag" onClick={() => actions.filterTag(t)} title={`Show everything tagged ${t}`}>{t}</button>
+            <button
+              key={t}
+              className="tag"
+              style={env.tagColors[t] ? { background: `${env.tagColors[t]}26`, color: env.tagColors[t] } : undefined}
+              onClick={() => actions.filterTag(t)}
+              title={`Show everything tagged ${t}`}
+            >{t}</button>
           ))}
           {link.status && link.status !== "works" && <span className={`label status-${link.status}`}>{STATUS_LABEL[link.status]}</span>}
           {link.cost && link.cost !== "free" && <span className="label">{COST_LABEL[link.cost]}</span>}

@@ -6,7 +6,9 @@ import ChatPanel from "./ChatPanel";
 import type { PaletteItem } from "./CommandPalette";
 import type { SuggestStart } from "./SuggestModal";
 import { Icon } from "./components/Icon";
-import FolderSection, { Drag } from "./components/FolderSection";
+import FolderSection, { Drag, FolderMeta } from "./components/FolderSection";
+import { FolderInfo, FolderMenu, FolderMenuState, PickModal, TagManager, folderMarkdown } from "./components/FolderExtras";
+import { MatchContext, matchLink, parseQuery } from "./components/query";
 import { CardContext, CardEnv, LinkCardActions } from "./components/cardEnv";
 import CardMenu, { CardMenuState } from "./components/CardMenu";
 import SelectionBar from "./components/SelectionBar";
@@ -32,13 +34,14 @@ const CACHE_KEY = "cache:data";
 const DEFAULT_TITLE = "Made by Theo 7A";
 const DEFAULT_SUBTITLE = "Shared school bookmarks — everyone sees the same list";
 
-type Sort = "manual" | "name" | "newest" | "clicks" | "likes" | "mine";
+type Sort = "manual" | "name" | "newest" | "clicks" | "likes" | "rating" | "mine";
 type PromptState = { title: string; initial: string; onSave: (v: string) => void; multiline?: boolean; placeholder?: string };
 /** Treat a fresh visit as starting after 30 minutes away. */
 const SESSION_GAP_MS = 30 * 60_000;
 type Modal =
   | { type: "link"; mode: LinkModalMode }
-  | { type: "folder"; folder?: Folder }
+  | { type: "folder"; folder?: Folder; smart?: boolean }
+  | { type: "tags" }
   | { type: "deleteFolder"; folder: Folder }
   | { type: "adminLogin" }
   | { type: "login" }
@@ -132,7 +135,15 @@ export default function HomePage() {
   const [modal, setModal] = useState<Modal>(null);
   const [submitting, setSubmitting] = useState(false);
   const [search, setSearch] = useState("");
-  const [tagFilter, setTagFilter] = useState("");
+  const [tagFilters, setTagFilters] = useState<string[]>([]);
+  const [tagMode, setTagMode] = useState<"any" | "all">("any");
+  const [tagCloud, setTagCloud] = useState(false);
+  const [space, setSpace] = useState("");
+  const [folderMenu, setFolderMenu] = useState<FolderMenuState | null>(null);
+  const [folderInfoId, setFolderInfoId] = useState<string | null>(null);
+  const [pick, setPick] = useState<{ kind: "merge" | "split"; folder: Folder } | null>(null);
+  const [chipDrag, setChipDrag] = useState<string | null>(null);
+  const [startDismissed, setStartDismissed] = useState(true);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [look, setLook] = useState<Look>(DEFAULT_LOOK);
   const [seenActivity, setSeenActivity] = useState<string | null>("");
@@ -203,6 +214,8 @@ export default function HomePage() {
     setShowTags(readLocal("showTags", false));
     setDismissed(readLocal<string | null>("dismissedAnnouncement", null));
     setFolderViewPrefs(readLocal("folderViews", {}));
+    setSpace(readLocal("space", ""));
+    setStartDismissed(readLocal("startDismissed", false));
     // a new visit starts after 30 minutes away; remember when the last one ended
     const lastSeen = readLocal<number>("lastSeen", 0);
     let prev = readLocal<number>("prevVisit", 0);
@@ -501,13 +514,27 @@ export default function HomePage() {
   const lastOpened = useMemo(() => new Map(history.map((h) => [h.linkId, h.at])), [history]);
   const folderById = useMemo(() => new Map((data?.folders || []).map((f) => [f.id, f])), [data]);
   const totalClicks = allRefs.reduce((n, r) => n + (r.link.clicks || 0), 0);
-  const sortedFolders = useMemo(
-    () => [...(data?.folders || [])].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned)),
+  const parsed = useMemo(() => parseQuery(search), [search]);
+  const q = search.trim().toLowerCase();
+  const filtering = parsed.active || tagFilters.length > 0;
+  const matchCtx: MatchContext = { prefs: personal.links, favorites: favoriteSet, since, me: user, avgRating: (id) => aggRatings[id]?.avg || 0 };
+  const folderPrefs = personal.folders;
+  const spaces = useMemo(
+    () => Array.from(new Set((data?.folders || []).map((f) => f.space).filter((x): x is string => !!x))).sort(),
     [data]
   );
-  const q = search.trim().toLowerCase();
-  const words = q.split(/\s+/).filter(Boolean);
-  const filtering = !!q || !!tagFilter;
+  // a space that no longer exists falls back to "All"
+  const activeSpace = space && spaces.includes(space) ? space : "";
+  const smartRules = useMemo(
+    () => new Map((data?.folders || []).filter((f) => f.rule).map((f) => [f.id, parseQuery(f.rule!)])),
+    [data]
+  );
+  // folders you look after (maintainers can edit their links)
+  const editableFolders = useMemo(
+    () => new Set((data?.folders || []).filter((f) => !!user && f.maintainers?.includes(user.toLowerCase())).map((f) => f.id)),
+    [data, user]
+  );
+  const canEditFolder = (f: Folder) => adminUnlocked || editableFolders.has(f.id);
 
   /** Hidden-for-me and expired links drop out (admins still see expired ones). */
   function shown(l: Link) {
@@ -516,40 +543,114 @@ export default function HomePage() {
     return true;
   }
   function matches(l: Link, folder: Folder) {
-    if (tagFilter && !l.tags?.includes(tagFilter)) return false;
-    if (!words.length) return true;
-    // every word has to appear somewhere: name, address, notes, tags, folder, who added it, or your own note
-    const mine = personal.links[l.id];
-    const haystack = [l.name, l.url, l.notes || "", l.tip || "", folder.name, l.addedBy || "", l.keyword || "", mine?.note || "", mine?.rename || "", ...(l.tags || [])].join(" ").toLowerCase();
-    return words.every((w) => haystack.includes(w));
+    if (tagFilters.length) {
+      const has = (t: string) => !!l.tags?.includes(t);
+      if (tagMode === "all" ? !tagFilters.every(has) : !tagFilters.some(has)) return false;
+    }
+    return matchLink(parsed, l, folder, matchCtx);
   }
-  function sortLinks(list: Link[]) {
-    if (sort === "name") list = [...list].sort((a, b) => a.name.localeCompare(b.name));
-    if (sort === "newest") list = [...list].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-    if (sort === "clicks") list = [...list].sort((a, b) => (b.clicks || 0) - (a.clicks || 0));
-    if (sort === "likes") list = [...list].sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
-    if (sort === "mine") list = [...list].sort((a, b) => (personal.ratings[b.id] || 0) - (personal.ratings[a.id] || 0));
+  /** Your own sort for a folder wins, then the main sort, then the folder's default. */
+  function effectiveSort(folder: Folder): string {
+    return folderPrefs[folder.id]?.sort || (sort !== "manual" ? sort : folder.sort || "manual");
+  }
+  function sortRefs(list: LinkRef[], how: string): LinkRef[] {
+    const by = (fn: (a: Link, b: Link) => number) => [...list].sort((a, b) => fn(a.link, b.link));
+    if (how === "name") list = by((a, b) => a.name.localeCompare(b.name));
+    if (how === "newest") list = by((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+    if (how === "clicks") list = by((a, b) => (b.clicks || 0) - (a.clicks || 0));
+    if (how === "likes") list = by((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
+    if (how === "rating") list = by((a, b) => (aggRatings[b.id]?.avg || 0) - (aggRatings[a.id]?.avg || 0));
+    if (how === "mine") list = by((a, b) => (personal.ratings[b.id] || 0) - (personal.ratings[a.id] || 0));
     // pinned links always lead their folder
-    return [...list].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned));
+    return [...list].sort((a, b) => Number(!!b.link.pinned) - Number(!!a.link.pinned));
   }
-  function visibleLinks(folder: Folder) {
-    return sortLinks(folder.links.filter((l) => shown(l) && matches(l, folder)));
+  function visibleLinks(folder: Folder): Link[] {
+    if (folder.rule) return [];
+    return sortRefs(folder.links.filter((l) => shown(l) && matches(l, folder)).map((link) => ({ folder, link })), effectiveSort(folder)).map((r) => r.link);
   }
-  /** Links from other folders that are set to also show in this one. */
+  /** Links shown here that live elsewhere: "also show in" links, or everything a smart folder's rule matches. */
   function shortcutsFor(folder: Folder): LinkRef[] {
+    const rule = smartRules.get(folder.id);
+    if (rule) {
+      const hits = allRefs.filter((r) => !r.folder.rule && shown(r.link) && matchLink(rule, r.link, r.folder, matchCtx) && matches(r.link, r.folder));
+      return sortRefs(hits, effectiveSort(folder));
+    }
     return allRefs.filter((r) => r.folder.id !== folder.id && r.link.alsoIn?.includes(folder.id) && shown(r.link) && matches(r.link, r.folder));
   }
-  const folderViews = sortedFolders.map((f) => ({ folder: f, links: visibleLinks(f), shortcuts: shortcutsFor(f) }));
-  const matchCount = folderViews.reduce((n, v) => n + v.links.length, 0);
+
+  // which folders show, and in what order
+  const canSeeFolder = (f: Folder) => (adminUnlocked || !f.archived) && (showHidden || !folderPrefs[f.id]?.hidden);
+  const allFolderIds = new Set((data?.folders || []).map((f) => f.id));
+  const childrenOf = new Map<string, Folder[]>();
+  (data?.folders || []).forEach((f) => {
+    if (f.parentId && allFolderIds.has(f.parentId) && canSeeFolder(f)) childrenOf.set(f.parentId, [...(childrenOf.get(f.parentId) || []), f]);
+  });
+  const topFolders = (() => {
+    const all = data?.folders || [];
+    let tops = all.filter((f) => (!f.parentId || !allFolderIds.has(f.parentId)) && canSeeFolder(f));
+    if (activeSpace) tops = tops.filter((f) => f.space === activeSpace);
+    const order = personal.folderOrder;
+    if (order.length) {
+      const pos = new Map(order.map((id, i) => [id, i]));
+      tops = [...tops].sort((a, b) => (pos.get(a.id) ?? 1e6 + all.indexOf(a)) - (pos.get(b.id) ?? 1e6 + all.indexOf(b)));
+    }
+    // pinned first, then your favorite folders, then the rest; archived ones last
+    const rank = (f: Folder) => (f.archived ? 3 : f.pinned ? 0 : folderPrefs[f.id]?.fav ? 1 : 2);
+    return [...tops].sort((a, b) => rank(a) - rank(b));
+  })();
+  const sortedFolders = topFolders.flatMap((f) => [f, ...(childrenOf.get(f.id) || [])]);
+  const folderVisited = useMemo(() => {
+    const m = new Map<string, number>();
+    history.forEach((h) => m.set(h.folderId, Math.max(m.get(h.folderId) || 0, h.at)));
+    return m;
+  }, [history]);
+  function metaFor(folder: Folder): FolderMeta {
+    let updatedAt = 0, unread = 0, done = 0;
+    const meLower = user?.toLowerCase();
+    for (const l of folder.links) {
+      updatedAt = Math.max(updatedAt, l.createdAt ? Date.parse(l.createdAt) : 0, l.updatedAt ? Date.parse(l.updatedAt) : 0);
+      if (since && isNewSince(l, since) && l.addedBy?.toLowerCase() !== meLower) unread++;
+      if (personal.links[l.id]?.done) done++;
+    }
+    return { updatedAt, visitedAt: folderVisited.get(folder.id), unread, done, fav: folderPrefs[folder.id]?.fav, follow: folderPrefs[folder.id]?.follow };
+  }
+  type FolderView = { folder: Folder; links: Link[]; shortcuts: LinkRef[] };
+  const viewOf = (f: Folder): FolderView => ({ folder: f, links: visibleLinks(f), shortcuts: shortcutsFor(f) });
+  const folderViews = sortedFolders.map(viewOf);
+  const viewById = new Map(folderViews.map((v) => [v.folder.id, v]));
+  const hasContent = (v: FolderView | undefined) => !!v && (v.links.length > 0 || v.shortcuts.length > 0);
+  /** Should this folder (and, for a parent, its sub-folders) be drawn? */
+  function folderVisible(f: Folder): boolean {
+    const v = viewById.get(f.id);
+    const kids = childrenOf.get(f.id) || [];
+    if (filtering) return hasContent(v) || kids.some((k) => hasContent(viewById.get(k.id)));
+    if (look.hideEmpty && !f.rule && !hasContent(v) && !kids.some((k) => hasContent(viewById.get(k.id)))) return false;
+    return true;
+  }
+  const matchCount = folderViews.reduce((n, v) => n + v.links.length + (v.folder.rule ? 0 : v.shortcuts.filter((r) => !r.link.alsoIn).length), 0);
+
+  // built-in lists shown as folders (optional, in Customize)
+  const specialViews: FolderView[] = !look.specialFolders || filtering ? [] : ([
+    { folder: { id: "__recent", name: "Recently added", emoji: "🆕", links: [] }, links: [],
+      shortcuts: [...allRefs].filter((r) => shown(r.link) && r.link.createdAt).sort((a, b) => (b.link.createdAt || "").localeCompare(a.link.createdAt || "")).slice(0, 12) },
+    { folder: { id: "__popular", name: "Most popular", emoji: "🔥", links: [] }, links: [],
+      shortcuts: [...allRefs].filter((r) => shown(r.link) && (r.link.clicks || 0) > 0).sort((a, b) => (b.link.clicks || 0) - (a.link.clicks || 0)).slice(0, 12) },
+    { folder: { id: "__top", name: "Top rated", emoji: "⭐", links: [] }, links: [],
+      shortcuts: [...allRefs].filter((r) => shown(r.link) && aggRatings[r.link.id]?.count).sort((a, b) => (aggRatings[b.link.id]?.avg || 0) - (aggRatings[a.link.id]?.avg || 0)).slice(0, 12) },
+  ] as FolderView[]).filter((v) => v.shortcuts.length > 0);
+
   /** Every card on screen, top to bottom — for J/K and shift-click ranges. */
   const visibleOrder = useMemo(
-    () => folderViews.flatMap((v) => (!filtering && collapsed[v.folder.id] ? [] : v.links.map((l) => l.id))),
+    () => folderViews.filter((v) => folderVisible(v.folder) || (v.folder.parentId && folderVisible(folderById.get(v.folder.parentId)!)))
+      .flatMap((v) => (!filtering && collapsed[v.folder.id] ? [] : v.links.map((l) => l.id))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data, search, tagFilter, sort, collapsed, showHidden, personal.links, adminUnlocked]
+    [data, search, tagFilters, tagMode, sort, collapsed, showHidden, personal.links, personal.folders, personal.folderOrder, adminUnlocked, activeSpace, look.hideEmpty]
   );
+  const startFolder = data?.settings?.startFolderId ? folderById.get(data.settings.startFolderId) : undefined;
+  const showStart = !!startFolder && !startDismissed && since === 0 && history.length < 3;
 
   const addingLocked = !!data?.settings?.lockAdding && !adminUnlocked;
-  const dragEnabled = adminUnlocked && sort === "manual" && !filtering;
+  const dragEnabled = adminUnlocked && sort === "manual" && !filtering && !personal.folderOrder.length;
   const showAdmin = adminUnlocked && adminOpen && !!data;
 
   // ---------- actions ----------
@@ -587,9 +688,44 @@ export default function HomePage() {
     if (!data?.folders.length) { setModal({ type: "folder" }); showToast("Create a folder first"); return; }
     setModal({ type: "link", mode: { kind: "add", folderId, url, bulk } });
   }
-  function openNewFolder() {
+  function openNewFolder(smart = false) {
     if (addingLocked) { setSuggest({ kind: "other" }); return; }
-    setModal({ type: "folder" });
+    setModal({ type: "folder", smart });
+  }
+  function toggleTag(t: string) {
+    setTagFilters((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
+  }
+  function applyView(v: { q: string; tags: string[]; tagMode: "any" | "all"; sort?: string }) {
+    setSearch(v.q);
+    setTagFilters(v.tags);
+    setTagMode(v.tagMode);
+    if (v.sort) changeSort(v.sort as Sort);
+    if (v.tags.length) setShowTags(true);
+  }
+  function saveCurrentView() {
+    setPrompt({
+      title: "Save this view",
+      initial: search.trim() || tagFilters.map((t) => `#${t}`).join(" "),
+      placeholder: "e.g. Maths videos",
+      onSave: (name) => {
+        if (!name.trim()) return;
+        personal.saveView({ name: name.trim(), q: search.trim(), tags: tagFilters, tagMode, sort });
+        showToast(`Saved “${name.trim()}” — it's in the Views row`);
+      },
+    });
+  }
+  /** Drag folder chips: admins arrange for everyone, others just for themselves. */
+  function reorderChips(fromId: string, beforeId: string) {
+    setChipDrag(null);
+    if (fromId === beforeId) return;
+    if (adminUnlocked && !personal.folderOrder.length) { moveFolder(fromId, beforeId); return; }
+    const ids = topFolders.map((f) => f.id).filter((id) => id !== fromId);
+    ids.splice(Math.max(0, ids.indexOf(beforeId)), 0, fromId);
+    personal.setFolderOrder(ids);
+    showToast("Folder order saved for you — reset it from the ⋯ menu at the top");
+  }
+  async function folderApi(action: string, payload: Record<string, unknown>, done: string) {
+    if (await api(action, { ...payload, password: adminPassword })) showToast(done);
   }
   function jumpToFolder(id: string) {
     toggleCollapsed(id, false);
@@ -631,12 +767,16 @@ export default function HomePage() {
   }
   async function saveFolder(v: FolderValues): Promise<boolean> {
     if (modal?.type !== "folder") return false;
+    const fields = {
+      name: v.name, emoji: v.emoji, color: v.color, description: v.description, guide: v.guide, parentId: v.parentId,
+      sort: v.sort, ...(adminUnlocked ? { space: v.space, rule: v.rule, maintainers: v.maintainers } : {}),
+    };
     if (!modal.folder) {
-      const ok = await api("addFolder", { name: v.name, emoji: v.emoji, color: v.color, password: adminPw() });
+      const ok = await api("addFolder", { ...fields, password: adminPw() });
       if (ok) showToast(`Created ${v.emoji} ${v.name}`);
       return !!ok;
     }
-    const ok = await api("editFolder", { folderId: modal.folder.id, name: v.name, emoji: v.emoji, color: v.color, pinned: v.pinned, password: adminPassword });
+    const ok = await api("editFolder", { folderId: modal.folder.id, ...fields, pinned: v.pinned, password: adminPassword });
     if (ok) showToast("Folder saved");
     return !!ok;
   }
@@ -662,7 +802,7 @@ export default function HomePage() {
       });
       api("toggleLike", { folderId: f.id, linkId: l.id }, { quiet: true }).then((ok) => { if (!ok) load(); });
     },
-    filterTag: (t) => { setTagFilter(t === tagFilter ? "" : t); window.scrollTo({ top: 0, behavior: "smooth" }); },
+    filterTag: (t) => { toggleTag(t); setShowTags(true); window.scrollTo({ top: 0, behavior: "smooth" }); },
     rate: (linkId, stars) => { if (!user) { showToast("Log in to rate"); openLogin(); return; } personal.rate(linkId, stars); },
     openProfile: (u) => setProfileView(u),
     pref: (linkId, patch) => personal.setLinkPref(linkId, patch),
@@ -898,6 +1038,11 @@ export default function HomePage() {
       return;
     }
     const t = e.target as HTMLElement;
+    if (e.altKey && !e.ctrlKey && !e.metaKey && /^Digit[1-9]$/.test(e.code)) {
+      const f = topFolders[Number(e.code.slice(5)) - 1];
+      if (f) { e.preventDefault(); jumpToFolder(f.id); }
+      return;
+    }
     if (e.metaKey || e.ctrlKey || e.altKey || t.closest("input, textarea, select, [contenteditable]")) return;
     if (modal || showCmd || suggest || prompt || cardMenu) return;
     const k = e.key.toLowerCase();
@@ -1010,6 +1155,8 @@ export default function HomePage() {
     actions: cardActions,
     me: user,
     admin: adminUnlocked,
+    editable: editableFolders,
+    tagColors: data?.settings?.tagColors || {},
     favorites: favoriteSet,
     ratings: aggRatings,
     myRatings: personal.ratings,
@@ -1128,6 +1275,14 @@ export default function HomePage() {
                         <Icon name={showHidden ? "eyeOff" : "eye"} /> {showHidden ? "Hide my hidden websites" : `Show my hidden websites (${hiddenCount})`}
                       </button>
                     )}
+                    {personal.folderOrder.length > 0 && (
+                      <button onClick={() => { setMoreMenu(false); personal.setFolderOrder([]); showToast("Back to the normal folder order"); }}><Icon name="reset" /> Reset my folder order</button>
+                    )}
+                    {Object.values(folderPrefs).some((p) => p.hidden) && !showHidden && (
+                      <button onClick={() => { setMoreMenu(false); setShowHidden(true); }}><Icon name="eye" /> Show my hidden folders</button>
+                    )}
+                    {adminUnlocked && <button onClick={() => { setMoreMenu(false); openNewFolder(true); }}><Icon name="bulb" /> New smart folder</button>}
+                    {adminUnlocked && <button onClick={() => { setMoreMenu(false); setModal({ type: "tags" }); }}><Icon name="tag" /> Manage tags</button>}
                     <button onClick={() => { setMoreMenu(false); setModal({ type: "shortcuts" }); }}><Icon name="keyboard" /> Keyboard shortcuts <span className="kbd">?</span></button>
                     {canInstall && <button onClick={installApp}><Icon name="download" /> Install app</button>}
                   </div>
@@ -1209,14 +1364,14 @@ export default function HomePage() {
               <Icon name="plus" /> {addingLocked ? "Suggest a website" : "Add website"}
             </button>
             {!addingLocked && (
-              <button className="btn btn-secondary" onClick={openNewFolder}><Icon name="folder" /> New folder</button>
+              <button className="btn btn-secondary" onClick={() => openNewFolder()}><Icon name="folder" /> New folder</button>
             )}
           </div>
           <div className="actions-right">
             {allTags.length > 0 && (
               <button
-                className={`btn btn-secondary btn-sm tags-toggle ${showTags || tagFilter ? "active" : ""}`}
-                onClick={() => { const v = !showTags; setShowTags(v); writeLocal("showTags", v); if (!v) setTagFilter(""); }}
+                className={`btn btn-secondary btn-sm tags-toggle ${showTags || tagFilters.length ? "active" : ""}`}
+                onClick={() => { const v = !showTags; setShowTags(v); writeLocal("showTags", v); if (!v) setTagFilters([]); }}
                 title="Filter by tag"
               ># Tags</button>
             )}
@@ -1229,6 +1384,7 @@ export default function HomePage() {
               <option value="newest">Newest first</option>
               <option value="clicks">Most visited</option>
               <option value="likes">Most liked</option>
+              <option value="rating">Top rated</option>
               {user && <option value="mine">My ratings</option>}
             </select>
             <div className="seg-toggle" role="group" aria-label="View">
@@ -1238,28 +1394,85 @@ export default function HomePage() {
           </div>
         </div>
 
-        {sortedFolders.length > 0 && (
+        {spaces.length > 0 && (
+          <div className="space-tabs" role="tablist" aria-label="Spaces">
+            {["", ...spaces].map((sp) => (
+              <button key={sp || "all"} role="tab" aria-selected={activeSpace === sp} className={activeSpace === sp ? "on" : ""}
+                onClick={() => { setSpace(sp); writeLocal("space", sp); }}>
+                {sp || "All"}
+              </button>
+            ))}
+          </div>
+        )}
+        {showStart && startFolder && (
+          <div className="announcement start-here">
+            <span>👋 New here? Start with <button className="link-btn" onClick={() => { jumpToFolder(startFolder.id); setStartDismissed(true); writeLocal("startDismissed", true); }}>{startFolder.emoji} {startFolder.name}</button></span>
+            <button className="announcement-x" title="Got it" onClick={() => { setStartDismissed(true); writeLocal("startDismissed", true); }}><Icon name="x" /></button>
+          </div>
+        )}
+        {topFolders.length > 0 && (
           <nav className="folder-nav sticky" aria-label="Jump to folder">
             <span className="nav-label">Jump to</span>
-            {sortedFolders.map((f) => (
-              <button
-                key={f.id}
-                className={activeFolder === f.id ? "on" : ""}
-                onClick={() => jumpToFolder(f.id)}
-                style={f.color ? ({ "--folder-accent": f.color } as React.CSSProperties) : undefined}
-              >
-                <span>{f.emoji}</span> {f.name} <em>{f.links.length}</em>
-              </button>
-            ))}
+            {topFolders.map((f, i) => {
+              const unread = metaFor(f).unread;
+              return (
+                <button
+                  key={f.id}
+                  className={`${activeFolder === f.id ? "on" : ""} ${chipDrag && chipDrag !== f.id ? "chip-drop" : ""}`}
+                  onClick={() => jumpToFolder(f.id)}
+                  style={f.color ? ({ "--folder-accent": f.color } as React.CSSProperties) : undefined}
+                  draggable
+                  title={`${i < 9 ? `Alt+${i + 1} · ` : ""}drag to rearrange${adminUnlocked && !personal.folderOrder.length ? " for everyone" : " for you"}`}
+                  onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", f.id); setChipDrag(f.id); }}
+                  onDragEnd={() => setChipDrag(null)}
+                  onDragOver={(e) => { if (chipDrag) e.preventDefault(); }}
+                  onDrop={(e) => { e.preventDefault(); if (chipDrag) reorderChips(chipDrag, f.id); }}
+                >
+                  <span>{f.emoji}</span> {f.name} <em>{f.rule ? "✨" : f.links.length}</em>
+                  {unread > 0 && <span className="chip-new" title={`${unread} new since your last visit`}>{unread}</span>}
+                </button>
+              );
+            })}
           </nav>
         )}
-        {allTags.length > 0 && (showTags || tagFilter) && (
-          <div className="tag-bar">
-            {allTags.slice(0, 16).map(([t, n]) => (
-              <button key={t} className={tagFilter === t ? "on" : ""} onClick={() => setTagFilter(tagFilter === t ? "" : t)}>
-                #{t} <em>{n}/{allRefs.length}</em>
-              </button>
+        {(personal.views.length > 0 || filtering) && (
+          <div className="views-bar">
+            <span className="nav-label">Views</span>
+            {personal.views.map((v) => (
+              <span key={v.id} className="view-chip">
+                <button onClick={() => applyView(v)} title={[v.q, ...v.tags.map((t) => `#${t}`)].filter(Boolean).join(" ")}>{v.name}</button>
+                <button className="view-x" onClick={() => personal.deleteView(v.id)} aria-label={`Delete view ${v.name}`}>×</button>
+              </span>
             ))}
+            {filtering && <button className="pick dashed" onClick={saveCurrentView}><Icon name="plus" /> Save this view</button>}
+          </div>
+        )}
+        {allTags.length > 0 && (showTags || tagFilters.length > 0) && (
+          <div className={`tag-bar ${tagCloud ? "cloud" : ""}`}>
+            {(tagCloud ? allTags : allTags.slice(0, 16)).map(([t, n]) => {
+              const color = data?.settings?.tagColors?.[t];
+              const max = allTags[0]?.[1] || 1;
+              return (
+                <button
+                  key={t}
+                  className={tagFilters.includes(t) ? "on" : ""}
+                  onClick={() => toggleTag(t)}
+                  style={{ ...(tagCloud ? { fontSize: `${0.72 + 0.55 * (n / max)}rem` } : {}), ...(color ? { color, borderColor: color } : {}) }}
+                >
+                  #{t} <em>{n}</em>
+                </button>
+              );
+            })}
+            {tagFilters.length > 1 && (
+              <span className="seg mini">
+                <button className={tagMode === "any" ? "on" : ""} onClick={() => setTagMode("any")} title="Show links with any of these tags">Any</button>
+                <button className={tagMode === "all" ? "on" : ""} onClick={() => setTagMode("all")} title="Only links with every one of these tags">All</button>
+              </span>
+            )}
+            {allTags.length > 16 || tagCloud ? (
+              <button className="link-btn tag-more" onClick={() => setTagCloud(!tagCloud)}>{tagCloud ? "Fewer tags" : `All ${allTags.length} tags`}</button>
+            ) : null}
+            {adminUnlocked && <button className="link-btn tag-more" onClick={() => setModal({ type: "tags" })}>Manage</button>}
           </div>
         )}
 
@@ -1268,10 +1481,10 @@ export default function HomePage() {
             <span>
               <strong>{matchCount}</strong> {matchCount === 1 ? "website" : "websites"}
               {q && <> matching “{search.trim()}”</>}
-              {tagFilter && <> tagged <strong>#{tagFilter}</strong></>}
+              {tagFilters.length > 0 && <> tagged <strong>{tagFilters.map((t) => `#${t}`).join(tagMode === "all" ? " and " : " or ")}</strong></>}
               {q && matchCount > 0 && <span className="enter-hint"> · press <span className="kbd">Enter</span> to open the first</span>}
             </span>
-            <button className="btn btn-secondary btn-sm" onClick={() => { setSearch(""); setTagFilter(""); }}>Clear</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => { setSearch(""); setTagFilters([]); }}>Clear</button>
           </div>
         ) : (
           <>
@@ -1291,7 +1504,7 @@ export default function HomePage() {
               <div className="empty-emoji">📂</div>
               <h3>No folders yet</h3>
               <p>Folders keep websites organised. Make the first one to get started.</p>
-              <button className="btn btn-primary" onClick={openNewFolder}><Icon name="plus" /> Create a folder</button>
+              <button className="btn btn-primary" onClick={() => openNewFolder()}><Icon name="plus" /> Create a folder</button>
             </div>
           )}
           {filtering && matchCount === 0 && sortedFolders.length > 0 && (
@@ -1303,35 +1516,75 @@ export default function HomePage() {
             </div>
           )}
           <CardContext.Provider value={cardEnv}>
-            {folderViews.map(({ folder, links, shortcuts }) => {
-              if (filtering && links.length === 0 && shortcuts.length === 0) return null;
-              return (
-                <FolderSection
-                  key={folder.id}
-                  folder={folder}
-                  links={links}
-                  shortcuts={shortcuts}
-                  totalLinks={folder.links.filter(shown).length}
-                  collapsed={!filtering && !!collapsed[folder.id]}
-                  view={folderViewPrefs[folder.id] || view}
-                  canAdd={!addingLocked}
-                  dragEnabled={dragEnabled}
-                  drag={drag}
-                  setDrag={setDrag}
-                  dropTarget={dropTarget}
-                  setDropTarget={setDropTarget}
-                  onToggle={() => toggleCollapsed(folder.id)}
-                  onToggleView={() => toggleFolderView(folder.id)}
-                  onAddHere={() => openAdd(folder.id)}
-                  onOpenAll={() => openAllIn(links)}
-                  onEditFolder={() => setModal({ type: "folder", folder })}
-                  onDeleteFolder={() => setModal({ type: "deleteFolder", folder })}
-                  onShareFolder={() => shareFolder(folder)}
-                  onMoveLink={moveLink}
-                  onMoveFolder={moveFolder}
-                  onDropUrl={(folderId, url) => openAdd(folderId, url)}
-                />
-              );
+            {specialViews.map((v) => (
+              <FolderSection
+                key={v.folder.id}
+                folder={v.folder}
+                links={[]}
+                shortcuts={v.shortcuts}
+                totalLinks={v.shortcuts.length}
+                collapsed={!!collapsed[v.folder.id]}
+                view={folderViewPrefs[v.folder.id] || view}
+                canAdd={false}
+                editor={false}
+                virtual
+                dragEnabled={false}
+                drag={drag}
+                setDrag={setDrag}
+                dropTarget={dropTarget}
+                setDropTarget={setDropTarget}
+                meta={{ updatedAt: 0, unread: 0, done: 0 }}
+                onToggle={() => toggleCollapsed(v.folder.id)}
+                onAddHere={() => {}}
+                onOpenAll={() => openAllIn(v.shortcuts.map((r) => r.link))}
+                onEditFolder={() => {}}
+                onDeleteFolder={() => {}}
+                onShareFolder={() => {}}
+                onMoveLink={moveLink}
+                onMoveFolder={moveFolder}
+                onDropUrl={() => {}}
+                onMenu={() => {}}
+              />
+            ))}
+            {topFolders.filter(folderVisible).map((top) => {
+              const section = (folder: Folder, sub: boolean, children?: React.ReactNode) => {
+                const { links, shortcuts } = viewById.get(folder.id) || { links: [], shortcuts: [] };
+                return (
+                  <FolderSection
+                    key={folder.id}
+                    folder={folder}
+                    links={links}
+                    shortcuts={shortcuts}
+                    totalLinks={folder.rule ? shortcuts.length : folder.links.filter(shown).length}
+                    collapsed={!filtering && !!collapsed[folder.id]}
+                    view={folderViewPrefs[folder.id] || view}
+                    canAdd={!addingLocked || editableFolders.has(folder.id)}
+                    editor={canEditFolder(folder)}
+                    sub={sub}
+                    meta={metaFor(folder)}
+                    dragEnabled={dragEnabled}
+                    drag={drag}
+                    setDrag={setDrag}
+                    dropTarget={dropTarget}
+                    setDropTarget={setDropTarget}
+                    onToggle={() => toggleCollapsed(folder.id)}
+                    onAddHere={() => openAdd(folder.id)}
+                    onOpenAll={() => openAllIn([...links, ...shortcuts.map((r) => r.link)])}
+                    onEditFolder={() => setModal({ type: "folder", folder })}
+                    onDeleteFolder={() => setModal({ type: "deleteFolder", folder })}
+                    onShareFolder={() => shareFolder(folder)}
+                    onMoveLink={moveLink}
+                    onMoveFolder={moveFolder}
+                    onDropUrl={(folderId, url) => openAdd(folderId, url)}
+                    onMenu={(at) => setFolderMenu({ folder, ...at })}
+                    onSplit={adminUnlocked ? () => setPick({ kind: "split", folder }) : undefined}
+                  >
+                    {children}
+                  </FolderSection>
+                );
+              };
+              const kids = (childrenOf.get(top.id) || []).filter((k) => !filtering || hasContent(viewById.get(k.id)));
+              return section(top, false, kids.length ? kids.map((k) => section(k, true)) : undefined);
             })}
             {cardMenu && <CardMenu state={cardMenu} onClose={() => setCardMenu(null)} />}
           </CardContext.Provider>
@@ -1387,9 +1640,109 @@ export default function HomePage() {
         onDelete={() => { if (confirm(`Delete ${selectedRefs.length} websites for everyone?`)) bulkAdmin("bulkDelete", {}, `Deleted ${selectedRefs.length} websites`); }}
         onClear={clearSelection}
       />
-      {modal?.type === "folder" && (
-        <FolderModal folder={modal.folder} admin={adminUnlocked} submitting={submitting} onSubmit={saveFolder} onClose={() => setModal(null)} />
+      {modal?.type === "folder" && data && (
+        <FolderModal
+          folder={modal.folder}
+          folders={data.folders}
+          spaces={spaces}
+          admin={adminUnlocked}
+          smart={modal.smart}
+          submitting={submitting}
+          onSubmit={saveFolder}
+          onClose={() => setModal(null)}
+        />
       )}
+      {modal?.type === "tags" && data && (
+        <TagManager
+          data={data}
+          onRename={async (from, to) => !!(await api("renameTag", { from, to, password: adminPassword }))}
+          onDelete={async (tag) => !!(await api("deleteTag", { tag, password: adminPassword }))}
+          onColor={(tag, color) => { api("setTagColor", { tag, color, password: adminPassword }, { quiet: true }); }}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {folderMenu && (() => {
+        const fm = folderMenu.folder;
+        const pref = folderPrefs[fm.id] || {};
+        const isStart = data?.settings?.startFolderId === fm.id;
+        return (
+          <FolderMenu
+            state={folderMenu}
+            pref={pref}
+            admin={adminUnlocked}
+            editor={canEditFolder(fm)}
+            isStart={isStart}
+            view={folderViewPrefs[fm.id] || view}
+            sort={effectiveSort(fm)}
+            onClose={() => setFolderMenu(null)}
+            actions={{
+              setPref: (patch) => {
+                if (patch.follow !== undefined && !user) { showToast("Log in to follow folders"); openLogin(); return; }
+                personal.setFolderPref(fm.id, patch);
+                if (patch.follow) showToast(`You'll hear about new links in ${fm.name}`);
+                if (patch.hidden) showToast(`Hid ${fm.name} — bring it back from the ⋯ menu at the top`);
+              },
+              toggleView: () => toggleFolderView(fm.id),
+              random: () => {
+                const pool = [...fm.links.filter(shown), ...shortcutsFor(fm).map((r) => r.link)];
+                const l = pool[Math.floor(Math.random() * pool.length)];
+                if (l) { trackAndOpen(allRefs.find((r) => r.link.id === l.id)?.folder || fm, l, true); showToast(`🎲 Opened ${l.name}`); }
+              },
+              openAll: () => openAllIn([...fm.links.filter(shown), ...shortcutsFor(fm).map((r) => r.link)]),
+              copyLink: () => shareFolder(fm),
+              copyMarkdown: () => navigator.clipboard.writeText(folderMarkdown(fm)).then(() => showToast("Copied as a Markdown list")).catch(() => showToast("Couldn't copy")),
+              info: () => setFolderInfoId(fm.id),
+              edit: () => setModal({ type: "folder", folder: fm }),
+              duplicate: () => folderApi("duplicateFolder", { folderId: fm.id }, `Copied ${fm.name}`),
+              merge: () => setPick({ kind: "merge", folder: fm }),
+              split: () => setPick({ kind: "split", folder: fm }),
+              archive: () => folderApi("editFolder", { folderId: fm.id, archived: !fm.archived }, fm.archived ? `${fm.name} is back` : `Archived ${fm.name} — only admins can see it`),
+              makeStart: () => folderApi("setSettings", { settings: { startFolderId: isStart ? "" : fm.id } }, isStart ? "No “Start here” folder now" : `New visitors will be pointed to ${fm.name}`),
+              remove: () => setModal({ type: "deleteFolder", folder: fm }),
+            }}
+          />
+        );
+      })()}
+      {folderInfoId && data && folderById.get(folderInfoId) && (
+        <FolderInfo
+          folder={folderById.get(folderInfoId)!}
+          data={data}
+          me={user}
+          done={folderById.get(folderInfoId)!.links.filter((l) => personal.links[l.id]?.done).length}
+          myRating={personal.ratings[`f_${folderInfoId}`]}
+          rating={aggRatings[`f_${folderInfoId}`]}
+          onRate={(stars) => { if (!user) { showToast("Log in to rate"); openLogin(); return; } personal.rate(`f_${folderInfoId}`, stars); }}
+          onProfile={(u) => { setFolderInfoId(null); setProfileView(u); }}
+          onClose={() => setFolderInfoId(null)}
+        />
+      )}
+      {pick?.kind === "merge" && data && (
+        <PickModal
+          title={`Merge ${pick.folder.name} into…`}
+          text={`Every website in ${pick.folder.emoji} ${pick.folder.name} moves into the folder you pick, then ${pick.folder.name} is removed. Undo is in the admin panel.`}
+          options={data.folders.filter((f) => f.id !== pick.folder.id && !f.rule).map((f) => ({ value: f.id, label: `${f.emoji} ${f.name}` }))}
+          confirmLabel="Merge"
+          onPick={(into) => folderApi("mergeFolder", { folderId: pick.folder.id, intoId: into }, `Merged ${pick.folder.name}`)}
+          onClose={() => setPick(null)}
+        />
+      )}
+      {pick?.kind === "split" && (() => {
+        const counts = new Map<string, number>();
+        pick.folder.links.forEach((l) => l.tags?.forEach((t) => counts.set(t, (counts.get(t) || 0) + 1)));
+        const options = Array.from(counts).sort((a, b) => b[1] - a[1]).map(([t, n]) => ({ value: t, label: `#${t} (${n} websites)` }));
+        return options.length ? (
+          <PickModal
+            title={`Split ${pick.folder.name} by tag`}
+            text="Websites with the tag you pick move into a new folder named after the tag."
+            options={options}
+            confirmLabel="Split"
+            onPick={(tag) => folderApi("splitFolder", { folderId: pick.folder.id, tag }, `Made a new #${tag} folder`)}
+            onClose={() => setPick(null)}
+          />
+        ) : (
+          <PickModal title="Nothing to split by" text="None of the websites in this folder have tags yet." options={[]} confirmLabel="OK" onPick={() => {}} onClose={() => setPick(null)} />
+        );
+      })()}
       {modal?.type === "deleteFolder" && (
         <ConfirmModal
           title="Delete folder?"

@@ -258,8 +258,14 @@ export interface Look {
   descriptions: boolean;
   /** tint each card with the main colour of the site's icon */
   iconTint: boolean;
+  /** show "Recently added", "Most popular" and "Top rated" as folders */
+  specialFolders: boolean;
+  /** skip folders with nothing in them */
+  hideEmpty: boolean;
 }
-export const DEFAULT_LOOK: Look = { palette: "black", accent: "", density: "comfy", motion: true, newTab: true, descriptions: false, iconTint: false };
+export const DEFAULT_LOOK: Look = {
+  palette: "black", accent: "", density: "comfy", motion: true, newTab: true, descriptions: false, iconTint: false, specialFolders: false, hideEmpty: false,
+};
 
 export function applyLook(look: Look) {
   const root = document.documentElement;
@@ -315,6 +321,16 @@ export function CustomizeModal({ look, onChange, onClose }: { look: Look; onChan
         <label className="toggle-row compact">
           <div><strong>Show descriptions</strong><span>A line about each site under its name.</span></div>
           <input type="checkbox" role="switch" checked={look.descriptions} onChange={(e) => onChange({ ...look, descriptions: e.target.checked })} />
+          <span className="switch" aria-hidden="true" />
+        </label>
+        <label className="toggle-row compact">
+          <div><strong>Extra folders</strong><span>Show “Recently added”, “Most popular” and “Top rated” as folders.</span></div>
+          <input type="checkbox" role="switch" checked={look.specialFolders} onChange={(e) => onChange({ ...look, specialFolders: e.target.checked })} />
+          <span className="switch" aria-hidden="true" />
+        </label>
+        <label className="toggle-row compact">
+          <div><strong>Hide empty folders</strong><span>Skip folders that have nothing in them yet.</span></div>
+          <input type="checkbox" role="switch" checked={look.hideEmpty} onChange={(e) => onChange({ ...look, hideEmpty: e.target.checked })} />
           <span className="switch" aria-hidden="true" />
         </label>
         <label className="toggle-row compact">
