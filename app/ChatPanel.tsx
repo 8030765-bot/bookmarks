@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatMessage } from "@/lib/types";
+import { Icon } from "./CommandPalette";
 
 const OPEN_POLL_MS = 3000;
 const CLOSED_POLL_MS = 15000;
@@ -14,17 +15,20 @@ function timeLabel(iso: string) {
 }
 
 export default function ChatPanel({
+  open,
+  setOpen,
   user,
   adminPassword,
   onNeedLogin,
   showToast,
 }: {
+  open: boolean;
+  setOpen: (fn: (open: boolean) => boolean) => void;
   user: string | null;
   adminPassword: string | null;
   onNeedLogin: () => void;
   showToast: (msg: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -107,7 +111,7 @@ export default function ChatPanel({
   return (
     <>
       <button className="chat-fab" onClick={() => setOpen((o) => !o)} aria-label="Toggle chat">
-        {open ? "✕" : "💬"}
+        {open ? "✕" : <Icon name="chat" />}
         {unread && <span className="chat-dot" />}
       </button>
       {open && (

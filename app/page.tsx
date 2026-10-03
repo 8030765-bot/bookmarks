@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { BookmarksData, Folder, Link } from "@/lib/types";
 import ChatPanel from "./ChatPanel";
+import CommandPalette, { Icon, PaletteItem } from "./CommandPalette";
 function faviconUrl(url: string) {
   try {
     const host = new URL(url).hostname;
@@ -54,7 +55,7 @@ export default function HomePage() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [sortBy, setSortBy] = useState<"name" | "newest" | "clicks" | "manual">("manual");
   const [showCmd, setShowCmd] = useState(false);
-  const [cmdQuery, setCmdQuery] = useState("");
+  const [chatOpen, setChatOpen] = useState(false);
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
   const [fName, setFName] = useState("");
@@ -69,7 +70,6 @@ export default function HomePage() {
   const [user, setUser] = useState<string | null>(null);
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [fUsername, setFUsername] = useState("");
-  const cmdRef = useRef<HTMLInputElement>(null);
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2800);
@@ -114,9 +114,7 @@ export default function HomePage() {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
-        setShowCmd(true);
-        setCmdQuery("");
-        setTimeout(() => cmdRef.current?.focus(), 50);
+        setShowCmd((s) => !s);
       }
       if (e.key === "Escape") {
         setShowCmd(false);
@@ -386,28 +384,33 @@ export default function HomePage() {
     folder.links?.forEach((l) => window.open(l.url, "_blank", "noopener,noreferrer"));
     showToast(`Opened ${folder.links?.length || 0} tabs`);
   }
-  const cmdResults = useMemo(() => {
-    if (!data?.folders) return [];
-    const q = cmdQuery.toLowerCase();
-    const results: { label: string; sub?: string; action: () => void }[] = [];
-    data.folders.forEach((f) => {
-      f.links?.forEach((l) => {
-        if (!q || l.name.toLowerCase().includes(q) || l.url.toLowerCase().includes(q)) {
-          results.push({
-            label: l.name,
-            sub: f.name,
-            action: () => { trackAndOpen(f.id, l); setShowCmd(false); },
-          });
-        }
-      });
-    });
-    if (!q || "add website".includes(q)) results.unshift({ label: "＋ Add Website", action: () => { setShowCmd(false); setModal({ type: "addLink" }); } });
-    if (!q || "new folder".includes(q)) results.unshift({ label: "📁 New Folder", action: () => { setShowCmd(false); setModal({ type: "addFolder" }); } });
-    if (!q || "admin".includes(q)) results.unshift({ label: "🔐 Admin Menu", action: () => { setShowCmd(false); setModal(adminUnlocked ? { type: "admin" } : { type: "adminLogin" }); } });
-    if (!q || "chat login".includes(q)) results.unshift({ label: user ? `👤 Log out (${user})` : "👤 Log in", action: () => { setShowCmd(false); if (user) handleLogout(); else openLogin(); } });
-    if (!q || "random".includes(q)) results.unshift({ label: "🎲 Random Bookmark", action: () => { setShowCmd(false); randomBookmark(); } });
-    return results.slice(0, 12);
-  }, [data, cmdQuery, adminUnlocked, user]);
+  // close the palette, then run the action
+  const cmd = (id: string, label: string, icon: string, run: () => void, hint?: string): PaletteItem => ({
+    id, label, hint, icon: <Icon name={icon} />, run: () => { setShowCmd(false); run(); },
+  });
+  function paletteActions(): PaletteItem[] {
+    return [
+      cmd("add", "Add website", "plus", () => { resetForm(); if (data?.folders?.[0]) setFFolderId(data.folders[0].id); setModal({ type: "addLink" }); }),
+      cmd("folder", "New folder", "folder", () => { resetForm(); setModal({ type: "addFolder" }); }),
+      cmd("random", "Random bookmark", "shuffle", randomBookmark),
+      cmd("chat", chatOpen ? "Close chat" : "Open chat", "chat", () => setChatOpen((o) => !o)),
+      cmd("theme", theme === "dark" ? "Switch to light mode" : "Switch to dark mode", "moon", () => setTheme(theme === "dark" ? "light" : "dark")),
+      cmd("view", viewMode === "grid" ? "Show as list" : "Show as grid", "grid", () => setViewMode(viewMode === "grid" ? "list" : "grid")),
+      cmd("admin", "Admin menu", "lock", () => setModal(adminUnlocked ? { type: "admin" } : { type: "adminLogin" })),
+      user
+        ? cmd("auth", `Log out (${user})`, "logout", handleLogout)
+        : cmd("auth", "Log in or sign up", "user", openLogin),
+    ];
+  }
+  function linkItem(folder: Folder, link: Link): PaletteItem {
+    return {
+      id: `${folder.id}:${link.id}`,
+      label: link.name,
+      hint: folder.name,
+      icon: <img src={faviconUrl(link.url)} alt="" width={16} height={16} />,
+      run: () => { setShowCmd(false); trackAndOpen(folder.id, link); },
+    };
+  }
 
   if (loading) return <div className="status"><p>Loading shared bookmarks…</p></div>;
   if (error && !data) {
@@ -445,7 +448,7 @@ export default function HomePage() {
           📁 New Folder
         </button>
         <button className="btn btn-secondary" onClick={randomBookmark}>🎲 Random</button>
-        <button className="btn btn-secondary" onClick={() => setShowCmd(true)} title="Ctrl+K">⌘K</button>
+        <button className="btn btn-secondary" onClick={() => setShowCmd(true)} title="Ctrl+K">Ctrl K</button>
         <button className="btn btn-secondary" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
           {theme === "dark" ? "☀️" : "🌙"}
         </button>
@@ -939,35 +942,46 @@ export default function HomePage() {
         </div>
       )}
       <ChatPanel
+        open={chatOpen}
+        setOpen={setChatOpen}
         user={user}
         adminPassword={adminUnlocked ? adminPassword : null}
         onNeedLogin={openLogin}
         showToast={showToast}
       />
-      {showCmd && (
-        <div className="cmd-overlay" onClick={() => setShowCmd(false)}>
-          <div className="cmd-box" onClick={(e) => e.stopPropagation()}>
-            <input
-              ref={cmdRef}
-              value={cmdQuery}
-              onChange={(e) => setCmdQuery(e.target.value)}
-              placeholder="Search links or type a command…"
-              autoFocus
-            />
-            <div className="cmd-results">
-              {cmdResults.map((r, i) => (
-                <div key={i} className="cmd-item" onClick={r.action}>
-                  <span>{r.label}</span>
-                  {r.sub && <span className="muted">{r.sub}</span>}
-                </div>
-              ))}
-              {cmdResults.length === 0 && (
-                <div className="cmd-item" style={{ color: "var(--text-muted)" }}>No results</div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {showCmd && (() => {
+        const actions = paletteActions();
+        const folderById = new Map((data?.folders || []).map((f) => [f.id, f]));
+        return (
+          <CommandPalette
+            onClose={() => setShowCmd(false)}
+            chipLabel="Theo's Bookmarks"
+            status={{
+              title: user ? `Logged in as ${user}` : "Not logged in",
+              sub: `${totalLinks} links · ${data?.folders?.length || 0} folders · ${totalClicks} clicks`,
+              online: !!user,
+              run: () => { setShowCmd(false); if (!user) openLogin(); else setChatOpen(true); },
+            }}
+            shortcuts={actions}
+            sections={[
+              { title: "Actions", items: actions },
+              {
+                title: "Most visited",
+                emptyQueryOnly: true,
+                items: mostVisited
+                  .filter((m) => (m.link.clicks || 0) > 0)
+                  .slice(0, 5)
+                  .map((m) => linkItem(folderById.get(m.folderId)!, m.link)),
+              },
+              {
+                title: "Links",
+                queryOnly: true,
+                items: (data?.folders || []).flatMap((f) => (f.links || []).map((l) => linkItem(f, l))),
+              },
+            ]}
+          />
+        );
+      })()}
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
