@@ -58,6 +58,7 @@ export const ICON_PATHS: Record<string, string> = {
   bulb: "M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.2 1 2V17h6v-.3c0-.8.4-1.5 1-2A7 7 0 0 0 12 2z",
   tools: "M14.7 6.3a4 4 0 0 0 5 5l-9.4 9.4a2.1 2.1 0 0 1-3-3zM6 3l3 3-1.5 1.5L4.5 4.5zM3 9l2-2",
   popout: "M14 4h6v6M20 4l-8 8M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
+  home: "M3 11l9-8 9 8M5 9.5V20h5v-6h4v6h5V9.5",
 };
 
 /* "Emoji icons" setting: swap the line icons for emoji where there's a good match. */
@@ -66,7 +67,7 @@ const EMOJI: Record<string, string> = {
   grid: "🔳", lock: "🔒", user: "👤", logout: "🚪", chart: "📊", link: "🔗", users: "👥", settings: "⚙️", database: "🗄️", clock: "🕐",
   x: "✖️", edit: "✏️", trash: "🗑️", pin: "📌", download: "⬇️", upload: "⬆️", undo: "↩️", star: "⭐", copy: "📋", external: "↗️",
   search: "🔍", sun: "☀️", list: "📃", keyboard: "⌨️", check: "✔️", heart: "❤️", share: "📤", trophy: "🏆", palette: "🎨", bell: "🔔",
-  poll: "📊", reply: "💬", bulb: "💡", tools: "🧰", popout: "🪟",
+  poll: "📊", reply: "💬", bulb: "💡", tools: "🧰", popout: "🪟", home: "🏠",
 };
 let iconStyle: "line" | "emoji" = "line";
 const iconListeners = new Set<() => void>();

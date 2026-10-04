@@ -43,6 +43,7 @@ import {
 } from "./components/Fun";
 import SideNav from "./components/SideNav";
 import { AddAnywhereModal, WeekChanges, downloadBookmarksHtml, downloadFolderCsv, embedCode } from "./components/DataViews";
+import { BottomNav, InstallModal, PullIndicator, buzz, usePullToRefresh } from "./components/Mobile";
 
 /** Changes that can wait for the connection to come back (each keeps its retry id). */
 const OUTBOX_KEY = "outbox";
@@ -77,6 +78,7 @@ type Modal =
   | { type: "whatsnew" }
   | { type: "week" }
   | { type: "addAnywhere" }
+  | { type: "install" }
   | { type: "profileEdit" }
   | { type: "recovery"; code: string; context: "signup" | "reset" }
   | null;
@@ -519,6 +521,9 @@ export default function HomePage() {
   useEffect(() => { setAprilOff(readLocal("aprilOff", "") === new Date().toDateString()); }, []);
   const aprilOn = !!data?.settings?.aprilFools && !aprilOff;
   useEffect(() => { document.documentElement.setAttribute("data-april", aprilOn ? "on" : "off"); }, [aprilOn]);
+  // phones: pull down at the top to refresh
+  const ptr = usePullToRefresh(async () => { await load(); loadRatings(); showToast("Up to date"); });
+
   // things waiting for staff, for the badge on the Admin button
   const loadStaffCount = useCallback(() => {
     if (!role) { setStaffCount(0); return; }
@@ -568,6 +573,21 @@ export default function HomePage() {
   useEffect(() => {
     if (addParamDone.current || !data) return;
     const params = new URLSearchParams(location.search);
+    // shortcuts from the app icon
+    if (params.get("focus") === "search") {
+      addParamDone.current = true;
+      params.delete("focus");
+      window.history.replaceState(null, "", `${location.pathname}${params.toString() ? `?${params}` : ""}`);
+      setTimeout(() => searchRef.current?.focus(), 100);
+      return;
+    }
+    if (params.get("add") === "new") {
+      addParamDone.current = true;
+      params.delete("add");
+      window.history.replaceState(null, "", `${location.pathname}${params.toString() ? `?${params}` : ""}`);
+      openAdd();
+      return;
+    }
     const url = params.get("add") || params.get("url") || (params.get("text") || "").match(/https?:\/\/\S+/)?.[0];
     if (!url) return;
     addParamDone.current = true;
@@ -1672,6 +1692,8 @@ export default function HomePage() {
   if (loading) {
     return (
       <div className="app">
+        {/* the installed app opens on a splash screen instead of grey boxes */}
+        <div className="splash" aria-hidden="true"><span className="splash-mark">🔖</span><span className="splash-name">{DEFAULT_TITLE}</span></div>
         {loadingLine && <p className="loading-line" role="status">{loadingLine}</p>}
         <div className="skeleton hero-skel" />
         <div className="skeleton bar-skel" />
@@ -1820,6 +1842,7 @@ export default function HomePage() {
                     <button onClick={() => { setMoreMenu(false); setModal({ type: "addAnywhere" }); }}><Icon name="plus" /> Add from any website…</button>
                     <button onClick={() => { setMoreMenu(false); if (data) { downloadBookmarksHtml(data); showToast("Downloaded — import it in Chrome or Edge from Bookmarks → Import"); } }}><Icon name="download" /> Download for my browser</button>
                     <button onClick={() => { setMoreMenu(false); setTimeout(() => window.print(), 50); }}><Icon name="list" /> Print the list</button>
+                    <button onClick={() => { setMoreMenu(false); setModal({ type: "install" }); }}><Icon name="download" /> Install the app</button>
                     <button onClick={() => { setMoreMenu(false); setHintMode(true); }}><Icon name="info" /> What&apos;s this? (explain buttons)</button>
                     {communityOn && <button onClick={() => { setMoreMenu(false); location.href = "/community"; }}><Icon name="users" /> Community page</button>}
                     {data?.settings?.suggestionsEnabled !== false && <button onClick={() => { setMoreMenu(false); setSuggest({}); }}><Icon name="bulb" /> Suggest a change</button>}
@@ -2378,6 +2401,7 @@ export default function HomePage() {
       {modal?.type === "whatsnew" && <WhatsNew activity={data?.activity || []} onClose={() => setModal(null)} />}
       {modal?.type === "week" && data && <WeekChanges data={data} onClose={() => setModal(null)} onOpen={openCard} />}
       {modal?.type === "addAnywhere" && <AddAnywhereModal onClose={() => setModal(null)} toast={showToast} />}
+      {modal?.type === "install" && <InstallModal canInstall={canInstall} onInstall={() => { setModal(null); installApp(); }} onClose={() => setModal(null)} />}
       {modal?.type === "spin" && (
         <SpinWheel refs={allRefs} folders={sortedFolders} onOpen={(f, l) => trackAndOpen(f, l, true)} onClose={() => setModal(null)} />
       )}
@@ -2685,6 +2709,16 @@ export default function HomePage() {
         />
       )}
       <Snow on={look.snow} />
+      <PullIndicator pull={ptr.pull} busy={ptr.busy} />
+      <BottomNav
+        onHome={() => { setSearch(""); setTagFilters([]); window.scrollTo({ top: 0, behavior: look.motion ? "smooth" : "auto" }); }}
+        onSearch={() => { window.scrollTo({ top: 0 }); setTimeout(() => searchRef.current?.focus(), 50); }}
+        onAdd={() => openAdd()}
+        onChat={() => setChatOpen((o) => !o)}
+        onMore={() => { window.scrollTo({ top: 0 }); setMoreMenu(true); }}
+        chatOpen={chatOpen}
+        unread={unreadCount}
+      />
       <HintMode on={hintMode} onOff={endHints} />
       {scrolled && (
         <button className="to-top" onClick={() => window.scrollTo({ top: 0, behavior: look.motion ? "smooth" : "auto" })} title="Back to top">

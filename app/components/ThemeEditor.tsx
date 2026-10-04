@@ -223,6 +223,7 @@ export function ThemeEditor({ look, onChange, onClose, startView, onStartView, f
             <Toggle label="Seasonal touches" hint="Holiday colours and logos that switch on by themselves." checked={look.seasonal} onChange={(v) => set({ seasonal: v })} />
             <Toggle label="Falling snow in December" checked={look.snow} onChange={(v) => set({ snow: v })} />
             <Toggle label="Minimal" hint="No emoji in folders and lists — just words." checked={look.minimal} onChange={(v) => set({ minimal: v })} />
+            <Toggle label="Vibration on phones" hint="A little buzz when you tap, star or swipe." checked={look.haptics} onChange={(v) => set({ haptics: v })} />
           </>
         )}
 
@@ -231,6 +232,7 @@ export function ThemeEditor({ look, onChange, onClose, startView, onStartView, f
             <Toggle label="High contrast" hint="Stronger text and borders." checked={look.highContrast} onChange={(v) => set({ highContrast: v })} />
             <Toggle label="Colourblind-safe colours" hint="Blue and orange instead of green and red." checked={look.colorblind} onChange={(v) => set({ colorblind: v })} />
             <Toggle label="Always underline links" checked={look.underline} onChange={(v) => set({ underline: v })} />
+            <Toggle label="Bigger buttons" hint="Easier to tap on phones and tablets." checked={look.bigButtons} onChange={(v) => set({ bigButtons: v })} />
             <Toggle label="Animations" hint="Turn off to reduce motion." checked={look.motion} onChange={(v) => set({ motion: v })} />
             <p className="hint">Tip: press <span className="kbd">?</span> for keyboard shortcuts, and use <strong>What&apos;s this?</strong> in the ⋯ menu to learn what any button does.</p>
           </>

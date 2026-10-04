@@ -1,5 +1,6 @@
 "use client";
 import { PreviewCard, loadPreview } from "./DataViews";
+import { buzz } from "./Mobile";
 import { useEffect, useRef, useState } from "react";
 import { Folder, Link } from "@/lib/types";
 import { Icon } from "./Icon";
@@ -90,6 +91,40 @@ export default function LinkCard({
   const stopPreview = () => { clearTimeout(hoverTimer.current); setPreview(false); };
   useEffect(() => () => clearTimeout(hoverTimer.current), []);
 
+  // phones: swipe right to star, swipe left to open
+  const swipe = useRef<{ x: number; y: number; dx: number; active: boolean } | null>(null);
+  const [swipeDx, setSwipeDx] = useState(0);
+  const onTouchStart = (e: React.TouchEvent) => {
+    if (renaming || e.touches.length !== 1) return;
+    swipe.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, active: false };
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    const s = swipe.current;
+    if (!s) return;
+    const dx = e.touches[0].clientX - s.x;
+    const dy = e.touches[0].clientY - s.y;
+    if (!s.active) {
+      if (Math.abs(dy) > 12) { swipe.current = null; return; } // scrolling, not swiping
+      if (Math.abs(dx) > 14) s.active = true;
+    }
+    if (s.active) { s.dx = dx; setSwipeDx(Math.max(-120, Math.min(120, dx))); }
+  };
+  const onTouchEnd = () => {
+    const s = swipe.current;
+    swipe.current = null;
+    setSwipeDx(0);
+    if (!s?.active) return;
+    if (s.dx > 90) {
+      buzz(15);
+      actions.star(folder, link);
+      actions.toast(favorited ? `Unstarred ${displayName}` : `Starred ${displayName} ⭐`);
+    } else if (s.dx < -90 && href) {
+      buzz(15);
+      actions.open(folder, link);
+      window.open(href, actions.newTab ? "_blank" : "_self", "noopener,noreferrer");
+    }
+  };
+
   // admins can double-click the name to rename it right on the card
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(link.name);
@@ -112,7 +147,15 @@ export default function LinkCard({
   return (
     <div
       className={`card ${favorited ? "fav" : ""} ${dropBefore ? "drop-before" : ""} ${selected ? "selected" : ""} ${expanded ? "expanded" : ""} ${focused ? "kb-focus" : ""} ${pref.done ? "done" : ""} ${expired ? "expired" : ""} ${link.pinned ? "pinned" : ""}`}
-      style={accent ? ({ "--card-accent": accent } as React.CSSProperties) : undefined}
+      style={{
+        ...(accent ? { "--card-accent": accent } : {}),
+        ...(swipeDx ? { transform: `translateX(${swipeDx}px)` } : {}),
+      } as React.CSSProperties}
+      data-swipe={swipeDx > 60 ? "star" : swipeDx < -60 ? "open" : undefined}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      onTouchCancel={() => { swipe.current = null; setSwipeDx(0); }}
       data-link-id={link.id}
       data-folder-id={folder.id}
       draggable={draggable && !renaming}

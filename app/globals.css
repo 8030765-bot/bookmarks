@@ -1679,3 +1679,68 @@ main:focus{outline:none}
   .card{border:none;padding:.2rem 0;break-inside:avoid}
   .card-main::after{content:attr(href);display:block;font-size:.7rem;color:#444;word-break:break-all}
 }
+
+/* ---------- batch 13: phones, tablets and the installed app ---------- */
+.bottom-nav{display:none}
+@media (max-width:700px){
+  .bottom-nav{display:grid;grid-template-columns:repeat(5,1fr);position:fixed;left:0;right:0;bottom:0;z-index:95;padding:.3rem .4rem calc(.3rem + env(safe-area-inset-bottom));background:color-mix(in srgb,var(--bg) 88%,transparent);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-top:1px solid var(--border)}
+  .bottom-nav button{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:48px;font-size:.62rem;color:var(--text-muted);border-radius:12px}
+  .bottom-nav button.on,.bottom-nav button:active{color:var(--text)}
+  .bottom-nav svg{width:20px;height:20px}
+  .bottom-nav button:first-child svg{transform:none}
+  .bottom-nav .bn-add{align-self:center;justify-self:center;width:48px;height:48px;min-height:48px;border-radius:50%;background:var(--primary-bg);color:var(--primary-fg);box-shadow:0 6px 18px rgba(0,0,0,.3)}
+  .bottom-nav .bn-add svg{width:22px;height:22px}
+  .bn-dot{position:absolute;top:4px;right:calc(50% - 18px);min-width:15px;height:15px;padding:0 3px;border-radius:99px;background:var(--danger);color:#fff;font-size:.58rem;font-style:normal;font-weight:700;line-height:15px}
+  body{padding-bottom:calc(64px + env(safe-area-inset-bottom))}
+  .chat-fab{display:none!important}
+  .to-top{bottom:calc(76px + env(safe-area-inset-bottom))}
+  .toast{bottom:calc(76px + env(safe-area-inset-bottom))}
+  /* pop-ups slide up from the bottom like a sheet */
+  .modal-overlay{align-items:flex-end;padding:0}
+  .modal{width:100%;max-width:none!important;border-radius:20px 20px 0 0;max-height:92vh;padding-bottom:calc(1.4rem + env(safe-area-inset-bottom));animation:sheetUp .24s cubic-bezier(.2,.8,.2,1)}
+  .modal::before{content:"";display:block;width:40px;height:4px;border-radius:99px;background:var(--border-light);margin:-.6rem auto .8rem}
+}
+@keyframes sheetUp{from{transform:translateY(100%)}to{transform:none}}
+/* pull to refresh */
+.ptr{position:fixed;top:var(--topbar-h,57px);left:0;right:0;z-index:70;display:flex;align-items:flex-end;justify-content:center;gap:.4rem;padding-bottom:.4rem;overflow:hidden;font-size:.78rem;color:var(--text-muted);pointer-events:none;transition:height .15s}
+.ptr-spin{display:inline-block;font-size:1.1rem}
+.ptr-spin.ready{color:var(--accent)}
+@media (pointer:coarse){html,body{overscroll-behavior-y:contain}}
+/* swipe cards */
+@media (pointer:coarse){.card{touch-action:pan-y}}
+.card[data-swipe]{transition:none}
+.card[data-swipe=star]{box-shadow:inset 4px 0 0 var(--warning),0 0 0 1px var(--warning)}
+.card[data-swipe=open]{box-shadow:inset -4px 0 0 var(--accent),0 0 0 1px var(--accent)}
+/* bigger buttons */
+:root[data-bigtap=on] .btn,:root[data-bigtap=on] .icon-btn,:root[data-bigtap=on] .btn-icon,:root[data-bigtap=on] .pick,:root[data-bigtap=on] .seg button,:root[data-bigtap=on] .folder-nav button,:root[data-bigtap=on] .menu button{min-height:44px}
+:root[data-bigtap=on] .icon-btn,:root[data-bigtap=on] .btn-icon{min-width:44px}
+:root[data-bigtap=on] .btn-sm{padding:.55rem .85rem;font-size:.88rem}
+:root[data-bigtap=on] .card{padding:.85rem .9rem}
+:root[data-bigtap=on] input[type=checkbox]{width:20px;height:20px}
+/* tablets: folders side by side */
+@media (min-width:760px) and (max-width:1180px) and (pointer:coarse){
+  main.folders{display:grid;grid-template-columns:1fr 1fr;gap:1rem;align-items:start}
+  main.folders>.folder-card{margin-bottom:0}
+  main.folders>.empty-state,main.folders>.drag-hint{grid-column:1/-1}
+  main.folders .cards{grid-template-columns:1fr}
+}
+/* phones on their side */
+@media (max-height:500px) and (orientation:landscape){
+  .hero{padding:.5rem 0 .4rem}
+  .hero h1{font-size:1.25rem}
+  .hero>p:not(.greeting),.today{display:none}
+  .modal{max-height:96vh}
+  .modal-overlay{align-items:center;padding:.5rem}
+  .bottom-nav{display:none}
+  body{padding-bottom:0}
+  .drawer{width:min(380px,60vw)}
+}
+/* splash screen for the installed app */
+.splash{display:none}
+@media (display-mode:standalone){
+  .splash{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.6rem;min-height:70vh;animation:fadeIn .3s ease}
+  .splash-mark{font-size:4rem;animation:petBob 2s ease-in-out infinite}
+  .splash-name{font-weight:750;font-size:1.3rem;letter-spacing:-.02em}
+  .splash~.skeleton{display:none}
+}
+.install-steps{padding-left:1.3rem;display:flex;flex-direction:column;gap:.35rem;font-size:.9rem;margin:.6rem 0}

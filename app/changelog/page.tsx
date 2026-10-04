@@ -7,6 +7,17 @@ import { EasterEgg } from "../components/Fun";
 /** Updates to the site itself (not the bookmarks — those are in "What's new"). Newest first. */
 const RELEASES: { date: string; title: string; items: string[] }[] = [
   {
+    date: "2026-10", title: "Phones & the app",
+    items: [
+      "A bottom bar on phones: home, search, add, chat and more",
+      "Swipe a card right to star it, left to open it; pull down to refresh",
+      "Share a link from any app straight into the site, and long-press the app icon for shortcuts",
+      "Pop-ups slide up from the bottom on phones; folders sit side by side on tablets; better in landscape",
+      "Bigger buttons and vibration options, a status bar that matches your theme, and a splash screen",
+      "Step-by-step install instructions for iPhone, Android and computers",
+    ],
+  },
+  {
     date: "2026-10", title: "Your data",
     items: [
       "Download every folder for Chrome or Edge, a folder as a spreadsheet, or print the list",

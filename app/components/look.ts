@@ -104,6 +104,10 @@ export interface Look {
   highContrast: boolean;
   colorblind: boolean;
   underline: boolean;
+  /** bigger tap targets */
+  bigButtons: boolean;
+  /** little buzzes on phones */
+  haptics: boolean;
 }
 export const DEFAULT_ORDER: Section[] = ["today", "polls", "quick"];
 export const DEFAULT_LOOK: Look = {
@@ -114,7 +118,7 @@ export const DEFAULT_LOOK: Look = {
   bg: "none", animatedBg: false, gradientTitle: false, glow: false, sparkles: false, seasonal: true, snow: true, greeting: true, minimal: false,
   iconStyle: "line", emojiFont: "device",
   autoDark: "off",
-  highContrast: false, colorblind: false, underline: false,
+  highContrast: false, colorblind: false, underline: false, bigButtons: false, haptics: true,
 };
 
 /** Only keep values that make sense (old saved looks, pasted theme codes, synced settings). */
@@ -129,7 +133,8 @@ export function cleanLook(raw: Partial<Look> | null | undefined): Look {
   pick("accent", (v) => typeof v === "string" && (v === "" || /^#[0-9a-f]{6}$/i.test(v)));
   pick("density", oneOf(["comfy", "compact", "large"]));
   for (const k of ["motion", "newTab", "descriptions", "iconTint", "specialFolders", "hideEmpty", "iconGrid", "folderBorders", "smallHeader", "sideNav",
-    "animatedBg", "gradientTitle", "glow", "sparkles", "seasonal", "snow", "greeting", "minimal", "highContrast", "colorblind", "underline"] as const) pick(k, bool);
+    "animatedBg", "gradientTitle", "glow", "sparkles", "seasonal", "snow", "greeting", "minimal", "highContrast", "colorblind", "underline",
+    "bigButtons", "haptics"] as const) pick(k, bool);
   pick("font", oneOf(FONTS.map((f) => f.id)));
   pick("fontScale", num(0.8, 1.4));
   pick("weight", oneOf(["light", "normal", "bold"]));
@@ -264,6 +269,8 @@ export function applyLook(look: Look, ctx: LookContext = { prefersDark: true, re
   set("season", season || "none");
   set("sidenav", look.sideNav);
   set("hide", look.hide.join(" ") || "none");
+  set("bigtap", look.bigButtons);
+  set("haptics", look.haptics);
   const style = root.style;
   style.setProperty("--fs-scale", String(look.fontScale));
   style.setProperty("--lh", String(look.lineHeight));
@@ -284,4 +291,17 @@ export function applyLook(look: Look, ctx: LookContext = { prefersDark: true, re
     style.removeProperty("--accent");
     style.removeProperty("--accent-dim");
   }
+  // the phone's status bar takes the theme's background colour
+  requestAnimationFrame(() => {
+    const bg = getComputedStyle(root).getPropertyValue("--bg").trim();
+    if (!bg) return;
+    let metas = Array.from(document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]'));
+    if (!metas.length) {
+      const m = document.createElement("meta");
+      m.name = "theme-color";
+      document.head.appendChild(m);
+      metas = [m];
+    }
+    metas.forEach((m) => { m.content = bg; m.removeAttribute("media"); });
+  });
 }

@@ -147,6 +147,16 @@ export default function LinkDetails({ link }: { folder: Folder; link: Link }) {
             🙏 {thanked ? "Thanked" : "Say thanks"}
           </button>
         )}
+        <button className="pick" title="Send this website to someone" onClick={async () => {
+          const href = safeHref(link.url);
+          if (!href) return;
+          try {
+            if (navigator.share) await navigator.share({ title: link.name, text: link.notes || link.name, url: href });
+            else { await navigator.clipboard.writeText(href); actions.toast("Link copied"); }
+          } catch {
+            // closed the share sheet
+          }
+        }}>📤 Share</button>
         {actions.report && <button className="pick" onClick={() => actions.report!(link)} title="Tell the moderators something's wrong">🚩 Report a problem</button>}
         {actions.suggestNote && (
           <button className="pick" onClick={() => actions.suggestNote!(link)} title="Add a public tip, like “needs a login” — a moderator checks it first">
