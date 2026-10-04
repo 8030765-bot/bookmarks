@@ -41,6 +41,8 @@ export function FolderMenu({
     openAll: () => void;
     copyLink: () => void;
     copyMarkdown: () => void;
+    csv: () => void;
+    embed: () => void;
     info: () => void;
     note: () => void;
     edit: () => void;
@@ -89,6 +91,8 @@ export function FolderMenu({
         {linkCount > 0 && <button onClick={run(actions.openAll)}><Icon name="external" /> Open all</button>}
         <button onClick={run(actions.copyLink)}><Icon name="share" /> Copy link to this folder</button>
         {linkCount > 0 && <button onClick={run(actions.copyMarkdown)}><Icon name="link" /> Copy as a Markdown list</button>}
+        {linkCount > 0 && <button onClick={run(actions.csv)}><Icon name="download" /> Download as a spreadsheet</button>}
+        <button onClick={run(actions.embed)}><Icon name="share" /> Copy embed code</button>
         <div className="menu-sep" />
         <button onClick={run(() => actions.setPref({ fav: !pref.fav }))}><Icon name="star" /> {pref.fav ? "Unfavorite folder" : "Favorite folder (shows first)"}</button>
         <button onClick={run(() => actions.setPref({ follow: !pref.follow }))}><Icon name="bell" /> {pref.follow ? "Stop following" : "Follow — tell me about new links"}</button>

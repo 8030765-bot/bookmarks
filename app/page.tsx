@@ -42,6 +42,11 @@ import {
   EasterEgg, HintMode, SitePet, Snow, randomLoadingLine, useLogoClicks, useNewYearFireworks, useSparkles, useUnlocked,
 } from "./components/Fun";
 import SideNav from "./components/SideNav";
+import { AddAnywhereModal, WeekChanges, downloadBookmarksHtml, downloadFolderCsv, embedCode } from "./components/DataViews";
+
+/** Changes that can wait for the connection to come back (each keeps its retry id). */
+const OUTBOX_KEY = "outbox";
+const OUTBOX_OK = new Set(["addLink", "addLinks", "editLink", "addFolder", "toggleLike"]);
 import { TodayStrip, sayThanks, suggestNote, useCommunityInfo } from "./components/Today";
 import { useTimerAlarm } from "./components/tools/timerAlarm";
 
@@ -70,6 +75,8 @@ type Modal =
   | { type: "customize" }
   | { type: "spin" }
   | { type: "whatsnew" }
+  | { type: "week" }
+  | { type: "addAnywhere" }
   | { type: "profileEdit" }
   | { type: "recovery"; code: string; context: "signup" | "reset" }
   | null;
@@ -196,6 +203,7 @@ export default function HomePage() {
   const [asMember, setAsMember] = useState(false);
   const asMemberRef = useRef(false);
   const queuedRef = useRef<string | null>(null);
+  const lastErrorRef = useRef("");
   const [staffCount, setStaffCount] = useState(0);
   const [role, setRole] = useState<"owner" | "admin" | "mod" | null>(null);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -555,6 +563,21 @@ export default function HomePage() {
     setChatTarget({ channel: params.get("ch") || undefined, msg: params.get("msg") || undefined });
   }, []);
 
+  // ?add=<url>&title=… (the "add from anywhere" bookmark, or sharing from a phone) opens the add box
+  const addParamDone = useRef(false);
+  useEffect(() => {
+    if (addParamDone.current || !data) return;
+    const params = new URLSearchParams(location.search);
+    const url = params.get("add") || params.get("url") || (params.get("text") || "").match(/https?:\/\/\S+/)?.[0];
+    if (!url) return;
+    addParamDone.current = true;
+    for (const k of ["add", "title", "url", "text"]) params.delete(k);
+    window.history.replaceState(null, "", `${location.pathname}${params.toString() ? `?${params}` : ""}${location.hash}`);
+    if (!/^https?:\/\//i.test(url)) return;
+    openAdd(undefined, url);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
   // ?edit=profile (from your profile page) opens the profile editor
   useEffect(() => {
     if (!user) return;
@@ -677,6 +700,7 @@ export default function HomePage() {
   // ---------- server calls ----------
   async function api(action: string, payload: Record<string, any> = {}, { quiet = false } = {}): Promise<BookmarksData | null> {
     if (!quiet) setSubmitting(true);
+    queuedRef.current = null;
     // the same id on every retry, so the server applies the change only once
     const body = JSON.stringify({ action, ...payload, opId: newOpId() });
     try {
@@ -688,6 +712,13 @@ export default function HomePage() {
           // flaky connection: try again a couple of times before giving up
           if (attempt < 2) { await new Promise((r) => setTimeout(r, 700 * (attempt + 1))); continue; }
           reportStatus("offline");
+          if (OUTBOX_OK.has(action)) {
+            // keep it and send it when we're back online (the retry id stops doubles)
+            writeLocal(OUTBOX_KEY, [...readLocal<string[]>(OUTBOX_KEY, []), body].slice(-50));
+            showToast("You're offline — saved on this device and it'll go through when you're back online", undefined, 6000);
+            queuedRef.current = "Saved offline — it'll be added when you're back online";
+            return data;
+          }
           throw new Error("You're offline — that change wasn't saved");
         }
         if ([502, 503, 504].includes(res.status) && attempt < 2) {
@@ -705,12 +736,36 @@ export default function HomePage() {
         return next;
       }
     } catch (e: any) {
-      showToast(e.message || "Something went wrong");
+      lastErrorRef.current = e.message || "";
+      if (!e.message?.startsWith("Someone else changed")) showToast(e.message || "Something went wrong");
       return null;
     } finally {
       if (!quiet) setSubmitting(false);
     }
   }
+  // send anything saved while offline
+  const flushOutbox = useCallback(async () => {
+    const queue = readLocal<string[]>(OUTBOX_KEY, []);
+    if (!queue.length || !navigator.onLine) return;
+    let sent = 0;
+    const left: string[] = [];
+    for (const body of queue) {
+      try {
+        const res = await fetch("/api/bookmarks", { method: "POST", headers: { "Content-Type": "application/json" }, body });
+        if (res.ok || (res.status >= 400 && res.status < 500)) sent++; // a refused change won't succeed later either
+        else left.push(body);
+      } catch {
+        left.push(body);
+      }
+    }
+    writeLocal(OUTBOX_KEY, left);
+    if (sent) { showToast(`Back online — sent ${sent} change${sent === 1 ? "" : "s"} you made offline`); load(); }
+  }, [load, showToast]);
+  useEffect(() => {
+    flushOutbox();
+    window.addEventListener("online", flushOutbox);
+    return () => window.removeEventListener("online", flushOutbox);
+  }, [flushOutbox]);
   /** Change one link on screen right away; the server's answer replaces it a moment later. */
   function patchLinkLocally(folderId: string, linkId: string, fn: (l: Link) => Link) {
     setData((d) => d && {
@@ -1101,11 +1156,16 @@ export default function HomePage() {
       return !!ok;
     }
     const { folder, link } = modal.mode;
-    let ok = await api("editLink", { ...common, folderId: folder.id, linkId: link.id });
+    let ok = await api("editLink", { ...common, folderId: folder.id, linkId: link.id, expectUpdatedAt: link.updatedAt || "" });
+    if (!ok && lastErrorRef.current.startsWith("Someone else changed")) {
+      // someone saved this link while the form was open
+      if (!confirm(`${lastErrorRef.current}.\n\nPress OK to save your version anyway, or Cancel to keep theirs.`)) { load(); return false; }
+      ok = await api("editLink", { ...common, folderId: folder.id, linkId: link.id, force: true });
+    }
     if (ok && values.folderId !== folder.id) {
       ok = await api("moveLinkTo", { folderId: folder.id, linkId: link.id, targetFolderId: values.folderId, password: adminPassword });
     }
-    if (ok) showToast("Saved");
+    if (ok) showToast(queuedRef.current || "Saved");
     return !!ok;
   }
   async function addMany(folderId: string, links: { name: string; url: string }[], tags: string[]): Promise<boolean> {
@@ -1130,7 +1190,11 @@ export default function HomePage() {
       if (ok) showToast(`Created ${v.emoji} ${v.name}`);
       return !!ok;
     }
-    const ok = await api("editFolder", { folderId: modal.folder.id, ...fields, pinned: v.pinned, password: adminPassword });
+    let ok = await api("editFolder", { folderId: modal.folder.id, ...fields, pinned: v.pinned, password: adminPassword, expectUpdatedAt: modal.folder.updatedAt || "" });
+    if (!ok && lastErrorRef.current.startsWith("Someone else changed")) {
+      if (!confirm(`${lastErrorRef.current}.\n\nPress OK to save your version anyway, or Cancel to keep theirs.`)) { load(); return false; }
+      ok = await api("editFolder", { folderId: modal.folder.id, ...fields, pinned: v.pinned, password: adminPassword, force: true });
+    }
     if (ok) showToast("Folder saved");
     return !!ok;
   }
@@ -1752,6 +1816,10 @@ export default function HomePage() {
                     <button className="phone-only" onClick={() => { setMoreMenu(false); setModal({ type: "leaderboard" }); }}><Icon name="trophy" /> Community</button>
                     <button onClick={() => { setMoreMenu(false); setShowCmd(true); }}><Icon name="search" /> Command menu <span className="kbd">Ctrl K</span></button>
                     <button onClick={() => { setMoreMenu(false); openTools(); }}><Icon name="tools" /> Tools <span className="kbd">O</span></button>
+                    <button onClick={() => { setMoreMenu(false); setModal({ type: "week" }); }}><Icon name="clock" /> The last 7 days</button>
+                    <button onClick={() => { setMoreMenu(false); setModal({ type: "addAnywhere" }); }}><Icon name="plus" /> Add from any website…</button>
+                    <button onClick={() => { setMoreMenu(false); if (data) { downloadBookmarksHtml(data); showToast("Downloaded — import it in Chrome or Edge from Bookmarks → Import"); } }}><Icon name="download" /> Download for my browser</button>
+                    <button onClick={() => { setMoreMenu(false); setTimeout(() => window.print(), 50); }}><Icon name="list" /> Print the list</button>
                     <button onClick={() => { setMoreMenu(false); setHintMode(true); }}><Icon name="info" /> What&apos;s this? (explain buttons)</button>
                     {communityOn && <button onClick={() => { setMoreMenu(false); location.href = "/community"; }}><Icon name="users" /> Community page</button>}
                     {data?.settings?.suggestionsEnabled !== false && <button onClick={() => { setMoreMenu(false); setSuggest({}); }}><Icon name="bulb" /> Suggest a change</button>}
@@ -2219,6 +2287,8 @@ export default function HomePage() {
               openAll: () => openAllIn([...fm.links.filter(shown), ...shortcutsFor(fm).map((r) => r.link)]),
               copyLink: () => shareFolder(fm),
               copyMarkdown: () => navigator.clipboard.writeText(folderMarkdown(fm)).then(() => showToast("Copied as a Markdown list")).catch(() => showToast("Couldn't copy")),
+              csv: () => { downloadFolderCsv(fm); showToast("Downloaded as a spreadsheet"); },
+              embed: () => navigator.clipboard.writeText(embedCode(fm)).then(() => showToast("Embed code copied — paste it into another website")).catch(() => showToast("Couldn't copy")),
               info: () => setFolderInfoId(fm.id),
               note: () => editFolderNote(fm),
               edit: () => setModal({ type: "folder", folder: fm }),
@@ -2306,6 +2376,8 @@ export default function HomePage() {
         />
       )}
       {modal?.type === "whatsnew" && <WhatsNew activity={data?.activity || []} onClose={() => setModal(null)} />}
+      {modal?.type === "week" && data && <WeekChanges data={data} onClose={() => setModal(null)} onOpen={openCard} />}
+      {modal?.type === "addAnywhere" && <AddAnywhereModal onClose={() => setModal(null)} toast={showToast} />}
       {modal?.type === "spin" && (
         <SpinWheel refs={allRefs} folders={sortedFolders} onOpen={(f, l) => trackAndOpen(f, l, true)} onClose={() => setModal(null)} />
       )}

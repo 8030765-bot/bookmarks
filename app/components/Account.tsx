@@ -221,7 +221,26 @@ export default function AccountModal({
           <>
             <div className="admin-h">Download my data</div>
             <p className="modal-text">Everything the site stores about you — profile, favorites, ratings, notes, settings, logins — as one file.</p>
-            <a className="btn btn-secondary btn-sm" href="/api/me?export=1" download><Icon name="download" /> Download</a>
+            <div className="admin-toolbar">
+              <a className="btn btn-secondary btn-sm" href="/api/me?export=1" download><Icon name="download" /> Download</a>
+              <label className="btn btn-secondary btn-sm" title="Bring back your settings, notes, saved views, favorites and My Stuff from a downloaded file">
+                <Icon name="upload" /> Import from a file
+                <input type="file" accept="application/json,.json" hidden onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!f) return;
+                  try {
+                    const file = JSON.parse(await f.text());
+                    if (!file || typeof file !== "object" || !("settings" in file || "linkNotes" in file || "myStuff" in file)) throw new Error("That isn't a “Download my data” file from this site");
+                    if (!confirm("Add the settings, notes, folder settings, saved views, favorites and My Stuff from this file to your account? Nothing is deleted.")) return;
+                    const j = await post({ action: "importPersonal", file });
+                    const c = j.imported || {};
+                    toast(`Imported ${c.notes || 0} notes, ${c.folders || 0} folder settings, ${c.views || 0} views, ${c.favorites || 0} favorites and ${c.myStuff || 0} private links — reloading…`);
+                    setTimeout(() => location.reload(), 1500);
+                  } catch (err: any) { toast(err.message || "Couldn't read that file"); }
+                }} />
+              </label>
+            </div>
 
             <div className="admin-h">Change username</div>
             {info.previousNames.length > 0 && <p className="hint">Used to be: {info.previousNames.join(", ")}</p>}

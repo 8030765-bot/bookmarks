@@ -80,6 +80,7 @@ export default function LinkModal({
 }) {
   const editing = mode.kind === "edit" ? mode.link : null;
   const [bulk, setBulk] = useState<string | null>(mode.kind === "add" && mode.bulk ? mode.bulk : null);
+  const [bulkNaming, setBulkNaming] = useState(false);
   const [url, setUrl] = useState(editing?.url || (mode.kind === "add" ? mode.url || "" : ""));
   const [name, setName] = useState(editing?.name || (mode.kind === "add" && mode.url ? nameFromUrl(mode.url) : ""));
   const [nameTouched, setNameTouched] = useState(!!editing);
@@ -184,7 +185,23 @@ export default function LinkModal({
     const pendingTag = tagInput.trim();
     const allTagsNow = pendingTag ? [...tags, pendingTag.toLowerCase()] : tags;
     if (bulk !== null) {
-      if (await onBulk(target, parseBulk(bulk), allTagsNow)) onClose();
+      let items = parseBulk(bulk);
+      // look up each page's real title (logged in, first 20) instead of guessing from the address
+      if (canFetch && items.length <= 20) {
+        setBulkNaming(true);
+        items = await Promise.all(items.map(async (it) => {
+          if (it.name !== nameFromUrl(it.url)) return it; // the list already gave it a name
+          try {
+            const res = await fetch(`/api/meta?url=${encodeURIComponent(it.url)}`);
+            const j = res.ok ? await res.json() : null;
+            return j?.title ? { ...it, name: String(j.title).slice(0, 100) } : it;
+          } catch {
+            return it;
+          }
+        }));
+        setBulkNaming(false);
+      }
+      if (await onBulk(target, items, allTagsNow)) onClose();
       return;
     }
     const ok = await onSubmit({
@@ -468,8 +485,8 @@ export default function LinkModal({
 
           <div className="modal-actions">
             <button type="button" className="btn btn-secondary" onClick={onClose} disabled={submitting}>Cancel</button>
-            <button type="submit" className="btn btn-primary" disabled={submitting || (bulk !== null ? !bulkLinks.length : !url.trim() || !name.trim())}>
-              {submitting ? "Saving…" : editing ? "Save changes" : bulk !== null ? `Add ${Math.min(50, bulkLinks.length)} for everyone` : "Add for everyone"}
+            <button type="submit" className="btn btn-primary" disabled={submitting || bulkNaming || (bulk !== null ? !bulkLinks.length : !url.trim() || !name.trim())}>
+              {bulkNaming ? "Finding names…" : submitting ? "Saving…" : editing ? "Save changes" : bulk !== null ? `Add ${Math.min(50, bulkLinks.length)} for everyone` : "Add for everyone"}
             </button>
           </div>
         </form>

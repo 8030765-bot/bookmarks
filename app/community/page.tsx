@@ -258,6 +258,7 @@ function Events({ events }: { events?: CommunityInfo["events"] }) {
   if (!events.length) return <div className="empty-state small"><p>Nothing on the calendar right now.</p></div>;
   return (
     <div className="events">
+      <p className="muted-inline"><a className="link-btn" href="/api/events?ics=1" download>📅 Add all events to my calendar</a></p>
       {events.map((e) => {
         const d = new Date(e.date);
         const live = Date.parse(e.date) <= Date.now() && (!e.endDate || Date.parse(e.endDate) > Date.now());
@@ -268,6 +269,7 @@ function Events({ events }: { events?: CommunityInfo["events"] }) {
               <strong>{e.title}</strong> {live && <span className="pill approved">happening now</span>}
               <div className="muted-inline">{d.toLocaleString(undefined, { weekday: "long", hour: "2-digit", minute: "2-digit" })}{e.endDate && ` – ${new Date(e.endDate).toLocaleDateString()}`}</div>
               {e.description && <p>{e.description}</p>}
+              <a className="link-btn" href={`/api/events?ics=1&id=${encodeURIComponent(e.id)}`} download>📅 Add to my calendar</a>
             </div>
           </div>
         );

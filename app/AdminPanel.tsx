@@ -6,7 +6,7 @@ import { suggestionSummary } from "./SuggestModal";
 import Favicon from "./components/Favicon";
 import { parseBookmarksHtml, pollCounts } from "./components/Community";
 import {
-  AdminLinkNote, AuditTools, ControlsTab, DEFAULT_REASONS, Dashboard, DangerButton, DataTools, Extras, FolderPermsEditor, ModPermsEditor, PeopleTab, ReportsTab,
+  AdminLinkNote, AuditTools, Backups, ControlsTab, CsvImport, DEFAULT_REASONS, Dashboard, DangerButton, DataHealth, DataTools, Extras, FolderPermsEditor, ModPermsEditor, PeopleTab, ReportsTab,
 } from "./AdminExtras";
 
 type Role = "owner" | "admin" | "mod" | null;
@@ -184,6 +184,9 @@ export default function AdminPanel({
         {tab === "data" && (
           <>
             <DataTab data={data} run={run} showToast={showToast} />
+            <DataHealth data={data} admin={admin} run={run} toast={showToast} />
+            <CsvImport data={data} run={run} toast={showToast} />
+            <Backups admin={admin} run={run} toast={showToast} />
             <DataTools data={data} info={info} admin={admin} run={run} refresh={refreshInfo} toast={showToast} />
           </>
         )}

@@ -314,6 +314,69 @@ export async function importMyStuff(username: string, items: { name: string; url
   return { myStuff: data.myStuff, added: added.length };
 }
 
+/**
+ * Bring back your own settings from a "Download my data" file: look and
+ * layout, notes on links, folder settings, saved views, favourites, blocked
+ * people and My Stuff. Everything is checked like a normal change.
+ */
+export async function importPersonal(username: string, file: Record<string, unknown>) {
+  if (JSON.stringify(file).length > 400_000) throw new Error("That file is too big");
+  const data = await getUserData(username);
+  const obj = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
+  const counts = { settings: 0, notes: 0, folders: 0, views: 0, favorites: 0, myStuff: 0 };
+  const settings = obj(file.settings);
+  if (settings) for (const k of SETTING_KEYS) if (k in settings) { data.settings[k] = settings[k]; counts.settings++; }
+  for (const [id, p] of Object.entries(obj(file.linkNotes) || {}).slice(0, MAX_LINK_PREFS)) {
+    if (!/^[\w-]{1,100}$/.test(id) || !obj(p)) continue;
+    const c = cleanLinkPref({ ...(data.links[id] || {}), ...(p as Record<string, unknown>) });
+    if (c) { data.links[id] = c; counts.notes++; }
+  }
+  for (const [id, p] of Object.entries(obj(file.folderSettings) || {}).slice(0, 500)) {
+    const q = obj(p);
+    if (!/^[\w-]{1,100}$/.test(id) || !q) continue;
+    const next: FolderPref = {};
+    for (const k of ["hidden", "fav", "follow"] as const) if (q[k] === true) next[k] = true;
+    if (typeof q.sort === "string" && FOLDER_SORTS.includes(q.sort)) next.sort = q.sort;
+    if (typeof q.note === "string" && q.note.trim()) next.note = q.note.trim().slice(0, 500);
+    if (Object.keys(next).length) { data.folders[id] = next; counts.folders++; }
+  }
+  if (Array.isArray(file.folderOrder)) data.folderOrder = Array.from(new Set(file.folderOrder.map(String).filter((id) => /^[\w-]{1,100}$/.test(id)))).slice(0, 500);
+  if (Array.isArray(file.savedViews)) {
+    for (const v of file.savedViews.slice(0, 20)) {
+      const q = obj(v);
+      const name = typeof q?.name === "string" ? q.name.trim().slice(0, 40) : "";
+      if (!q || !name || data.views.some((x) => x.name === name) || data.views.length >= 20) continue;
+      data.views.push({
+        id: uuid(), name, q: typeof q.q === "string" ? q.q.slice(0, 200) : "",
+        tags: Array.isArray(q.tags) ? q.tags.map(String).slice(0, 10) : [], tagMode: q.tagMode === "all" ? "all" : "any",
+        sort: typeof q.sort === "string" ? q.sort.slice(0, 20) : undefined,
+      });
+      counts.views++;
+    }
+  }
+  if (Array.isArray(file.favorites)) {
+    const ids = file.favorites.map(String).filter((id) => /^[\w-]{1,100}$/.test(id));
+    const before = data.favorites.length;
+    data.favorites = Array.from(new Set([...data.favorites, ...ids])).slice(0, 1000);
+    counts.favorites = data.favorites.length - before;
+  }
+  if (Array.isArray(file.blocked)) data.blocked = Array.from(new Set([...data.blocked, ...file.blocked.map((u) => String(u).toLowerCase()).filter((u) => /^[a-z0-9_]{3,20}$/.test(u))])).slice(0, 200);
+  if (Array.isArray(file.myStuff)) {
+    const have = new Set(data.myStuff.map((l) => l.url));
+    for (const it of file.myStuff) {
+      const q = obj(it);
+      const url = typeof q?.url === "string" ? q.url : "";
+      if (!/^https?:\/\//i.test(url) || have.has(url) || data.myStuff.length >= MAX_MYSTUFF) continue;
+      have.add(url);
+      data.myStuff.push({ id: uuid(), name: String(q!.name || url).slice(0, 100), url: url.slice(0, 2000), createdAt: new Date().toISOString(), folder: typeof q!.folder === "string" ? q!.folder.slice(0, 40) || undefined : undefined });
+      counts.myStuff++;
+    }
+  }
+  if (JSON.stringify(data.settings).length > 20_000) throw new Error("Those settings are too big to save");
+  await save(username, data);
+  return counts;
+}
+
 /** Move a whole account's data to a new username. */
 export async function renameUserData(oldName: string, newName: string) {
   if (oldName.toLowerCase() === newName.toLowerCase()) return;
@@ -395,7 +458,10 @@ export async function notify(toUsername: string, n: Omit<Notification, "id" | "a
   const data = await getUserData(toUsername);
   if (data.notifyPrefs[n.kind] === false) return;
   const entry: Notification = { ...n, id: uuid(), at: new Date().toISOString(), read: false };
-  data.notifications = [entry, ...data.notifications].slice(0, MAX_NOTIFS);
+  // old ones clear themselves: read ones after 30 days, everything after 90
+  const now = Date.now();
+  const keep = (x: Notification) => now - Date.parse(x.at) < (x.read ? 30 : 90) * 86400_000;
+  data.notifications = [entry, ...data.notifications.filter(keep)].slice(0, MAX_NOTIFS);
   await save(toUsername, data);
   const quiet = data.dndUntil && Date.parse(data.dndUntil) > Date.now();
   if (!quiet) {

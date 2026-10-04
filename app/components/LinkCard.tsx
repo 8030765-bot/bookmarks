@@ -1,4 +1,5 @@
 "use client";
+import { PreviewCard, loadPreview } from "./DataViews";
 import { useEffect, useRef, useState } from "react";
 import { Folder, Link } from "@/lib/types";
 import { Icon } from "./Icon";
@@ -73,6 +74,22 @@ export default function LinkCard({
   }, [env.iconTint, link.color, link.url]);
   const accent = link.color || tint;
 
+  // a little preview (picture + description) after resting the mouse on a card
+  const [preview, setPreview] = useState<{ title?: string; description?: string; image?: string } | null | undefined | false>(false);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout>>();
+  const [previewAt, setPreviewAt] = useState<{ left: number; top: number; below: boolean }>({ left: 0, top: 0, below: false });
+  const startPreview = (el: HTMLElement) => {
+    if (!me || !href || !window.matchMedia("(hover: hover)").matches) return;
+    clearTimeout(hoverTimer.current);
+    // fixed to the screen, so folder edges can't cut it off; below the card if there's no room above
+    const r = el.getBoundingClientRect();
+    const below = r.top < 150;
+    setPreviewAt({ left: Math.max(8, Math.min(r.left, window.innerWidth - 330)), top: below ? r.bottom + 6 : r.top - 6, below });
+    hoverTimer.current = setTimeout(() => { setPreview(undefined); loadPreview(link.url).then((d) => setPreview((p) => (p === false ? p : d))); }, 900);
+  };
+  const stopPreview = () => { clearTimeout(hoverTimer.current); setPreview(false); };
+  useEffect(() => () => clearTimeout(hoverTimer.current), []);
+
   // admins can double-click the name to rename it right on the card
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(link.name);
@@ -109,6 +126,7 @@ export default function LinkCard({
       onDrop={onDrop}
       onContextMenu={(e) => { e.preventDefault(); actions.menu(folder, link, { x: e.clientX, y: e.clientY }); }}
     >
+      {preview !== false && <PreviewCard url={link.url} data={preview} at={previewAt} />}
       <label className="card-check" title="Select (Shift-click to select a range)" onClick={(e) => e.stopPropagation()}>
         <input
           type="checkbox"
@@ -125,7 +143,9 @@ export default function LinkCard({
         rel="noopener noreferrer"
         onClick={(e) => { if (renaming) { e.preventDefault(); return; } actions.open(folder, link); }}
         onAuxClick={(e) => { if (e.button === 1) actions.open(folder, link); }}
-        onMouseEnter={() => href && warmUp(href)}
+        onMouseEnter={(e) => { if (href) warmUp(href); startPreview(e.currentTarget); }}
+        onMouseLeave={stopPreview}
+        onMouseDown={stopPreview}
         onFocus={() => href && warmUp(href)}
         draggable={false}
         title={title}

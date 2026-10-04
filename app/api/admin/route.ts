@@ -19,6 +19,8 @@ import {
   setTimeoutFor, warnUser,
 } from "@/lib/moderation";
 import { getRole } from "@/lib/roles";
+import { diffData, getBackup, listBackups } from "@/lib/backups";
+import { allResults, checkBatch } from "@/lib/linkcheck";
 
 export const dynamic = "force-dynamic";
 
@@ -327,6 +329,25 @@ export async function POST(req: NextRequest) {
         checkAdmin(ctx, password);
         await clearErrors();
         return NextResponse.json({ errors: [] });
+      /* ---------- backups & link checks ---------- */
+      case "backups":
+        checkAdmin(ctx, password);
+        return NextResponse.json({ backups: await listBackups() });
+      case "backupDiff": {
+        checkAdmin(ctx, password);
+        const before = await getBackup(String(body.day || ""));
+        if (!before) throw new Error("That backup has expired");
+        return NextResponse.json({ diff: diffData(before, await getBookmarks()) });
+      }
+      case "linkCheck": {
+        checkAdmin(ctx, password);
+        const data = await getBookmarks();
+        const links = data.folders.flatMap((f) => f.links.map((l) => ({ id: l.id, url: l.url })));
+        return NextResponse.json(await checkBatch(links, Number(body.max) || 8));
+      }
+      case "linkResults":
+        checkAdmin(ctx, password);
+        return NextResponse.json({ results: await allResults() });
       case "exportChat": {
         checkAdmin(ctx, password);
         await log();

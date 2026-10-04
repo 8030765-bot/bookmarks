@@ -9,6 +9,7 @@ import { REV_KEYS } from "./revs";
 import { fansKey } from "./social";
 import { getClub, isMember } from "./clubs";
 import { addToTrash, setFlags, takeFromTrash } from "./moderation";
+import { backupIfNeeded, getBackup } from "./backups";
 const KEY = "bookmarks:shared";
 const PREV_KEY = "bookmarks:shared:prev";
 // visit counts live in their own hash (HINCRBY) so a click never rewrites the whole list
@@ -165,10 +166,29 @@ function looksLikeDefaultSeed(data: BookmarksData): boolean {
   const ids = (data.folders || []).map((f) => f.id).sort().join(",");
   return ids === "helios-gust,hubs,proxies" && linkCount(data) <= 10;
 }
+/**
+ * Saved data stays readable after updates: each format change gets a step
+ * here, and older copies (backups, imports, the live list) are upgraded
+ * when they're read.
+ */
+export const SCHEMA = 2;
+function migrate(data: BookmarksData): BookmarksData {
+  const from = data.schema || 1;
+  if (from < 2) {
+    // v2: tags are lowercase and unique; folders always have an emoji
+    for (const f of data.folders) {
+      if (!f.emoji) f.emoji = "📁";
+      for (const l of f.links || []) if (Array.isArray(l.tags)) l.tags = Array.from(new Set(l.tags.map((t) => String(t).toLowerCase())));
+    }
+  }
+  data.schema = SCHEMA;
+  return data;
+}
 function normalize(data: BookmarksData | null | undefined): BookmarksData {
   if (!data || !Array.isArray(data.folders)) {
     return structuredClone(defaultData);
   }
+  migrate(data);
   if (!data.activity) data.activity = [];
   if (!data.settings) data.settings = { theme: "dark", viewMode: "grid", sortBy: "manual" };
   for (const f of data.folders) {
@@ -241,6 +261,7 @@ export async function saveBookmarks(data: BookmarksData, { snapshot = true } = {
   if (snapshot && existing && Array.isArray(existing.folders)) {
     await redis.set(PREV_KEY, existing);
   }
+  await backupIfNeeded(existing).catch(() => {});
   await redis.set(KEY, normalized);
   // publish the new revision so every open page knows to refresh
   await redis.set(REV_KEYS.bookmarks, normalized.rev);
@@ -256,6 +277,17 @@ function moveItem<T>(list: T[], index: number, dir: number) {
   const target = index + dir;
   if (index < 0 || target < 0 || target >= list.length) return;
   [list[index], list[target]] = [list[target], list[index]];
+}
+/**
+ * Two people editing the same thing: the form sends the "last changed"
+ * time it started from, and we refuse if someone saved in between
+ * (unless they choose to overwrite).
+ */
+function assertNotChanged(current: string | undefined, body: Record<string, unknown>) {
+  if (typeof body.expectUpdatedAt !== "string" || body.force === true) return;
+  if ((current || "") !== body.expectUpdatedAt) {
+    throw new Error("Someone else changed this while you were editing — reload to see their version, or save again to overwrite it");
+  }
 }
 /** " (suggested by x)" when an admin approved a user suggestion */
 function credit(body: Record<string, unknown>) {
@@ -379,6 +411,7 @@ export async function handleAction(
     case "editLink": {
       const { folder, link } = findLink(data, String(body.folderId || ""), String(body.linkId || ""));
       await requireFolderEditor(folder);
+      assertNotChanged(link.updatedAt, body);
       if (typeof body.name === "string" && body.name.trim()) link.name = cleanName(body.name);
       if (typeof body.url === "string" && body.url.trim()) link.url = cleanUrl(body.url);
       if (Array.isArray(body.tags) || typeof body.tags === "string") link.tags = cleanTags(body.tags);
@@ -424,6 +457,8 @@ export async function handleAction(
     case "editFolder": {
       const folder = findFolder(body.folderId || body.id);
       await requireFolderEditor(folder);
+      assertNotChanged(folder.updatedAt, body);
+      folder.updatedAt = new Date().toISOString();
       const admin = isAdmin();
       if (typeof body.name === "string" && body.name.trim()) folder.name = cleanName(body.name, 60);
       if (typeof body.emoji === "string" && body.emoji.trim()) folder.emoji = cleanName(body.emoji, 8);
@@ -899,6 +934,128 @@ export async function handleAction(
       else data.folders.splice(before, 0, folder);
       await saveBookmarks(data);
       return data;
+    }
+    case "importCsv": {
+      // rows of name, url, folder, tags — into folders by name (new ones are created)
+      requireAdmin(password);
+      const rows = Array.isArray(body.rows) ? (body.rows as Record<string, unknown>[]).slice(0, 2000) : [];
+      const have = new Set(data.folders.flatMap((f) => f.links.map((l) => l.url)));
+      let added = 0, made = 0;
+      for (const r of rows) {
+        let url = "";
+        try { url = cleanUrl(r.url); } catch { continue; }
+        if (!url || have.has(url)) continue;
+        const folderName = cleanName(r.folder, 60) || "Imported";
+        let folder = data.folders.find((f) => f.name.toLowerCase() === folderName.toLowerCase() && !f.rule);
+        if (!folder) {
+          folder = { id: uuid(), name: folderName, emoji: "📥", links: [], createdAt: new Date().toISOString() };
+          data.folders.push(folder);
+          made++;
+        }
+        folder.links.push({ id: uuid(), name: cleanName(r.name) || url, url, tags: cleanTags(r.tags), clicks: 0, createdAt: new Date().toISOString(), addedBy: me });
+        have.add(url);
+        added++;
+      }
+      if (!added) throw new Error("No new links in that file (they may already be on the site)");
+      pushActivity(data, "import", `Imported ${added} links from a spreadsheet${made ? ` (${made} new folders)` : ""}`);
+      await saveBookmarks(data);
+      return data;
+    }
+    case "mergeDuplicates": {
+      // the same address in several places: keep the oldest, fold the rest into it
+      requireAdmin(password);
+      const key = (u: string) => u.trim().toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/\/+$/, "");
+      const seen = new Map<string, { folder: Folder; link: Link }>();
+      const trashed: { kind: "link"; by?: string; folderId: string; folderName: string; item: Link }[] = [];
+      let merged = 0;
+      const ordered = data.folders.flatMap((f) => f.links.map((l) => ({ folder: f, link: l })))
+        .sort((a, b) => (a.link.createdAt || "").localeCompare(b.link.createdAt || ""));
+      const drop = new Set<string>();
+      for (const { folder, link } of ordered) {
+        const k = key(link.url);
+        const keep = seen.get(k);
+        if (!keep) { seen.set(k, { folder, link }); continue; }
+        // keep the extra info: tags, likes, and show it in the other folder too
+        keep.link.tags = Array.from(new Set([...(keep.link.tags || []), ...(link.tags || [])])).slice(0, 8);
+        keep.link.likes = Array.from(new Set([...(keep.link.likes || []), ...(link.likes || [])]));
+        if (folder.id !== keep.folder.id) keep.link.alsoIn = Array.from(new Set([...(keep.link.alsoIn || []), folder.id])).slice(0, 5);
+        keep.link.notes ||= link.notes;
+        drop.add(link.id);
+        trashed.push({ kind: "link", by: me, folderId: folder.id, folderName: folder.name, item: link });
+        merged++;
+      }
+      if (!merged) throw new Error("No duplicates found");
+      data.folders.forEach((f) => { f.links = f.links.filter((l) => !drop.has(l.id)); });
+      pushActivity(data, "edit", `Merged ${merged} duplicate link${merged === 1 ? "" : "s"}`);
+      await saveBookmarks(data);
+      await addToTrash(trashed).catch(() => {});
+      return data;
+    }
+    case "healthFix": {
+      requireAdmin(password);
+      const fix = String(body.fix || "");
+      const ids = new Set(data.folders.map((f) => f.id));
+      const used = new Set(data.folders.flatMap((f) => f.links.flatMap((l) => l.tags || [])));
+      let n = 0;
+      if (fix === "emptyFolders") {
+        const empty = data.folders.filter((f) => !f.links.length && !f.rule && !data.folders.some((c) => c.parentId === f.id));
+        n = empty.length;
+        data.folders = data.folders.filter((f) => !empty.includes(f));
+      } else if (fix === "unusedTags") {
+        const colors = { ...(data.settings?.tagColors || {}) };
+        for (const t of Object.keys(colors)) if (!used.has(t)) { delete colors[t]; n++; }
+        if (data.settings) data.settings.tagColors = Object.keys(colors).length ? colors : undefined;
+      } else if (fix === "orphans") {
+        for (const f of data.folders) {
+          if (f.parentId && !ids.has(f.parentId)) { f.parentId = undefined; n++; }
+          for (const l of f.links) {
+            if (l.alsoIn?.some((id) => !ids.has(id))) { l.alsoIn = l.alsoIn.filter((id) => ids.has(id)); if (!l.alsoIn.length) l.alsoIn = undefined; n++; }
+          }
+        }
+        const s = data.settings;
+        if (s?.startFolderId && !ids.has(s.startFolderId)) { s.startFolderId = undefined; n++; }
+        if (s?.featuredFolderId && !ids.has(s.featuredFolderId)) { s.featuredFolderId = undefined; n++; }
+      } else throw new Error("Unknown fix");
+      if (!n) throw new Error("Nothing to fix");
+      pushActivity(data, "edit", `Health check: fixed ${n} item${n === 1 ? "" : "s"}`);
+      await saveBookmarks(data);
+      return data;
+    }
+    case "httpsUpgrade": {
+      // switch chosen http:// links to https:// (the link checker says which work)
+      requireAdmin(password);
+      const want = new Set(Array.isArray(body.linkIds) ? body.linkIds.map(String) : []);
+      let n = 0;
+      for (const f of data.folders) for (const l of f.links) {
+        if (l.url.startsWith("http://") && (!want.size || want.has(l.id))) { l.url = l.url.replace(/^http:/, "https:"); l.updatedAt = new Date().toISOString(); n++; }
+      }
+      if (!n) throw new Error("No http:// links to switch");
+      pushActivity(data, "edit", `Switched ${n} link${n === 1 ? "" : "s"} to https`);
+      await saveBookmarks(data);
+      return data;
+    }
+    case "setLinkStatuses": {
+      // from the link checker: mark links as working or broken in one go
+      requireAdmin(password);
+      const map = (body.statuses || {}) as Record<string, unknown>;
+      let n = 0;
+      for (const f of data.folders) for (const l of f.links) {
+        const st = map[l.id];
+        if (st === "broken" || st === "works") { l.status = st; n++; }
+      }
+      pushActivity(data, "edit", `Link check: updated ${n} link${n === 1 ? "" : "s"}`);
+      await saveBookmarks(data, { snapshot: false });
+      return data;
+    }
+    case "restoreBackup": {
+      requireAdmin(password);
+      if (String(body.confirm || "").toUpperCase() !== "RESTORE") throw new Error("Type RESTORE to confirm");
+      const backup = await getBackup(String(body.day || ""));
+      if (!backup) throw new Error("That backup has expired");
+      const restored = normalize(backup);
+      pushActivity(restored, "restore", `Restored the backup from ${body.day}`);
+      await saveBookmarks(restored);
+      return restored;
     }
     case "replaceUrls": {
       // find & replace across every link address (admins preview the matches first in the panel)

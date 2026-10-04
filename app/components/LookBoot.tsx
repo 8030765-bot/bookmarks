@@ -17,7 +17,8 @@ export default function LookBoot() {
   useEffect(() => {
     const isHome = location.pathname === "/";
     setHome(isHome);
-    if (isHome) return; // the home page does all this itself
+    // the home page does all this itself; embedded widgets follow the host site's ?theme=
+    if (isHome || location.pathname.startsWith("/embed/")) return;
     const apply = () => {
       const look = cleanLook(readLocal<Partial<Look>>("look", {}));
       applyLook(look, {

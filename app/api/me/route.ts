@@ -12,7 +12,7 @@ import { addPushSub, hasPush, pushConfigured, pushPublicKey, removePushSub } fro
 import {
   clearNotifications, setDnd, setNotifyPrefs,
   addMyStuff, getUserData, importMyStuff, markNotificationsRead, moveMyStuff, recordAggregateRating, removeMyStuff, renameMyStuffFolder,
-  deleteView, saveMessage, saveSettings, saveView, setBlocked, setFolderOrder, setFolderPref, setLinkPref, setProfile, setRating, toggleFavorite,
+  deleteView, importPersonal, saveMessage, saveSettings, saveView, setBlocked, setFolderOrder, setFolderPref, setLinkPref, setProfile, setRating, toggleFavorite,
 } from "@/lib/userdata";
 import { Redis } from "@upstash/redis";
 import { followersKey } from "@/lib/store";
@@ -84,6 +84,12 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ myStuff: await moveMyStuff(user, String(body.id || ""), String(body.folder || "")) });
       case "renameMyStuffFolder":
         return NextResponse.json({ myStuff: await renameMyStuffFolder(user, String(body.from || ""), String(body.to || "")) });
+      case "importPersonal": {
+        // a "Download my data" file from this site
+        await rateLimit(`import:${user.toLowerCase()}`, 5, 60);
+        const counts = await importPersonal(user, (body.file || {}) as Record<string, unknown>);
+        return NextResponse.json({ imported: counts, ...(await getUserData(user)) });
+      }
       case "importMyStuff": {
         // a browser bookmarks file, already read into {name, url, folder} by the page
         const items: { name: string; url: string; folder?: string }[] = [];

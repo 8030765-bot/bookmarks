@@ -19,6 +19,9 @@ const csp = [
   "object-src 'none'",
 ].join("; ");
 
+// the folder widget (/embed/…) may be shown inside other sites; nothing else can
+const embedCsp = csp.replace("frame-ancestors 'none'", "frame-ancestors *");
+
 const securityHeaders = [
   { key: "Content-Security-Policy", value: csp },
   { key: "X-Content-Type-Options", value: "nosniff" },
@@ -34,7 +37,13 @@ const nextConfig = {
   eslint: { ignoreDuringBuilds: true },
   async headers() {
     return [
-      { source: "/(.*)", headers: securityHeaders },
+      { source: "/((?!embed/).*)", headers: securityHeaders },
+      {
+        source: "/embed/:path*",
+        headers: securityHeaders
+          .filter((h) => h.key !== "X-Frame-Options")
+          .map((h) => (h.key === "Content-Security-Policy" ? { ...h, value: embedCsp } : h)),
+      },
       // the service worker must never be cached, or updates would get stuck
       { source: "/sw.js", headers: [{ key: "Cache-Control", value: "no-cache, no-store, must-revalidate" }] },
     ];

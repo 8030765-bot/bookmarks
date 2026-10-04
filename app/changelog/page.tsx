@@ -7,6 +7,20 @@ import { EasterEgg } from "../components/Fun";
 /** Updates to the site itself (not the bookmarks — those are in "What's new"). Newest first. */
 const RELEASES: { date: string; title: string; items: string[] }[] = [
   {
+    date: "2026-10", title: "Your data",
+    items: [
+      "Download every folder for Chrome or Edge, a folder as a spreadsheet, or print the list",
+      "An “Add from any website” button for your bookmarks bar",
+      "The last 7 days at a glance",
+      "Put a folder on another website with its embed code; RSS, JSON and calendar feeds",
+      "Links you add while offline are sent when you're back online",
+      "A warning if someone else changed a link while you were editing it",
+      "A peek at each website when you rest the mouse on it",
+      "Bring your own settings back from a “Download my data” file",
+      "For admins: daily backups, a link checker, a health check, CSV import and merging duplicates",
+    ],
+  },
+  {
     date: "2026-10", title: "Moderation & admin",
     items: [
       "Report a link or a chat message (🚩) and a moderator will look",

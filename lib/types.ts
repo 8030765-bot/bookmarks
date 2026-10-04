@@ -57,6 +57,8 @@ export interface FolderPerm {
 }
 export interface Folder {
   perm?: FolderPerm;
+  /** last edit (for "someone else changed this" warnings) */
+  updatedAt?: string;
   /** admin: only appears to members from this date (ISO) */
   showAt?: string;
   id: string;
@@ -254,6 +256,8 @@ export interface Poll {
 }
 
 export interface BookmarksData {
+  /** data format version, so older saved copies can be upgraded when read */
+  schema?: number;
   /** bumped on every save so clients can cheaply check for changes */
   rev?: number;
   updatedAt?: string;

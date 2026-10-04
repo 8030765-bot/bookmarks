@@ -699,3 +699,203 @@ export function FolderPermsEditor({ folder, run, toast }: { folder: Folder; run:
     </div>
   );
 }
+
+/* ---------- batch 12: health check, duplicates, CSV, backups, link checker ---------- */
+const urlKey = (u: string) => u.trim().toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/\/+$/, "");
+/** Parse a CSV file (quotes, commas and new lines inside quotes are fine). */
+export function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [], cell = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+      else if (c === '"') q = false;
+      else cell += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(cell); cell = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(cell); rows.push(row); row = []; cell = "";
+    } else cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter((r) => r.some((x) => x.trim()));
+}
+
+export function DataHealth({ data, admin, run, toast }: { data: BookmarksData; admin: AdminFn; run: Run; toast: Toast }) {
+  const report = useMemo(() => {
+    const ids = new Set(data.folders.map((f) => f.id));
+    const used = new Set(data.folders.flatMap((f) => f.links.flatMap((l) => l.tags || [])));
+    const groups = new Map<string, { folder: Folder; link: Link }[]>();
+    for (const f of data.folders) for (const l of f.links) { const k = urlKey(l.url); groups.set(k, [...(groups.get(k) || []), { folder: f, link: l }]); }
+    const dupes = Array.from(groups.values()).filter((g) => g.length > 1);
+    return {
+      empty: data.folders.filter((f) => !f.links.length && !f.rule && !data.folders.some((c) => c.parentId === f.id)),
+      unusedTags: Object.keys(data.settings?.tagColors || {}).filter((t) => !used.has(t)),
+      orphans: data.folders.filter((f) => f.parentId && !ids.has(f.parentId)).length
+        + data.folders.reduce((n, f) => n + f.links.filter((l) => l.alsoIn?.some((id) => !ids.has(id))).length, 0)
+        + (data.settings?.startFolderId && !ids.has(data.settings.startFolderId) ? 1 : 0)
+        + (data.settings?.featuredFolderId && !ids.has(data.settings.featuredFolderId) ? 1 : 0),
+      http: data.folders.flatMap((f) => f.links.filter((l) => l.url.startsWith("http://")).map((l) => ({ f, l }))),
+      dupes,
+    };
+  }, [data]);
+  const fix = async (what: string, done: string) => { if (await run("healthFix", { fix: what })) toast(done); };
+  const issues = report.empty.length + report.unusedTags.length + report.orphans + report.http.length + report.dupes.length;
+  return (
+    <section>
+      <h3 className="admin-h">Health check {issues === 0 && "✅"}</h3>
+      {issues === 0 && <div className="admin-empty">Everything looks tidy.</div>}
+      {report.empty.length > 0 && (
+        <div className="health-row"><div><strong>{report.empty.length} empty folder{report.empty.length === 1 ? "" : "s"}</strong><span>{report.empty.map((f) => `${f.emoji} ${f.name}`).join(", ")}</span></div>
+          <button className="btn btn-secondary btn-sm" onClick={() => { if (confirm("Delete the empty folders?")) fix("emptyFolders", "Empty folders removed"); }}>Remove</button></div>
+      )}
+      {report.unusedTags.length > 0 && (
+        <div className="health-row"><div><strong>{report.unusedTags.length} tag colour{report.unusedTags.length === 1 ? "" : "s"} for tags nobody uses</strong><span>#{report.unusedTags.join(" #")}</span></div>
+          <button className="btn btn-secondary btn-sm" onClick={() => fix("unusedTags", "Tidied tag colours")}>Tidy</button></div>
+      )}
+      {report.orphans > 0 && (
+        <div className="health-row"><div><strong>{report.orphans} broken reference{report.orphans === 1 ? "" : "s"}</strong><span>Links or settings pointing at folders that were deleted.</span></div>
+          <button className="btn btn-secondary btn-sm" onClick={() => fix("orphans", "References fixed")}>Fix</button></div>
+      )}
+      {report.dupes.length > 0 && (
+        <div className="health-row"><div><strong>{report.dupes.length} website{report.dupes.length === 1 ? "" : "s"} added more than once</strong>
+          <span>{report.dupes.slice(0, 4).map((g) => `${g[0].link.name} (${g.map((x) => x.folder.name).join(", ")})`).join(" · ")}{report.dupes.length > 4 ? " …" : ""}</span></div>
+          <button className="btn btn-secondary btn-sm" onClick={async () => {
+            if (!confirm(`Merge ${report.dupes.length} duplicate${report.dupes.length === 1 ? "" : "s"}? The oldest copy is kept, with all tags and likes, and it shows in the other folders too. The extras go to the trash.`)) return;
+            if (await run("mergeDuplicates")) toast("Duplicates merged");
+          }}>Merge</button></div>
+      )}
+      {report.http.length > 0 && (
+        <div className="health-row"><div><strong>{report.http.length} link{report.http.length === 1 ? "" : "s"} still use http://</strong><span>Run the link checker to see which work on https, or switch them all.</span></div>
+          <button className="btn btn-secondary btn-sm" onClick={async () => { if (confirm(`Switch ${report.http.length} links to https://?`) && (await run("httpsUpgrade"))) toast("Switched to https"); }}>Switch all</button></div>
+      )}
+      <LinkChecker data={data} admin={admin} run={run} toast={toast} />
+    </section>
+  );
+}
+
+interface Check { ok: boolean; status: number; at: string; finalUrl?: string; error?: string; httpsOk?: boolean }
+function LinkChecker({ data, admin, run, toast }: { data: BookmarksData; admin: AdminFn; run: Run; toast: Toast }) {
+  const [results, setResults] = useState<Record<string, Check> | null>(null);
+  const [running, setRunning] = useState(false);
+  const all = useMemo(() => data.folders.flatMap((f) => f.links.map((l) => ({ f, l }))), [data]);
+  useEffect(() => { admin("linkResults").then((j) => setResults(j.results || {})).catch(() => setResults({})); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  const checkAll = async () => {
+    setRunning(true);
+    try {
+      // a few at a time so no single request runs too long
+      for (let i = 0; i < Math.ceil(all.length / 8) && i < 40; i++) {
+        const j = await admin("linkCheck", { max: 8 });
+        setResults(j.results);
+        if (!j.checked) break;
+      }
+      toast("Link check finished");
+    } catch (e: any) { toast(e.message); } finally { setRunning(false); }
+  };
+  const broken = all.filter(({ l }) => results?.[l.id] && !results[l.id].ok);
+  const httpsReady = all.filter(({ l }) => l.url.startsWith("http://") && results?.[l.id]?.httpsOk);
+  const checked = all.filter(({ l }) => results?.[l.id]).length;
+  return (
+    <div className="link-checker">
+      <div className="health-row">
+        <div><strong>Link checker</strong><span>{checked}/{all.length} checked{broken.length ? ` · ${broken.length} not loading` : ""}</span></div>
+        <button className="btn btn-secondary btn-sm" disabled={running} onClick={checkAll}>{running ? "Checking…" : "Check links"}</button>
+      </div>
+      {broken.map(({ f, l }) => (
+        <div key={l.id} className="admin-row compact">
+          <div className="row-main"><div className="row-title">{l.name} {l.status === "broken" && <span className="pill bad">marked broken</span>}</div>
+            <div className="row-sub">{f.emoji} {f.name} · {results![l.id].error || `error ${results![l.id].status}`} · {l.url}</div></div>
+        </div>
+      ))}
+      {broken.length > 0 && (
+        <button className="btn btn-secondary btn-sm" onClick={async () => {
+          if (await run("setLinkStatuses", { statuses: Object.fromEntries(broken.map(({ l }) => [l.id, "broken"])) })) toast(`Marked ${broken.length} as broken`);
+        }}>Mark these as broken</button>
+      )}
+      {httpsReady.length > 0 && (
+        <button className="btn btn-secondary btn-sm" onClick={async () => {
+          if (await run("httpsUpgrade", { linkIds: httpsReady.map(({ l }) => l.id) })) toast(`Switched ${httpsReady.length} to https`);
+        }}>Switch the {httpsReady.length} that work on https</button>
+      )}
+    </div>
+  );
+}
+
+export function CsvImport({ data, run, toast }: { data: BookmarksData; run: Run; toast: Toast }) {
+  const [rows, setRows] = useState<{ name: string; url: string; folder: string; tags: string }[] | null>(null);
+  const have = useMemo(() => new Set(data.folders.flatMap((f) => f.links.map((l) => urlKey(l.url)))), [data]);
+  return (
+    <section>
+      <h3 className="admin-h">Spreadsheet (CSV)</h3>
+      <div className="admin-toolbar">
+        <label className="btn btn-secondary btn-sm">
+          Import a CSV
+          <input type="file" accept=".csv,text/csv" hidden onChange={async (e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (!file) return;
+            const table = parseCsv(await file.text());
+            const head = (table[0] || []).map((h) => h.trim().toLowerCase());
+            const col = (names: string[], fallback: number) => { const i = head.findIndex((h) => names.includes(h)); return i >= 0 ? i : fallback; };
+            const hasHeader = head.some((h) => ["url", "link", "address", "name", "title"].includes(h));
+            const [ni, ui, fi, ti] = [col(["name", "title"], 0), col(["url", "link", "address"], 1), col(["folder", "category"], 2), col(["tags", "tag"], 3)];
+            const parsed = (hasHeader ? table.slice(1) : table).map((r) => ({ name: (r[ni] || "").trim(), url: (r[ui] || "").trim(), folder: (r[fi] || "").trim(), tags: (r[ti] || "").trim() })).filter((r) => r.url);
+            if (!parsed.length) { toast("No links found — the file needs at least a url column"); return; }
+            setRows(parsed);
+          }} />
+        </label>
+        <button className="btn btn-secondary btn-sm" onClick={() => {
+          const lines = ["name,url,folder,tags", ...data.folders.flatMap((f) => f.links.map((l) => [l.name, l.url, f.name, (l.tags || []).join(" ")].map((x) => `"${String(x).replace(/"/g, '""')}"`).join(",")))];
+          download(`bookmarks-${new Date().toISOString().slice(0, 10)}.csv`, lines.join("\n"), "text/csv");
+        }}>Export everything as CSV</button>
+      </div>
+      {rows && (
+        <div className="import-review">
+          <strong>Import {rows.length} rows?</strong>
+          <div className="row-sub">{rows.filter((r) => have.has(urlKey(r.url))).length} already on the site (skipped) · new folders: {Array.from(new Set(rows.map((r) => r.folder || "Imported"))).filter((n) => !data.folders.some((f) => f.name.toLowerCase() === n.toLowerCase())).join(", ") || "none"}</div>
+          {rows.slice(0, 6).map((r, i) => <div key={i} className="row-sub">• {r.name || r.url} → {r.folder || "Imported"}{r.tags ? ` #${r.tags}` : ""}</div>)}
+          <div className="admin-toolbar end">
+            <button className="btn btn-secondary btn-sm" onClick={() => setRows(null)}>Cancel</button>
+            <button className="btn btn-primary btn-sm" onClick={async () => {
+              const r = rows; setRows(null);
+              if (await run("importCsv", { rows: r.map((x) => ({ ...x, tags: x.tags.split(/[ ,;]+/).filter(Boolean) })) })) toast("Imported");
+            }}>Import</button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+export function Backups({ admin, run, toast }: { admin: AdminFn; run: Run; toast: Toast }) {
+  const [list, setList] = useState<{ day: string; at: string; folders: number; links: number }[] | null>(null);
+  const [diff, setDiff] = useState<{ day: string; d: { added: { name: string; folder: string }[]; removed: { name: string; folder: string }[]; changed: { before: { name: string; url: string }; after: { name: string; url: string } }[]; foldersAdded: string[]; foldersRemoved: string[] } } | null>(null);
+  useEffect(() => { admin("backups").then((j) => setList(j.backups || [])).catch(() => setList([])); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  return (
+    <section>
+      <h3 className="admin-h">Daily backups <span className="muted-inline">— kept for 14 days</span></h3>
+      {!list && <div className="skeleton skel-line" />}
+      {list && list.length === 0 && <div className="admin-empty">The first backup is made the next time something changes.</div>}
+      {list?.map((b) => (
+        <div key={b.day} className="admin-row compact">
+          <div className="row-main"><div className="row-title">{new Date(`${b.day}T12:00:00Z`).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}</div><div className="row-sub">{b.folders} folders · {b.links} links · saved {ago(b.at)}</div></div>
+          <button className="btn btn-secondary btn-sm" onClick={async () => { try { setDiff({ day: b.day, d: (await admin("backupDiff", { day: b.day })).diff }); } catch (e: any) { toast(e.message); } }}>What changed since</button>
+          <DangerButton label="Restore" word="RESTORE" warning={`Put everything back to how it was on ${b.day}? Changes since then will be lost (you can use Undo straight after).`}
+            onConfirm={async (w) => { if (await run("restoreBackup", { day: b.day, confirm: w })) toast(`Restored ${b.day}`); }} />
+        </div>
+      ))}
+      {diff && (
+        <div className="import-review">
+          <strong>Since {diff.day}</strong>
+          <div className="row-sub">+{diff.d.added.length} added · −{diff.d.removed.length} removed · {diff.d.changed.length} changed{diff.d.foldersAdded.length ? ` · new folders: ${diff.d.foldersAdded.join(", ")}` : ""}{diff.d.foldersRemoved.length ? ` · folders gone: ${diff.d.foldersRemoved.join(", ")}` : ""}</div>
+          {diff.d.added.slice(0, 8).map((l, i) => <div key={`a${i}`} className="row-sub">+ {l.name} ({l.folder})</div>)}
+          {diff.d.removed.slice(0, 8).map((l, i) => <div key={`r${i}`} className="row-sub">− {l.name} ({l.folder})</div>)}
+          {diff.d.changed.slice(0, 8).map((c, i) => <div key={`c${i}`} className="row-sub">~ {c.before.name}{c.before.name !== c.after.name ? ` → ${c.after.name}` : ""}</div>)}
+          <div className="admin-toolbar end"><button className="btn btn-secondary btn-sm" onClick={() => setDiff(null)}>Close</button></div>
+        </div>
+      )}
+    </section>
+  );
+}
