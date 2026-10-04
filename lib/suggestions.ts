@@ -145,7 +145,9 @@ export async function approveSuggestion(id: string, auth: { password?: string; _
   } else if (s.kind === "editFolder") {
     await handleAction("editFolder", { ...auth, folderId: s.folderId, name: name || s.name, description: s.description });
   } else if (s.kind === "addLink") {
-    await handleAction("addLink", { ...auth, folderId, name, url, suggestedBy: s.user });
+    // approval templates can add tags as it goes in
+    const tags = Array.isArray(overrides.tags) ? overrides.tags.map(String).slice(0, 8) : undefined;
+    await handleAction("addLink", { ...auth, folderId, name, url, suggestedBy: s.user, ...(tags ? { tags } : {}) });
   } else if (s.kind === "editLink") {
     await handleAction("editLink", { ...auth, folderId: s.folderId, linkId: s.linkId, name, url, suggestedBy: s.user });
   } else if (s.kind === "removeLink") {

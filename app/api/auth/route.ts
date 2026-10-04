@@ -4,13 +4,15 @@ import { getAuthContext, getRole, ownerExists } from "@/lib/roles";
 import { errorResponse } from "@/lib/http";
 import { clientIp, rateLimit } from "@/lib/ratelimit";
 import { notify } from "@/lib/userdata";
+import { bumpStat, checkSignup, getFlags, inGroup } from "@/lib/moderation";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
     const { user, role, ownerExists } = await getAuthContext();
-    return NextResponse.json({ user, role, ownerExists });
+    const [contributor, beta, flags] = await Promise.all([inGroup("contributors", user), inGroup("beta", user), getFlags()]);
+    return NextResponse.json({ user, role, ownerExists, contributor, beta, betaFlags: flags.betaFlags || [], signups: flags.signups || "open" });
   } catch {
     return NextResponse.json({ user: null, role: null, ownerExists: false });
   }
@@ -64,7 +66,9 @@ export async function POST(req: NextRequest) {
     // per-address limits on top of the per-account lockout
     if (action === "signup") {
       await rateLimit(`signup:${ip}`, 8, 60 * 60);
+      await checkSignup(username, typeof body.invite === "string" ? body.invite : "");
       const session = await signup(username, password, remember);
+      await bumpStat("signups");
       // signup includes the one-time recovery code so the client can show it
       return loggedIn(session, remember, { recoveryCode: session.recoveryCode });
     }

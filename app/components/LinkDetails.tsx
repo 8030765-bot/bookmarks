@@ -147,6 +147,7 @@ export default function LinkDetails({ link }: { folder: Folder; link: Link }) {
             🙏 {thanked ? "Thanked" : "Say thanks"}
           </button>
         )}
+        {actions.report && <button className="pick" onClick={() => actions.report!(link)} title="Tell the moderators something's wrong">🚩 Report a problem</button>}
         {actions.suggestNote && (
           <button className="pick" onClick={() => actions.suggestNote!(link)} title="Add a public tip, like “needs a login” — a moderator checks it first">
             <Icon name="note" /> Add a note for everyone

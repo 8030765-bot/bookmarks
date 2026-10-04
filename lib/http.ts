@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { isAuthError } from "./roles";
+import { logError } from "./moderation";
 
 export const QUOTA_MESSAGE =
   "The site's free database limit has been reached — you're seeing a saved copy and changes are paused until it resets.";
@@ -21,6 +22,10 @@ export function errorResponse(e: unknown, fallbackStatus = 400) {
         ? 429
         : message.startsWith("Wrong")
           ? 401
-          : fallbackStatus;
+          : message.startsWith("Read-only")
+            ? 503
+            : fallbackStatus;
+  // real server faults go to the admins' "recent errors" list
+  if (status >= 500 && status !== 503) logError(message);
   return NextResponse.json({ error: message }, { status });
 }

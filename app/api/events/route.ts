@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { deleteEvent, listEvents, saveEvent } from "@/lib/community";
 import { errorResponse } from "@/lib/http";
 import { audit, checkMod, getAuthContext } from "@/lib/roles";
+import { modCan } from "@/lib/moderation";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const ctx = await getAuthContext();
     checkMod(ctx, typeof body.password === "string" ? body.password : undefined);
+    if (ctx.role === "mod" && !(await modCan(ctx.role, "events"))) throw new Error("Admins only — moderators can't edit events here");
     if (body.action === "delete") {
       await deleteEvent(String(body.id || ""));
       await audit(ctx, "deleteEvent", String(body.id || "")).catch(() => {});

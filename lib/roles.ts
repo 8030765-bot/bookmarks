@@ -35,6 +35,8 @@ export interface AuthContext {
   user: string | null;
   role: Role | null;
   ownerExists: boolean;
+  /** can add links without waiting for approval (set by the bookmarks route) */
+  contributor?: boolean;
 }
 export async function getAuthContext(): Promise<AuthContext> {
   const user = await getCurrentUser();

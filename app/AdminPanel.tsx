@@ -5,19 +5,24 @@ import { Icon } from "./components/Icon";
 import { suggestionSummary } from "./SuggestModal";
 import Favicon from "./components/Favicon";
 import { parseBookmarksHtml, pollCounts } from "./components/Community";
+import {
+  AdminLinkNote, AuditTools, ControlsTab, DEFAULT_REASONS, Dashboard, DangerButton, DataTools, Extras, FolderPermsEditor, ModPermsEditor, PeopleTab, ReportsTab,
+} from "./AdminExtras";
 
 type Role = "owner" | "admin" | "mod" | null;
-type Tab = "overview" | "suggestions" | "community" | "polls" | "links" | "folders" | "chat" | "users" | "roles" | "site" | "data" | "activity";
+type Tab = "overview" | "suggestions" | "reports" | "community" | "polls" | "links" | "folders" | "chat" | "users" | "roles" | "controls" | "site" | "data" | "activity";
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "overview", label: "Overview", icon: "chart" },
   { id: "suggestions", label: "Suggestions", icon: "bulb" },
+  { id: "reports", label: "Reports", icon: "info" },
   { id: "community", label: "Community", icon: "trophy" },
   { id: "polls", label: "Polls", icon: "poll" },
   { id: "links", label: "Links", icon: "link" },
   { id: "folders", label: "Folders", icon: "folder" },
   { id: "chat", label: "Chat", icon: "chat" },
-  { id: "users", label: "Users", icon: "users" },
+  { id: "users", label: "People", icon: "users" },
   { id: "roles", label: "Access", icon: "lock" },
+  { id: "controls", label: "Controls", icon: "settings" },
   { id: "site", label: "Site", icon: "settings" },
   { id: "data", label: "Data", icon: "database" },
   { id: "activity", label: "Activity", icon: "clock" },
@@ -25,7 +30,7 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 type Api = (action: string, payload?: Record<string, any>) => Promise<boolean>;
 interface AuditEntry { at: string; actor: string; role: string; action: string; detail?: string }
-interface AdminInfo {
+interface AdminInfo extends Omit<Extras, "users" | "banned" | "roles" | "audit" | "me"> {
   users: { username: string; createdAt: string }[];
   banned: string[];
   messageCount: number;
@@ -115,6 +120,7 @@ export default function AdminPanel({
   );
   const totalClicks = allLinks.reduce((n, r) => n + (r.link.clicks || 0), 0);
   const pending = info?.suggestions.filter((x) => x.status === "pending").length ?? 0;
+  const isAdminRole = role !== "mod";
 
   return (
     <aside className="admin-panel" aria-label="Admin panel">
@@ -134,12 +140,13 @@ export default function AdminPanel({
       <nav className="admin-tabs">
         {TABS.filter((t) => {
           if (t.id === "roles") return role === "owner";
-          if (role === "mod") return ["overview", "suggestions", "community", "chat", "users"].includes(t.id);
+          if (role === "mod") return ["overview", "suggestions", "reports", "community", "chat", "users"].includes(t.id);
           return true;
         }).map((t) => (
           <button key={t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)} title={t.label}>
             {t.id === "suggestions" && pending > 0 && <span className="tab-badge">{pending}</span>}
             {t.id === "community" && (info?.notes?.length || 0) > 0 && <span className="tab-badge">{info!.notes!.length}</span>}
+            {t.id === "reports" && (info?.reports?.length || 0) > 0 && <span className="tab-badge">{info!.reports!.length}</span>}
             <Icon name={t.icon} />
             <span>{t.label}</span>
           </button>
@@ -147,8 +154,13 @@ export default function AdminPanel({
       </nav>
       <div className="admin-body">
         {tab === "overview" && (
-          <OverviewTab data={data} rows={allLinks} totalClicks={totalClicks} info={info} goTo={setTab} />
+          <>
+            <Dashboard info={info} admin={admin} refresh={refreshInfo} toast={showToast} isAdmin={isAdminRole} />
+            <OverviewTab data={data} rows={allLinks} totalClicks={totalClicks} info={info} goTo={setTab} />
+          </>
         )}
+        {tab === "reports" && <ReportsTab info={info} admin={admin} run={run} data={data} refresh={refreshInfo} toast={showToast} isAdmin={isAdminRole} />}
+        {tab === "controls" && <ControlsTab data={data} info={info} admin={admin} run={run} refresh={refreshInfo} toast={showToast} />}
         {tab === "suggestions" && (
           <SuggestionsTab data={data} info={info} admin={admin} setInfo={setInfo} applyData={applyData} showToast={showToast} />
         )}
@@ -156,16 +168,26 @@ export default function AdminPanel({
           <CommunityTab data={data} info={info} admin={admin} setInfo={setInfo} applyData={applyData} run={run} role={role} password={password} showToast={showToast} />
         )}
         {tab === "polls" && <PollsTab data={data} run={run} submitting={submitting} showToast={showToast} />}
-        {tab === "links" && <LinksTab data={data} rows={allLinks} run={run} submitting={submitting} showToast={showToast} />}
+        {tab === "links" && <LinksTab data={data} rows={allLinks} run={run} submitting={submitting} showToast={showToast} linkNotes={info?.linkNotes || {}} admin={admin} refreshInfo={refreshInfo} />}
         {tab === "folders" && <FoldersTab data={data} run={run} submitting={submitting} showToast={showToast} />}
         {tab === "chat" && (
           <ChatTab data={data} password={password} run={run} admin={admin} info={info} refreshInfo={refreshInfo} showToast={showToast} />
         )}
-        {tab === "users" && <UsersTab admin={admin} info={info} refreshInfo={refreshInfo} showToast={showToast} />}
-        {tab === "roles" && <RolesTab admin={admin} info={info} refreshInfo={refreshInfo} showToast={showToast} />}
+        {tab === "users" && <PeopleTab info={info} admin={admin} refresh={refreshInfo} toast={showToast} isAdmin={isAdminRole} />}
+        {tab === "roles" && (
+          <>
+            <RolesTab admin={admin} info={info} refreshInfo={refreshInfo} showToast={showToast} />
+            <ModPermsEditor data={data} info={info} run={run} toast={showToast} />
+          </>
+        )}
         {tab === "site" && <SiteTab data={data} run={run} submitting={submitting} showToast={showToast} />}
-        {tab === "data" && <DataTab data={data} run={run} showToast={showToast} />}
-        {tab === "activity" && <ActivityTab data={data} audit={info?.audit} />}
+        {tab === "data" && (
+          <>
+            <DataTab data={data} run={run} showToast={showToast} />
+            <DataTools data={data} info={info} admin={admin} run={run} refresh={refreshInfo} toast={showToast} />
+          </>
+        )}
+        {tab === "activity" && <ActivityTab data={data} audit={info?.audit} admin={admin} refresh={refreshInfo} toast={showToast} />}
       </div>
     </aside>
   );
@@ -294,17 +316,14 @@ function SuggestionsTab({
 }) {
   const [filter, setFilter] = useState<"pending" | "approved" | "rejected" | "all">("pending");
   // admin tweaks before approving, keyed by suggestion id
-  const [edits, setEdits] = useState<Record<string, { name?: string; url?: string; folderId?: string }>>({});
+  const [edits, setEdits] = useState<Record<string, { name?: string; url?: string; folderId?: string; tags?: string[] }>>({});
   const [busy, setBusy] = useState<string | null>(null);
-  if (!info) return <div className="admin-empty">Loading suggestions…</div>;
-
-  const list = info.suggestions.filter((x) => filter === "all" || x.status === filter);
-  const count = (st: string) => info.suggestions.filter((x) => x.status === st).length;
-  const findLink = (x: Suggestion) => data.folders.find((f) => f.id === x.folderId)?.links.find((l) => l.id === x.linkId);
-  const folderName = (id?: string) => {
-    const f = data.folders.find((ff) => ff.id === id);
-    return f ? `${f.emoji} ${f.name}` : "a deleted folder";
-  };
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [focus, setFocus] = useState(0);
+  const reasons = data.settings?.rejectReasons?.length ? data.settings.rejectReasons : DEFAULT_REASONS;
+  const templates = data.settings?.approveTemplates || [];
+  const list = (info?.suggestions || []).filter((x) => filter === "all" || x.status === filter);
+  const pendingList = list.filter((x) => x.status === "pending");
 
   async function act(action: string, x: Suggestion, extra: Record<string, unknown> = {}) {
     setBusy(x.id);
@@ -320,6 +339,47 @@ function SuggestionsTab({
       setBusy(null);
     }
   }
+  const approve = (x: Suggestion) => act(x.kind === "other" ? "approveSuggestion" : "approveSuggestion", x, x.kind === "other" ? {} : { overrides: edits[x.id] || {} });
+  const decline = (x: Suggestion, reason: string) => act("rejectSuggestion", x, { reason });
+
+  // keyboard: J/K move, A approve, D decline with the first ready-made reason, X pick
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (filter !== "pending" || t.closest?.("input, textarea, select") || e.metaKey || e.ctrlKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      const cur = pendingList[focus];
+      if (k === "j") { e.preventDefault(); setFocus((f) => Math.min(pendingList.length - 1, f + 1)); }
+      else if (k === "k") { e.preventDefault(); setFocus((f) => Math.max(0, f - 1)); }
+      else if (k === "a" && cur) { e.preventDefault(); approve(cur).then((ok) => ok && showToast(`Approved — ${suggestionSummary(cur)}`)); }
+      else if (k === "d" && cur) { e.preventDefault(); decline(cur, reasons[0]).then((ok) => ok && showToast("Declined")); }
+      else if (k === "x" && cur) { e.preventDefault(); setPicked((p) => { const n = new Set(p); if (n.has(cur.id)) n.delete(cur.id); else n.add(cur.id); return n; }); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+  useEffect(() => { document.querySelector(`[data-sugg-index="${focus}"]`)?.scrollIntoView({ block: "nearest" }); }, [focus]);
+
+  if (!info) return <div className="admin-empty">Loading suggestions…</div>;
+  const count = (st: string) => info.suggestions.filter((x) => x.status === st).length;
+  const findLink = (x: Suggestion) => data.folders.find((f) => f.id === x.folderId)?.links.find((l) => l.id === x.linkId);
+  const folderName = (id?: string) => {
+    const f = data.folders.find((ff) => ff.id === id);
+    return f ? `${f.emoji} ${f.name}` : "a deleted folder";
+  };
+  const bulk = async (how: "approve" | "decline") => {
+    const items = pendingList.filter((x) => picked.has(x.id));
+    let reason = "";
+    if (how === "decline") {
+      const r = window.prompt(`Reason for declining ${items.length} suggestions (optional):`, reasons[0] || "");
+      if (r === null) return;
+      reason = r;
+    }
+    let done = 0;
+    for (const x of items) if (await (how === "approve" ? approve(x) : decline(x, reason))) done++;
+    setPicked(new Set());
+    showToast(`${how === "approve" ? "Approved" : "Declined"} ${done} of ${items.length}`);
+  };
 
   return (
     <>
@@ -331,6 +391,19 @@ function SuggestionsTab({
           </button>
         ))}
       </div>
+      {filter === "pending" && pendingList.length > 0 && (
+        <div className="bulk-bar">
+          <label className="check-row"><input type="checkbox" checked={picked.size === pendingList.length} onChange={(e) => setPicked(e.target.checked ? new Set(pendingList.map((x) => x.id)) : new Set())} /> All</label>
+          {picked.size > 0 && (
+            <>
+              <strong>{picked.size} picked</strong>
+              <button className="btn btn-primary btn-sm" onClick={() => bulk("approve")}>Approve</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => bulk("decline")}>Decline</button>
+            </>
+          )}
+          <span className="row-sub kbd-hints"><span className="kbd">J</span>/<span className="kbd">K</span> move · <span className="kbd">A</span> approve · <span className="kbd">D</span> decline · <span className="kbd">X</span> pick</span>
+        </div>
+      )}
       {list.length === 0 && (
         <div className="admin-empty">{filter === "pending" ? "All caught up — no suggestions waiting." : "Nothing here."}</div>
       )}
@@ -339,9 +412,11 @@ function SuggestionsTab({
         const link = findLink(x);
         const gone = (x.kind === "editLink" || x.kind === "removeLink") && !link;
         const setE = (patch: typeof e) => setEdits((all) => ({ ...all, [x.id]: { ...e, ...patch } }));
+        const idx = pendingList.indexOf(x);
         return (
-          <div key={x.id} className={`sugg-card ${x.status}`}>
+          <div key={x.id} data-sugg-index={idx >= 0 ? idx : undefined} className={`sugg-card ${x.status} ${idx === focus && filter === "pending" ? "kb-focus" : ""}`}>
             <div className="sugg-top">
+              {x.status === "pending" && <input type="checkbox" checked={picked.has(x.id)} onChange={() => setPicked((p) => { const n = new Set(p); if (n.has(x.id)) n.delete(x.id); else n.add(x.id); return n; })} aria-label="Pick" />}
               <span className="avatar sm">{x.user[0]?.toUpperCase()}</span>
               <strong>{x.user}</strong>
               <span className="sugg-kind">{KIND_TEXT[x.kind]}</span>
@@ -369,13 +444,24 @@ function SuggestionsTab({
                       {!data.folders.some((f) => f.id === (e.folderId ?? x.folderId)) && <option value={x.folderId}>(deleted folder)</option>}
                       {data.folders.map((f) => <option key={f.id} value={f.id}>{f.emoji} {f.name}</option>)}
                     </select>
+                    {templates.length > 0 && (
+                      <select value="" onChange={(ev) => { const t = templates[Number(ev.target.value)]; if (t) setE({ folderId: t.folderId, tags: t.tags }); }} aria-label="Template">
+                        <option value="">Use a template…</option>
+                        {templates.map((t, i) => <option key={i} value={i}>{t.name}</option>)}
+                      </select>
+                    )}
+                    {e.tags?.length ? <span className="row-sub">Tags: #{e.tags.join(" #")}</span> : null}
                   </div>
                 )}
-                {x.kind === "editLink" && (
-                  <div className="sugg-diff">
-                    {link && x.name && x.name !== link.name && <div><del>{link.name}</del> → <ins>{x.name}</ins></div>}
-                    {link && x.url && <div className="diff-url"><del>{link.url}</del> → <ins>{x.url}</ins></div>}
-                  </div>
+                {x.kind === "editLink" && link && (
+                  <table className="compare">
+                    <thead><tr><th /><th>Now</th><th>Suggested</th></tr></thead>
+                    <tbody>
+                      <tr className={x.name && x.name !== link.name ? "changed" : ""}><th>Name</th><td>{link.name}</td><td>{x.name || link.name}</td></tr>
+                      <tr className={x.url && x.url !== link.url ? "changed" : ""}><th>Address</th><td className="mono">{link.url}</td><td className="mono">{x.url || link.url}</td></tr>
+                      <tr><th>Folder</th><td colSpan={2}>{folderName(x.folderId)}</td></tr>
+                    </tbody>
+                  </table>
                 )}
                 {x.kind === "removeLink" && link && (
                   <div className="sugg-diff">Remove <strong>{link.name}</strong> from {folderName(x.folderId)}<div className="diff-url">{link.url}</div></div>
@@ -387,28 +473,27 @@ function SuggestionsTab({
                 )}
                 {x.kind === "other" && <StagePicker x={x} act={act} />}
                 <div className="sugg-actions">
-                  {x.kind !== "other" ? (
-                    <button
-                      className="btn btn-primary btn-sm"
-                      disabled={busy === x.id || gone}
-                      onClick={async () => {
-                        if (await act("approveSuggestion", x, { overrides: e })) showToast(`Approved — ${suggestionSummary(x)}`);
-                      }}
-                    >Approve &amp; apply</button>
-                  ) : (
-                    <button className="btn btn-primary btn-sm" disabled={busy === x.id} onClick={async () => { if (await act("approveSuggestion", x)) showToast("Marked as done"); }}>
-                      Mark done
-                    </button>
-                  )}
                   <button
-                    className="btn btn-secondary btn-sm"
+                    className="btn btn-primary btn-sm"
+                    disabled={busy === x.id || gone}
+                    onClick={async () => { if (await approve(x)) showToast(x.kind === "other" ? "Marked as done" : `Approved — ${suggestionSummary(x)}`); }}
+                  >{x.kind === "other" ? "Mark done" : <>Approve &amp; apply</>}</button>
+                  <select
+                    className="decline-select"
+                    value=""
                     disabled={busy === x.id}
-                    onClick={async () => {
-                      const reason = window.prompt("Reason for declining (optional — the user will see this):", "");
-                      if (reason === null) return;
-                      if (await act("rejectSuggestion", x, { reason })) showToast("Declined");
+                    aria-label="Decline with a reason"
+                    onChange={async (ev) => {
+                      const v = ev.target.value;
+                      let reason = v;
+                      if (v === "__custom") { const r = window.prompt("Reason for declining (optional — they'll see this):", ""); if (r === null) return; reason = r; }
+                      if (await decline(x, reason)) showToast("Declined");
                     }}
-                  >Decline</button>
+                  >
+                    <option value="">Decline…</option>
+                    {reasons.map((r) => <option key={r} value={r}>{r}</option>)}
+                    <option value="__custom">Write a reason…</option>
+                  </select>
                 </div>
               </div>
             )}
@@ -518,8 +603,11 @@ function PollsTab({ data, run, submitting, showToast }: { data: BookmarksData; r
 /* ---------- Links ---------- */
 type LinkFilter = "all" | "duplicates" | "unclicked" | "favorites" | string; // string = folder id
 function LinksTab({
-  data, rows, run, submitting, showToast,
-}: { data: BookmarksData; rows: LinkRow[]; run: Api; submitting: boolean; showToast: (m: string) => void }) {
+  data, rows, run, submitting, showToast, linkNotes, admin, refreshInfo,
+}: {
+  data: BookmarksData; rows: LinkRow[]; run: Api; submitting: boolean; showToast: (m: string) => void;
+  linkNotes: Record<string, string>; admin: (a: string, p?: Record<string, any>) => Promise<any>; refreshInfo: () => void;
+}) {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<LinkFilter>("all");
   const [sort, setSort] = useState<"manual" | "clicks" | "newest" | "name">("manual");
@@ -687,7 +775,8 @@ function LinksTab({
                       {link.favorite && "⭐ "}{link.name}
                       {dupUrls.has(normUrl(link.url)) && <span className="pill warn">dup</span>}
                     </div>
-                    <div className="row-sub">{folder.emoji} {folder.name} · {link.url.replace(/^https?:\/\//, "")}</div>
+                    <div className="row-sub">{folder.emoji} {folder.name} · {link.url.replace(/^https?:\/\//, "")}{link.showAt && Date.parse(link.showAt) > Date.now() ? ` · 🗓️ appears ${new Date(link.showAt).toLocaleDateString()}` : ""}</div>
+                    {linkNotes[link.id] && <div className="row-sub admin-note">🔒 {linkNotes[link.id]}</div>}
                   </div>
                   <span className="row-num" title="Clicks">{link.clicks || 0}</span>
                   <div className="row-actions">
@@ -699,6 +788,12 @@ function LinksTab({
                     )}
                     <button className="btn-icon sm" title="Edit" onClick={() => setEditing({ folderId: folder.id, linkId: link.id, name: link.name, url: link.url, tags: (link.tags || []).join(", ") })}><Icon name="edit" /></button>
                     <button className="btn-icon sm" title="Reset clicks" onClick={() => run("resetClicks", { folderId: folder.id, linkId: link.id })}><Icon name="reset" /></button>
+                    <AdminLinkNote link={link} notes={linkNotes} admin={admin} refresh={refreshInfo} />
+                    <button className={`btn-icon sm ${link.showAt ? "on" : ""}`} title={link.showAt ? `Scheduled for ${new Date(link.showAt).toLocaleString()}` : "Schedule: only show it from a date"} onClick={async () => {
+                      const v = window.prompt("Show this link to members from (YYYY-MM-DD HH:MM). Leave empty to show it now.", link.showAt ? new Date(link.showAt).toISOString().slice(0, 16).replace("T", " ") : "");
+                      if (v === null) return;
+                      if (await run("editLink", { folderId: folder.id, linkId: link.id, showAt: v.trim() ? new Date(v.trim().replace(" ", "T")).toISOString() : "" })) showToast(v.trim() ? "Scheduled" : "Showing now");
+                    }}><Icon name="clock" /></button>
                     <button
                       className="btn-icon sm danger"
                       title="Delete"
@@ -724,6 +819,7 @@ function FoldersTab({
   const [drafts, setDrafts] = useState<Record<string, { name: string; emoji: string; color: string }>>({});
   const [newName, setNewName] = useState("");
   const [newEmoji, setNewEmoji] = useState("📁");
+  const [permsOpen, setPermsOpen] = useState<string | null>(null);
 
   const draftFor = (f: Folder) => drafts[f.id] || { name: f.name, emoji: f.emoji, color: f.color || "#7c6cff" };
   const setDraft = (f: Folder, patch: Partial<{ name: string; emoji: string; color: string }>) =>
@@ -762,7 +858,16 @@ function FoldersTab({
               <input className="folder-name" value={d.name} onChange={(e) => setDraft(f, { name: e.target.value })} aria-label="Folder name" />
               <input type="color" className="color-input" value={d.color} onChange={(e) => setDraft(f, { color: e.target.value })} aria-label="Color" />
               <span className="row-num" title="Links">{f.links.length}</span>
+              {(f.perm?.add === "admins" && f.perm?.edit === "admins") && <span className="pill warn" title="Only admins can change it">🔒</span>}
+              {f.perm?.view === "members" && <span className="pill" title="Hidden from people who aren't logged in">members</span>}
+              {f.showAt && Date.parse(f.showAt) > Date.now() && <span className="pill" title={new Date(f.showAt).toLocaleString()}>🗓️ later</span>}
               <div className="row-actions">
+                <button className={`btn-icon sm ${permsOpen === f.id ? "on" : ""}`} title="Who can add, edit and see this folder" onClick={() => setPermsOpen(permsOpen === f.id ? null : f.id)}><Icon name="lock" /></button>
+                <button className={`btn-icon sm ${f.showAt ? "on" : ""}`} title={f.showAt ? `Scheduled for ${new Date(f.showAt).toLocaleString()}` : "Schedule: only show it from a date"} onClick={async () => {
+                  const v = window.prompt("Show this folder to members from (YYYY-MM-DD HH:MM). Leave empty to show it now.", f.showAt ? new Date(f.showAt).toISOString().slice(0, 16).replace("T", " ") : "");
+                  if (v === null) return;
+                  if (await run("editFolder", { folderId: f.id, showAt: v.trim() ? new Date(v.trim().replace(" ", "T")).toISOString() : "" })) showToast(v.trim() ? "Scheduled" : "Showing now");
+                }}><Icon name="clock" /></button>
                 {isDirty(f) && (
                   <button
                     className="btn btn-primary btn-sm"
@@ -784,6 +889,7 @@ function FoldersTab({
                   }}
                 ><Icon name="trash" /></button>
               </div>
+              {permsOpen === f.id && <FolderPermsEditor folder={f} run={run} toast={showToast} />}
             </div>
           );
         })}
@@ -837,14 +943,11 @@ function ChatTab({
       />
       <div className="admin-toolbar">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search messages or users…" />
-        <button
-          className="btn btn-danger btn-sm"
-          onClick={async () => {
-            if (!confirm("Delete ALL chat messages for everyone?")) return;
-            try { await admin("clearChat"); setMessages([]); refreshInfo(); showToast("Chat cleared"); }
+        <DangerButton label="Clear chat" word="CLEAR" warning="Delete ALL chat messages for everyone? This can't be undone — download a copy from the Data tab first if you need one."
+          onConfirm={async (w) => {
+            try { await admin("clearChat", { confirm: w }); setMessages([]); refreshInfo(); showToast("Chat cleared"); }
             catch (e: any) { showToast(e.message); }
-          }}
-        >Clear chat</button>
+          }} />
       </div>
       <div className="admin-list">
         {shown.length === 0 && <div className="admin-empty">No messages.</div>}
@@ -869,67 +972,6 @@ function ChatTab({
                   }}
                 >{isBanned ? "Unmute" : "Mute"}</button>
                 <button className="btn-icon sm danger" title="Delete message" onClick={() => del(m.id)}><Icon name="trash" /></button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </>
-  );
-}
-
-/* ---------- Users ---------- */
-function UsersTab({
-  admin, info, refreshInfo, showToast,
-}: { admin: (a: string, p?: Record<string, any>) => Promise<any>; info: AdminInfo | null; refreshInfo: () => void; showToast: (m: string) => void }) {
-  const [q, setQ] = useState("");
-  if (!info) return <div className="admin-empty">Loading users…</div>;
-  const banned = new Set(info.banned);
-  const users = info.users.filter((u) => u.username.toLowerCase().includes(q.toLowerCase()));
-  const act = async (action: string, username: string, done: string) => {
-    try { await admin(action, { username }); refreshInfo(); showToast(done); }
-    catch (e: any) { showToast(e.message); }
-  };
-  return (
-    <>
-      <div className="admin-toolbar">
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${info.users.length} users…`} />
-        <button
-          className="btn btn-secondary btn-sm"
-          title="Find older accounts that aren't listed yet"
-          onClick={async () => { try { const j = await admin("rebuildUsers"); refreshInfo(); showToast(`User list rebuilt — ${j.found} account${j.found === 1 ? "" : "s"}`); } catch (e: any) { showToast(e.message); } }}
-        >Rebuild list</button>
-      </div>
-      <p className="hint" style={{ marginBottom: ".6rem" }}>Missing someone? Older accounts appear once they log in, or press Rebuild list.</p>
-      <div className="admin-list">
-        {users.length === 0 && <div className="admin-empty">No users yet.</div>}
-        {users.map((u) => {
-          const isBanned = banned.has(u.username.toLowerCase());
-          return (
-            <div key={u.username} className="admin-row">
-              <span className="avatar">{u.username[0]?.toUpperCase()}</span>
-              <div className="row-main">
-                <div className="row-title">{u.username}{isBanned && <span className="pill bad">muted</span>}</div>
-                <div className="row-sub">joined {timeAgo(u.createdAt)}</div>
-              </div>
-              <div className="row-actions">
-                <button className="btn btn-secondary btn-sm" onClick={() => act(isBanned ? "unban" : "ban", u.username, isBanned ? `Unmuted ${u.username}` : `Muted ${u.username}`)}>
-                  {isBanned ? "Unmute" : "Mute"}
-                </button>
-                <button
-                  className="btn btn-secondary btn-sm"
-                  title="Set a temporary password to give them"
-                  onClick={async () => {
-                    if (!confirm(`Reset ${u.username}'s password? You'll get a temporary password to give them.`)) return;
-                    try { const j = await admin("resetPassword", { username: u.username }); window.prompt(`Temporary password for ${u.username} — copy and give it to them:`, j.tempPassword); }
-                    catch (e: any) { showToast(e.message); }
-                  }}
-                >Reset pw</button>
-                <button
-                  className="btn-icon sm danger"
-                  title="Delete account"
-                  onClick={() => { if (confirm(`Delete ${u.username}'s account? They'll be logged out.`)) act("deleteUser", u.username, `Deleted ${u.username}`); }}
-                ><Icon name="trash" /></button>
               </div>
             </div>
           );
@@ -1020,19 +1062,29 @@ function DataTab({ data, run, showToast }: { data: BookmarksData; run: Api; show
     }
     download(html + `</DL><p>\n`, "text/html", `bookmarks-${stamp}.html`);
   }
+  // imports show a review first, then go live
+  const [review, setReview] = useState<{ title: string; lines: string[]; go: () => Promise<boolean>; done: string } | null>(null);
   async function importFile(file: File) {
     try {
       const payload = JSON.parse(await file.text());
       if (!Array.isArray(payload.folders)) throw new Error();
-      if (!confirm(`Replace everything with ${payload.folders.length} folders from ${file.name}?`)) return;
-      if (await run("importData", { payload })) showToast("Imported!");
+      const incoming = payload.folders as Folder[];
+      const nowIds = new Set(data.folders.map((f) => f.id));
+      const links = incoming.reduce((n, f) => n + (Array.isArray(f.links) ? f.links.length : 0), 0);
+      setReview({
+        title: `Replace everything with ${file.name}?`,
+        lines: [
+          `${incoming.length} folders, ${links} links (now: ${data.folders.length} folders, ${data.folders.reduce((n, f) => n + f.links.length, 0)} links)`,
+          `${incoming.filter((f) => !nowIds.has(f.id)).length} folders are new, ${data.folders.filter((f) => !incoming.some((x) => x.id === f.id)).length} current folders would disappear`,
+          ...incoming.slice(0, 8).map((f) => `• ${f.emoji || "📁"} ${f.name} (${Array.isArray(f.links) ? f.links.length : 0})`),
+        ],
+        go: () => run("importData", { payload }),
+        done: "Imported!",
+      });
     } catch {
       showToast("That isn't a valid bookmarks JSON file");
     }
   }
-  const danger = async (msg: string, action: string, done: string) => {
-    if (confirm(msg) && (await run(action))) showToast(done);
-  };
   return (
     <>
       <h3 className="admin-h">Backup</h3>
@@ -1060,8 +1112,18 @@ function DataTab({ data, run, showToast }: { data: BookmarksData; run: Api; show
               const folders = parseBookmarksHtml(await f.text());
               const count = folders.reduce((n, x) => n + x.links.length, 0);
               if (!count) { showToast("No web links found in that file"); return; }
-              if (!confirm(`Add ${count} websites in ${folders.length} new folder(s)? Existing bookmarks stay as they are.`)) return;
-              if (await run("addFolders", { folders })) showToast(`Imported ${count} websites`);
+              const have = new Set(data.folders.flatMap((x) => x.links.map((l) => normUrl(l.url))));
+              const dupes = folders.reduce((n, x) => n + x.links.filter((l) => have.has(normUrl(l.url))).length, 0);
+              setReview({
+                title: `Add ${count} websites from ${f.name}?`,
+                lines: [
+                  `${folders.length} new folder(s); existing bookmarks stay as they are`,
+                  dupes ? `${dupes} of them are already on the site` : "None of them are on the site yet",
+                  ...folders.slice(0, 8).map((x) => `• ${x.name} (${x.links.length})`),
+                ],
+                go: () => run("addFolders", { folders }),
+                done: `Imported ${count} websites`,
+              });
             }}
           />
         </label>
@@ -1069,19 +1131,29 @@ function DataTab({ data, run, showToast }: { data: BookmarksData; run: Api; show
           <Icon name="undo" /><span>Undo last change</span><em>Press again to redo</em>
         </button>
       </div>
+      {review && (
+        <div className="import-review">
+          <strong>{review.title}</strong>
+          {review.lines.map((l, i) => <div key={i} className="row-sub">{l}</div>)}
+          <div className="admin-toolbar end">
+            <button className="btn btn-secondary btn-sm" onClick={() => setReview(null)}>Cancel</button>
+            <button className="btn btn-primary btn-sm" onClick={async () => { const r = review; setReview(null); if (await r.go()) showToast(r.done); }}>Import</button>
+          </div>
+        </div>
+      )}
       <h3 className="admin-h">Danger zone</h3>
       <div className="danger-zone">
         <div className="danger-row">
           <div><strong>Reset click counts</strong><span>Sets every link back to 0 clicks.</span></div>
-          <button className="btn btn-danger btn-sm" onClick={() => danger("Reset ALL click counts to 0?", "resetClicks", "Clicks reset")}>Reset</button>
+          <DangerButton label="Reset clicks" word="RESET" warning="Set every link back to 0 clicks?" onConfirm={async () => { if (await run("resetClicks")) showToast("Clicks reset"); }} />
         </div>
         <div className="danger-row">
           <div><strong>Restore default bookmarks</strong><span>Replaces everything with the starter set.</span></div>
-          <button className="btn btn-danger btn-sm" onClick={() => danger("Replace everything with the default bookmarks?", "reset", "Reset to defaults")}>Restore</button>
+          <DangerButton label="Restore defaults" word="RESET" warning="Replace every folder and link with the starter set? Use Undo straight after if you change your mind." onConfirm={async (w) => { if (await run("reset", { confirm: w })) showToast("Reset to defaults"); }} />
         </div>
         <div className="danger-row">
           <div><strong>Delete everything</strong><span>Removes all folders and links.</span></div>
-          <button className="btn btn-danger btn-sm" onClick={() => danger("Delete ALL folders and links? Use Undo right after if you change your mind.", "clearAll", "Everything cleared")}>Delete all</button>
+          <DangerButton label="Delete everything" word="DELETE" warning="Delete ALL folders and links for everyone? Use Undo straight after if you change your mind." onConfirm={async (w) => { if (await run("clearAll", { confirm: w })) showToast("Everything cleared"); }} />
         </div>
       </div>
     </>
@@ -1089,7 +1161,7 @@ function DataTab({ data, run, showToast }: { data: BookmarksData; run: Api; show
 }
 
 /* ---------- Activity ---------- */
-function ActivityTab({ data, audit }: { data: BookmarksData; audit?: AuditEntry[] }) {
+function ActivityTab({ data, audit, admin, refresh, toast }: { data: BookmarksData; audit?: AuditEntry[]; admin: (a: string, p?: Record<string, any>) => Promise<any>; refresh: () => void; toast: (m: string) => void }) {
   const [view, setView] = useState<"activity" | "audit">("activity");
   if (audit && audit.length > 0) {
     return (
@@ -1098,27 +1170,11 @@ function ActivityTab({ data, audit }: { data: BookmarksData; audit?: AuditEntry[
           <button className={view === "activity" ? "on" : ""} onClick={() => setView("activity")}>Everyone</button>
           <button className={view === "audit" ? "on" : ""} onClick={() => setView("audit")}>Admin log <span>{audit.length}</span></button>
         </div>
-        {view === "audit" ? <AuditList items={audit} /> : <ActivityInner data={data} />}
+        {view === "audit" ? <AuditTools items={audit} admin={admin} refresh={refresh} toast={toast} /> : <ActivityInner data={data} />}
       </>
     );
   }
   return <ActivityInner data={data} />;
-}
-function AuditList({ items }: { items: AuditEntry[] }) {
-  return (
-    <div className="admin-list">
-      {items.map((a, i) => (
-        <div key={i} className="admin-row">
-          <span className="avatar sm">{(a.actor[0] || "?").toUpperCase()}</span>
-          <div className="row-main">
-            <div className="row-title">{a.actor} <span className={`pill role-${a.role}`}>{a.role}</span></div>
-            <div className="row-sub">{a.action}{a.detail ? ` · ${a.detail}` : ""}</div>
-          </div>
-          <span className="row-sub">{timeAgo(a.at)}</span>
-        </div>
-      ))}
-    </div>
-  );
 }
 function ActivityInner({ data }: { data: BookmarksData }) {
   const [type, setType] = useState("all");

@@ -40,6 +40,8 @@ export interface LinkCardActions {
   thank?: (link: Link) => void;
   /** suggest a short public note for a moderator to approve */
   suggestNote?: (link: Link) => void;
+  /** tell the moderators something's wrong with it */
+  report?: (link: Link) => void;
 }
 
 /** Everything a card needs that's the same for every card on the page. */

@@ -4,7 +4,7 @@ import { getCurrentUser, listUsers } from "@/lib/auth";
 import { getAllMessages } from "@/lib/chat";
 import { allFlair, allThanks, helperStats, listEvents, proposeNote, thank, wyrTally, wyrVote } from "@/lib/community";
 import { errorResponse } from "@/lib/http";
-import { requireMember } from "@/lib/member";
+import { cleanPostText, requireCommunityOpen, requireMember } from "@/lib/member";
 import { rateLimit } from "@/lib/ratelimit";
 import { getBookmarks } from "@/lib/store";
 import { listSuggestions } from "@/lib/suggestions";
@@ -114,6 +114,8 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const me = await requireMember();
+    await requireCommunityOpen(me.staff);
+    await cleanPostText(body, ["text"]);
     await rateLimit(`community:${me.user.toLowerCase()}`, 30, 60);
     const findLink = async (id: string) => {
       const link = (await getBookmarks()).folders.flatMap((f) => f.links).find((l) => l.id === id);

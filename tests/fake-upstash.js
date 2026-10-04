@@ -51,6 +51,7 @@ function run(cmd) {
     case "mset": { for (let i = 0; i < a.length; i += 2) kv.set(a[i], { v: str(a[i + 1]), exp: 0 }); return "OK"; }
     case "del": { let n = 0; for (const k of a) if (kv.delete(k)) n++; return n; }
     case "exists": return a.filter((k) => live(k)).length;
+    case "dbsize": return [...kv.keys()].filter((k) => live(k)).length;
     case "incr": case "incrby": {
       const e = live(a[0]);
       const n = Number(e?.v || 0) + (String(op).toLowerCase() === "incrby" ? Number(a[1]) : 1);

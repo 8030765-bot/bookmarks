@@ -8,6 +8,7 @@ import { notify } from "./userdata";
 import { REV_KEYS } from "./revs";
 import { fansKey } from "./social";
 import { getClub, isMember } from "./clubs";
+import { addToTrash, setFlags, takeFromTrash } from "./moderation";
 const KEY = "bookmarks:shared";
 const PREV_KEY = "bookmarks:shared:prev";
 // visit counts live in their own hash (HINCRBY) so a click never rewrites the whole list
@@ -31,6 +32,10 @@ function cleanUrl(v: unknown) {
 function cleanTags(v: unknown): string[] {
   const list = Array.isArray(v) ? v.map(String) : typeof v === "string" ? v.split(",") : [];
   return Array.from(new Set(list.map((t) => t.trim().toLowerCase().replace(/,/g, "").slice(0, 24)).filter(Boolean))).slice(0, MAX_TAGS);
+}
+function cleanDate(v: string) {
+  const t = Date.parse(v);
+  return v && Number.isFinite(t) ? new Date(t).toISOString() : undefined;
 }
 function cleanColor(v: unknown) {
   return typeof v === "string" && /^#[0-9a-f]{3,8}$/i.test(v) ? v : undefined;
@@ -67,6 +72,16 @@ function applyFolderFields(data: BookmarksData, folder: Folder, body: Record<str
     if (folder.rule && folder.links.length) throw new Error("Only an empty folder can become a smart folder");
   }
   if (typeof body.archived === "boolean") folder.archived = body.archived || undefined;
+  if (body.perm && typeof body.perm === "object") {
+    const p = body.perm as Record<string, unknown>;
+    const perm: Folder["perm"] = {
+      add: p.add === "contributors" || p.add === "admins" ? p.add : undefined,
+      edit: p.edit === "admins" ? "admins" : undefined,
+      view: p.view === "members" ? "members" : undefined,
+    };
+    folder.perm = perm.add || perm.edit || perm.view ? perm : undefined;
+  }
+  if (typeof body.showAt === "string") folder.showAt = cleanDate(body.showAt);
   if (Array.isArray(body.maintainers)) {
     const names = Array.from(new Set(body.maintainers.map((u) => String(u).trim().toLowerCase()).filter((u) => /^[a-z0-9_]{3,20}$/.test(u)))).slice(0, 5);
     folder.maintainers = names.length ? names : undefined;
@@ -107,6 +122,7 @@ function applyExtras(data: BookmarksData, link: Link, body: Record<string, unkno
     link.checklist = steps.length ? steps : undefined;
   }
   if (!admin) return;
+  if (typeof body.showAt === "string") link.showAt = cleanDate(body.showAt);
   if (typeof body.pinned === "boolean") link.pinned = body.pinned || undefined;
   if (typeof body.verified === "boolean") link.verified = body.verified || undefined;
   if (typeof body.status === "string") link.status = STATUSES.includes(body.status as LinkStatus) ? (body.status as LinkStatus) : undefined;
@@ -280,9 +296,17 @@ export async function handleAction(
   // folder maintainers (and a club's members, for its folder) can manage the links in it
   const maintains = (folder: Folder) => !!me && !!folder.maintainers?.includes(me.toLowerCase());
   const requireFolderEditor = async (folder: Folder) => {
+    if (folder.perm?.edit === "admins") return requireAdmin(password);
     if (maintains(folder)) return;
     if (folder.clubId && me && isMember(await getClub(folder.clubId), me)) return;
     requireAdmin(password);
+  };
+  /** Adding a link: the site-wide lock, then the folder's own rule. */
+  const requireCanAdd = async (folder: Folder) => {
+    const rule = folder.perm?.add;
+    if (rule === "admins") return requireAdmin(password);
+    if (rule === "contributors" && !authFrom(body).contributor && !maintains(folder)) return requireAdmin(password);
+    if (data.settings?.lockAdding) await requireFolderEditor(folder);
   };
   const findFolder = (id: unknown) => {
     const folder = data.folders.find((f) => f.id === String(id || ""));
@@ -302,7 +326,7 @@ export async function handleAction(
       const url = cleanUrl(body.url);
       if (!folderId || !name || !url) throw new Error("Missing fields");
       const folder = findFolder(folderId);
-      if (data.settings?.lockAdding) await requireFolderEditor(folder);
+      await requireCanAdd(folder);
       if (folder.rule) throw new Error("Smart folders fill themselves — add the link to a normal folder");
       const tags = cleanTags(body.tags);
       const user = me;
@@ -329,7 +353,7 @@ export async function handleAction(
     case "addLinks": {
       // paste a list of links: one save instead of one per link
       const folder = findFolder(body.folderId);
-      if (data.settings?.lockAdding) await requireFolderEditor(folder);
+      await requireCanAdd(folder);
       if (folder.rule) throw new Error("Smart folders fill themselves — add the links to a normal folder");
       const incoming = Array.isArray(body.links) ? (body.links as Record<string, unknown>[]).slice(0, 50) : [];
       const existing = new Set(data.folders.flatMap((f) => f.links.map((l) => l.url)));
@@ -374,6 +398,7 @@ export async function handleAction(
       folder.links = folder.links.filter((l) => l.id !== linkId);
       log("delete", `Deleted link “${before?.name || linkId}”${credit(body)}`, folder.id);
       await saveBookmarks(data);
+      if (before) await addToTrash([{ kind: "link", by: me, folderId: folder.id, folderName: folder.name, item: before }]).catch(() => {});
       await getRedis().hdel(CLICKS_KEY, linkId).catch(() => {});
       return data;
     }
@@ -418,6 +443,7 @@ export async function handleAction(
       data.folders.forEach((f) => { if (f.parentId === folderId) f.parentId = undefined; });
       log("delete", `Deleted folder “${before?.name || folderId}”`);
       await saveBookmarks(data);
+      if (before) await addToTrash([{ kind: "folder", by: me, item: before }]).catch(() => {});
       return data;
     }
     case "mergeFolder": {
@@ -585,6 +611,7 @@ export async function handleAction(
       return data;
     }
     case "votePoll": {
+      if (data.settings?.pollsEnabled === false) throw new Error("Polls are turned off right now");
       const user = me?.toLowerCase() || "";
       if (!user) throw new Error("Log in to vote");
       const poll = (data.polls || []).find((p) => p.id === String(body.pollId || ""));
@@ -672,6 +699,7 @@ export async function handleAction(
     }
     case "reset": {
       requireAdmin(password);
+      if (String(body.confirm || "").toUpperCase() !== "RESET") throw new Error("Type RESET to confirm");
       const fresh = structuredClone(defaultData);
       pushActivity(fresh, "reset", "Reset to defaults");
       await saveBookmarks(fresh);
@@ -679,6 +707,7 @@ export async function handleAction(
     }
     case "clearAll": {
       requireAdmin(password);
+      if (String(body.confirm || "").toUpperCase() !== "DELETE") throw new Error("Type DELETE to confirm");
       const empty: BookmarksData = {
         folders: [],
         activity: [],
@@ -748,6 +777,13 @@ export async function handleAction(
       }
       if (typeof patch.aprilFools === "boolean") s.aprilFools = patch.aprilFools || undefined;
       if (typeof patch.siteBirthday === "string") s.siteBirthday = /^\d{4}-\d{2}-\d{2}$/.test(patch.siteBirthday) ? patch.siteBirthday : undefined;
+      applyAdminSettings(s, patch);
+      await setFlags({
+        maintenance: s.maintenance, maintenanceMessage: s.maintenanceMessage, signups: s.signups, approveLinks: s.approveLinks,
+        newAccountWait: s.newAccountWait, rateScale: s.rateScale, blockedNames: s.blockedNames, wordFilter: s.wordFilter,
+        modPerms: s.modPerms, betaFlags: s.betaFlags, pollsEnabled: s.pollsEnabled, suggestionsEnabled: s.suggestionsEnabled,
+        communityEnabled: s.communityEnabled,
+      });
       pushActivity(data, "settings", "Updated site settings");
       await saveBookmarks(data);
       return data;
@@ -787,13 +823,16 @@ export async function handleAction(
       const refs = linkRefs(body);
       const ids = new Set(refs.map((r) => r.linkId));
       let removed = 0;
+      const trashed: { kind: "link"; by?: string; folderId: string; folderName: string; item: Link }[] = [];
       for (const f of data.folders) {
         const before = f.links.length;
+        f.links.filter((l) => ids.has(l.id)).forEach((l) => trashed.push({ kind: "link", by: me, folderId: f.id, folderName: f.name, item: l }));
         f.links = f.links.filter((l) => !ids.has(l.id));
         removed += before - f.links.length;
       }
       pushActivity(data, "delete", `Deleted ${removed} links`);
       await saveBookmarks(data);
+      await addToTrash(trashed).catch(() => {});
       return data;
     }
     case "bulkTag": {
@@ -861,6 +900,45 @@ export async function handleAction(
       await saveBookmarks(data);
       return data;
     }
+    case "replaceUrls": {
+      // find & replace across every link address (admins preview the matches first in the panel)
+      requireAdmin(password);
+      const find = String(body.find || "");
+      const replace = String(body.replace ?? "");
+      if (find.length < 3) throw new Error("Type at least 3 characters to find");
+      let changed = 0;
+      for (const f of data.folders) {
+        for (const l of f.links) {
+          if (!l.url.includes(find)) continue;
+          const next = l.url.split(find).join(replace);
+          try { l.url = cleanUrl(next); changed++; l.updatedAt = new Date().toISOString(); } catch { /* skip results that aren't valid links */ }
+        }
+      }
+      if (!changed) throw new Error("No links matched");
+      pushActivity(data, "edit", `Replaced “${find}” with “${replace}” in ${changed} links`);
+      await saveBookmarks(data);
+      return data;
+    }
+    case "restoreTrash": {
+      requireAdmin(password);
+      const t = await takeFromTrash(String(body.id || ""));
+      if (!t) throw new Error("That's no longer in the trash");
+      if (t.kind === "folder") {
+        const folder = t.item as Folder;
+        if (data.folders.some((f) => f.id === folder.id)) folder.id = uuid();
+        data.folders.push(folder);
+        pushActivity(data, "restore", `Restored folder “${folder.name}”`);
+      } else {
+        const link = t.item as Link;
+        const folder = data.folders.find((f) => f.id === t.folderId) || data.folders[0];
+        if (!folder) throw new Error("Make a folder first, then restore");
+        if (data.folders.some((f) => f.links.some((l) => l.id === link.id))) link.id = uuid();
+        folder.links.push(link);
+        pushActivity(data, "restore", `Restored “${link.name}” to ${folder.name}`, { folderId: folder.id });
+      }
+      await saveBookmarks(data);
+      return data;
+    }
     case "undo": {
       requireAdmin(password);
       const redis = getRedis();
@@ -879,6 +957,54 @@ export async function handleAction(
     default:
       throw new Error("Unknown action");
   }
+}
+
+/** Moderation and site-control settings from the admin panel. */
+function applyAdminSettings(s: NonNullable<BookmarksData["settings"]>, patch: Record<string, unknown>) {
+  const bool = (k: "maintenance" | "approveLinks" | "newAccountWait") => { if (typeof patch[k] === "boolean") s[k] = (patch[k] as boolean) || undefined; };
+  bool("maintenance"); bool("approveLinks"); bool("newAccountWait");
+  for (const k of ["pollsEnabled", "suggestionsEnabled", "communityEnabled"] as const) {
+    if (typeof patch[k] === "boolean") s[k] = patch[k] === false ? false : undefined;
+  }
+  if (typeof patch.maintenanceMessage === "string") s.maintenanceMessage = patch.maintenanceMessage.trim().slice(0, 200) || undefined;
+  if (patch.signups === "open" || patch.signups === "closed" || patch.signups === "invite") s.signups = patch.signups === "open" ? undefined : patch.signups;
+  if (typeof patch.rateScale === "number" && Number.isFinite(patch.rateScale)) s.rateScale = Math.max(0.25, Math.min(5, patch.rateScale)) === 1 ? undefined : Math.max(0.25, Math.min(5, patch.rateScale));
+  const words = (v: unknown, max: number) => Array.from(new Set((Array.isArray(v) ? v : String(v || "").split(/[\n,]/)).map((x) => String(x).trim().toLowerCase()).filter(Boolean))).slice(0, max).map((x) => x.slice(0, 30));
+  if (patch.blockedNames !== undefined) { const l = words(patch.blockedNames, 200); s.blockedNames = l.length ? l : undefined; }
+  if (patch.wordFilter !== undefined) { const l = words(patch.wordFilter, 200); s.wordFilter = l.length ? l : undefined; }
+  if (patch.betaFlags !== undefined) { const l = words(patch.betaFlags, 20).filter((x) => ["tools", "community", "wiki"].includes(x)); s.betaFlags = l.length ? l : undefined; }
+  if (patch.modPerms && typeof patch.modPerms === "object") {
+    const out: Record<string, boolean> = {};
+    for (const [k, v] of Object.entries(patch.modPerms as Record<string, unknown>)) if (/^[a-zA-Z]{2,20}$/.test(k) && v === false) out[k] = false;
+    s.modPerms = Object.keys(out).length ? out : undefined;
+  }
+  if (Array.isArray(patch.rejectReasons)) {
+    const l = patch.rejectReasons.map((x) => String(x).trim().slice(0, 120)).filter(Boolean).slice(0, 15);
+    s.rejectReasons = l.length ? l : undefined;
+  }
+  if (Array.isArray(patch.approveTemplates)) {
+    const l = (patch.approveTemplates as Record<string, unknown>[]).slice(0, 15).map((t) => ({
+      name: String(t?.name || "").trim().slice(0, 40), folderId: String(t?.folderId || ""), tags: cleanTags(t?.tags),
+    })).filter((t) => t.name && t.folderId);
+    s.approveTemplates = l.length ? l : undefined;
+  }
+  for (const k of ["announceFrom", "announceUntil"] as const) if (typeof patch[k] === "string") s[k] = cleanDate(patch[k] as string);
+}
+
+/**
+ * What one visitor is allowed to see: guests don't get members-only folders,
+ * and nobody but admins sees links or folders scheduled for later.
+ */
+export function viewFor(data: BookmarksData, viewer: { admin: boolean; member: boolean }): BookmarksData {
+  if (viewer.admin) return data;
+  const now = Date.now();
+  const live = (iso?: string) => !iso || Date.parse(iso) <= now;
+  return {
+    ...data,
+    folders: data.folders
+      .filter((f) => live(f.showAt) && (viewer.member || f.perm?.view !== "members"))
+      .map((f) => (f.links.some((l) => !live(l.showAt)) ? { ...f, links: f.links.filter((l) => live(l.showAt)) } : f)),
+  };
 }
 
 /** One visit: a single HINCRBY instead of read-modify-write of the whole list. */

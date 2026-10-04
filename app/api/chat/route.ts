@@ -10,6 +10,7 @@ import { errorResponse } from "@/lib/http";
 import { getClub, isMember } from "@/lib/clubs";
 import { rateLimit } from "@/lib/ratelimit";
 import { ChatChannel } from "@/lib/types";
+import { assertWritable, bumpStat, filterWords, modCan, restriction } from "@/lib/moderation";
 
 export const dynamic = "force-dynamic";
 
@@ -81,6 +82,7 @@ export async function POST(req: NextRequest) {
     if (settings?.chatEnabled === false && !isStaff(ctx)) {
       return NextResponse.json({ error: "Chat is turned off" }, { status: 403 });
     }
+    if (action !== "typing") await assertWritable(ctx.role);
     const reply = async (extra: Record<string, unknown> = {}) => {
       const { messages, hasMore } = await getMessages(ch);
       return NextResponse.json({ channel: ch, messages, hasMore, pins: await getPins(ch), ...extra });
@@ -90,13 +92,18 @@ export async function POST(req: NextRequest) {
       case "send":
         await requireChannel(ctx, ch);
         await rateLimit(`chat:${user.toLowerCase()}`, 30, 60);
-        await postMessage(user, String(body.text || ""), {
+        {
+          const why = await restriction(user);
+          if (why) throw new Error(why);
+        }
+        await postMessage(user, await filterWords(String(body.text || "")), {
           channel: ch,
           replyTo: body.replyTo ? String(body.replyTo) : undefined,
           announce: ctx.role === "owner" || ctx.role === "admin",
           maxLen: settings?.chatMaxLen,
           linkAllow: settings?.chatLinkAllow,
         });
+        await bumpStat("messages");
         return reply();
       case "react":
         await requireChannel(ctx, ch);
@@ -111,6 +118,7 @@ export async function POST(req: NextRequest) {
         if (!owner) throw new Error("Message not found");
         if (owner.toLowerCase() !== user.toLowerCase()) {
           checkMod(ctx, typeof body.password === "string" ? body.password : undefined);
+          if (!(await modCan(ctx.role, "deleteMessages")) && ctx.role === "mod") throw new Error("Admins only — moderators can't delete messages here");
           await audit(ctx, "deleteMessage", `${owner}: ${id}`).catch(() => {});
         }
         await deleteMessage(id);

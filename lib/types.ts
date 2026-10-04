@@ -43,11 +43,22 @@ export interface Link {
   readMins?: number;
   /** context added by members and approved by admins */
   communityNotes?: { text: string; by: string; at: string }[];
+  /** admin: only appears to members from this date (ISO) */
+  showAt?: string;
 }
 
 export type LinkStatus = "works" | "login" | "slow" | "broken";
 
+/** Who can do what in one folder (missing = the site's normal rules). */
+export interface FolderPerm {
+  add?: "everyone" | "contributors" | "admins";
+  edit?: "maintainers" | "admins";
+  view?: "everyone" | "members";
+}
 export interface Folder {
+  perm?: FolderPerm;
+  /** admin: only appears to members from this date (ISO) */
+  showAt?: string;
   id: string;
   name: string;
   emoji: string;
@@ -199,6 +210,27 @@ export interface SiteSettings {
   themeOfMonth?: { code: string; name: string };
   /** fun: April Fools mode, switched on by an admin */
   aprilFools?: boolean;
+  /** admin: read-only mode, with a banner */
+  maintenance?: boolean;
+  maintenanceMessage?: string;
+  signups?: "open" | "closed" | "invite";
+  approveLinks?: boolean;
+  newAccountWait?: boolean;
+  rateScale?: number;
+  blockedNames?: string[];
+  wordFilter?: string[];
+  modPerms?: Record<string, boolean>;
+  betaFlags?: string[];
+  pollsEnabled?: boolean;
+  suggestionsEnabled?: boolean;
+  communityEnabled?: boolean;
+  /** ready-made reasons for declining a suggestion */
+  rejectReasons?: string[];
+  /** quick folder + tags to use when approving a link */
+  approveTemplates?: { name: string; folderId: string; tags: string[] }[];
+  /** the announcement only shows between these times (ISO) */
+  announceFrom?: string;
+  announceUntil?: string;
 }
 
 export interface Poll {

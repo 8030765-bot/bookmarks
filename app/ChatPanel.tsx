@@ -456,6 +456,19 @@ export default function ChatPanel({
               {canModerate && <button onClick={() => { act({ action: "pin", id: m.id, pinned: !s.pins.some((p) => p.id === m.id) }, s.pins.some((p) => p.id === m.id) ? "Unpinned" : "Pinned"); setMenuFor(null); }}><Icon name="pin" /> {s.pins.some((p) => p.id === m.id) ? "Unpin" : "Pin"}</button>}
               {(mine || canModerate) && <button className="danger" onClick={() => { if (confirm(mine ? "Delete your message?" : "Delete this message for everyone?")) act({ action: "delete", id: m.id, password: adminPassword || undefined }); setMenuFor(null); }}><Icon name="trash" /> Delete</button>}
               {user && onBlock && !mine && <button onClick={() => { if (confirm(`Hide all messages from ${m.user}? You can undo this in Account & security.`)) onBlock(m.user); setMenuFor(null); }}><Icon name="eyeOff" /> Block {m.user}</button>}
+              {user && !mine && (
+                <button onClick={async () => {
+                  setMenuFor(null);
+                  const reason = window.prompt(`What's wrong with this message from ${m.user}?`, "");
+                  if (!reason?.trim()) return;
+                  const res = await fetch("/api/reports", {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ kind: "message", targetId: m.id, targetName: `${m.user}: ${m.text.slice(0, 80)}`, reason, extra: `${channel}: ${m.text.slice(0, 200)}` }),
+                  });
+                  const j = await res.json().catch(() => ({}));
+                  showToast(res.ok ? "Thanks — a moderator will take a look" : j.error || "Couldn't send the report");
+                }}>🚩 Report</button>
+              )}
             </div>
           )}
           {picker === m.id && (

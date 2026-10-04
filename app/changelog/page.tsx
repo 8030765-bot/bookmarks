@@ -7,6 +7,17 @@ import { EasterEgg } from "../components/Fun";
 /** Updates to the site itself (not the bookmarks — those are in "What's new"). Newest first. */
 const RELEASES: { date: string; title: string; items: string[] }[] = [
   {
+    date: "2026-10", title: "Moderation & admin",
+    items: [
+      "Report a link or a chat message (🚩) and a moderator will look",
+      "Moderators can warn, time out, mute or pause edits — with reasons and history",
+      "Folders can be locked, limited to contributors, or shown only to members",
+      "Admins can switch on approval for new links, invite-only sign-ups and a read-only maintenance mode",
+      "Deleted links and folders go to a trash and can be restored",
+      "A dashboard with charts, a staff board, and much more for admins",
+    ],
+  },
+  {
     date: "2026-10", title: "Look & feel",
     items: [
       "A new Customize window with a live preview: 14 themes (including Retro 95 and Terminal), any accent colour, backgrounds and dark mode by time of day",

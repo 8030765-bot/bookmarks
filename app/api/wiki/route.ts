@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { deleteWiki, getWiki, listWiki, saveWiki } from "@/lib/community";
 import { errorResponse } from "@/lib/http";
-import { requireMember } from "@/lib/member";
+import { cleanPostText, requireCommunityOpen, requireMember } from "@/lib/member";
 import { rateLimit } from "@/lib/ratelimit";
 import { audit } from "@/lib/roles";
 
@@ -26,6 +26,8 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const me = await requireMember();
+    await requireCommunityOpen(me.staff);
+    await cleanPostText(body, ["title", "body"]);
     if (body.action === "delete") {
       if (!me.staff) throw new Error("Admins only — ask a moderator to remove a page");
       await deleteWiki(String(body.slug || ""));

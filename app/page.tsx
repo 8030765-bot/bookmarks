@@ -189,6 +189,14 @@ export default function HomePage() {
   const [adminOpen, setAdminOpen] = useState(false);
   const [user, setUser] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
+  // from /api/auth: beta tester?, which features are in beta, how sign-ups work
+  const [authExtras, setAuthExtras] = useState<{ beta: boolean; betaFlags: string[]; signups: string }>({ beta: false, betaFlags: [], signups: "open" });
+  const [fInvite, setFInvite] = useState("");
+  // admins can look at the site the way members see it
+  const [asMember, setAsMember] = useState(false);
+  const asMemberRef = useRef(false);
+  const queuedRef = useRef<string | null>(null);
+  const [staffCount, setStaffCount] = useState(0);
   const [role, setRole] = useState<"owner" | "admin" | "mod" | null>(null);
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileView, setProfileView] = useState<string | null>(null);
@@ -369,7 +377,7 @@ export default function HomePage() {
     }
     try {
       setError(null);
-      const res = await fetch("/api/bookmarks", { cache: "no-store" });
+      const res = await fetch(asMemberRef.current ? "/api/bookmarks?asMember=1" : "/api/bookmarks", { cache: "no-store" });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (json.quota) reportStatus("quota");
@@ -405,7 +413,7 @@ export default function HomePage() {
   const serverRev = useRev("bookmarks");
   useEffect(() => {
     if (serverRev < 0 || serverRev <= revRef.current) return;
-    fetch("/api/bookmarks", { cache: "no-store" }).then((r) => r.json()).then(applyIfNewer).catch(() => {});
+    fetch(asMemberRef.current ? "/api/bookmarks?asMember=1" : "/api/bookmarks", { cache: "no-store" }).then((r) => r.json()).then(applyIfNewer).catch(() => {});
   }, [serverRev, applyIfNewer]);
 
   const presence = usePresence(user);
@@ -503,6 +511,29 @@ export default function HomePage() {
   useEffect(() => { setAprilOff(readLocal("aprilOff", "") === new Date().toDateString()); }, []);
   const aprilOn = !!data?.settings?.aprilFools && !aprilOff;
   useEffect(() => { document.documentElement.setAttribute("data-april", aprilOn ? "on" : "off"); }, [aprilOn]);
+  // things waiting for staff, for the badge on the Admin button
+  const loadStaffCount = useCallback(() => {
+    if (!role) { setStaffCount(0); return; }
+    fetch("/api/admin", { cache: "no-store" }).then((r) => r.json()).then((j) => setStaffCount(Number(j.count) || 0)).catch(() => {});
+  }, [role]);
+  useEffect(() => { loadStaffCount(); }, [loadStaffCount]);
+  useOnRevChange("suggestions", loadStaffCount);
+  const toggleAsMember = () => {
+    const next = !asMember;
+    asMemberRef.current = next;
+    setAsMember(next);
+    if (next) { setAdminOpen(false); setAdminUnlocked(false); showToast("Viewing the site as a member — use the ⋯ menu to go back"); }
+    else { setAdminUnlocked(!!role); showToast("Back to admin view"); }
+    load();
+  };
+  /** A feature in beta is only for admins and beta testers. */
+  const betaOk = (f: string) => !(data?.settings?.betaFlags || authExtras.betaFlags).includes(f) || !!role || authExtras.beta;
+  const communityOn = data?.settings?.communityEnabled !== false && betaOk("community");
+  const announceLive = (() => {
+    const s = data?.settings;
+    const now = Date.now();
+    return !(s?.announceFrom && Date.parse(s.announceFrom) > now) && !(s?.announceUntil && Date.parse(s.announceUntil) < now);
+  })();
   const [loadingLine, setLoadingLine] = useState("");
   useEffect(() => { setLoadingLine(randomLoadingLine()); }, []);
 
@@ -604,6 +635,7 @@ export default function HomePage() {
       setRole(j.role || null);
       setOwnerExists(!!j.ownerExists);
       if (j.role) { setAdminUnlocked(true); setAdminPassword(""); }
+      setAuthExtras({ beta: !!j.beta, betaFlags: Array.isArray(j.betaFlags) ? j.betaFlags : [], signups: j.signups || "open" });
     }).catch(() => {}).finally(() => setAuthChecked(true));
     let saved: string | null = null;
     try { saved = sessionStorage.getItem(ADMIN_PW_KEY); } catch {}
@@ -669,6 +701,7 @@ export default function HomePage() {
         }
         const next = ensureData(json);
         setData(next);
+        queuedRef.current = typeof json.queued === "string" ? json.queued : null;
         return next;
       }
     } catch (e: any) {
@@ -1064,7 +1097,7 @@ export default function HomePage() {
     const common = { ...fields, password: adminPw() };
     if (modal.mode.kind === "add") {
       const ok = await api("addLink", { ...common, folderId: values.folderId });
-      if (ok) showToast(`Added ${values.name} for everyone`);
+      if (ok) showToast(queuedRef.current || `Added ${values.name} for everyone`, undefined, queuedRef.current ? 6000 : undefined);
       return !!ok;
     }
     const { folder, link } = modal.mode;
@@ -1150,6 +1183,20 @@ export default function HomePage() {
         onSave: (text) => {
           if (!text.trim()) return;
           suggestNote(l.id, text).then(() => showToast("Thanks! A moderator will check your note")).catch((e) => showToast(e.message));
+        },
+      });
+    },
+    report: (l) => {
+      if (!user) { showToast("Log in to report a problem"); openLogin(); return; }
+      setPrompt({
+        title: `What's wrong with “${l.name}”?`,
+        initial: "",
+        placeholder: "e.g. It's broken · Not appropriate for school · Pop-ups everywhere",
+        onSave: async (reason) => {
+          if (!reason.trim()) return;
+          const res = await fetch("/api/reports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "link", targetId: l.id, targetName: l.name, reason }) });
+          const j = await res.json().catch(() => ({}));
+          showToast(res.ok ? "Thanks — a moderator will take a look" : j.error || "Couldn't send the report");
         },
       });
     },
@@ -1311,7 +1358,7 @@ export default function HomePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(ticket
           ? { action: "login2fa", ticket, code: fTotp, remember: rememberMe }
-          : { action: authMode, username: fUsername, password: fPassword, remember: rememberMe }),
+          : { action: authMode, username: fUsername, password: fPassword, remember: rememberMe, ...(authMode === "signup" && fInvite.trim() ? { invite: fInvite.trim() } : {}) }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -1588,7 +1635,7 @@ export default function HomePage() {
   // homepage sections you can reorder (Customize → Layout)
   const customOrder = look.order.join() !== DEFAULT_ORDER.join();
   const logo = holidayLogo(new Date(), data?.settings?.siteBirthday);
-  const todayBlock = (
+  const todayBlock = !communityOn ? null : (
     <>
         {data && (
           <TodayStrip
@@ -1604,7 +1651,7 @@ export default function HomePage() {
         )}
     </>
   );
-  const pollsBlock = (
+  const pollsBlock = data?.settings?.pollsEnabled === false ? null : (
     <>
         <PollCards
           polls={data?.polls || []}
@@ -1659,6 +1706,16 @@ export default function HomePage() {
           <span className="offline-dot" /> You&apos;re offline — showing the copy saved on this device. Changes from others will appear when you reconnect.
         </div>
       )}
+      {data?.settings?.maintenance && (
+        <div className="offline-bar maint-bar" role="status">
+          🛠️ The site is read-only for maintenance{data.settings.maintenanceMessage ? ` — ${data.settings.maintenanceMessage}` : ""}.{role === "owner" || role === "admin" ? " (Admins can still make changes.)" : ""}
+        </div>
+      )}
+      {asMember && (
+        <div className="offline-bar member-bar" role="status">
+          👀 You&apos;re seeing the site as a member does. <button className="link-btn" onClick={toggleAsMember}>Back to admin view</button>
+        </div>
+      )}
       <div className="topbar" ref={topbarRef}>
         <div className="topbar-inner">
           <button className="brand" onClick={() => { if (!logoClick()) window.scrollTo({ top: 0, behavior: look.motion ? "smooth" : "auto" }); }} title={look.seasonal ? logo.label : "Back to top"}>
@@ -1679,7 +1736,7 @@ export default function HomePage() {
             onPickFolder={(f) => { setSearch(""); jumpToFolder(f.id); }}
           />
           <div className="top-actions">
-            <button className="icon-btn" title="Tools (O)" onClick={() => openTools()}><Icon name="tools" /></button>
+            {betaOk("tools") && <button className="icon-btn" title="Tools (O)" onClick={() => openTools()}><Icon name="tools" /></button>}
             <button className="icon-btn" title="Spin the wheel (S)" onClick={() => setModal({ type: "spin" })}><Icon name="shuffle" /></button>
             <button className="icon-btn" title="Community (L)" onClick={() => setModal({ type: "leaderboard" })}><Icon name="trophy" /></button>
             {user && <NotificationBell notifications={personal.notifications} open={notifOpen} onOpen={() => setNotifOpen(true)} />}
@@ -1696,8 +1753,11 @@ export default function HomePage() {
                     <button onClick={() => { setMoreMenu(false); setShowCmd(true); }}><Icon name="search" /> Command menu <span className="kbd">Ctrl K</span></button>
                     <button onClick={() => { setMoreMenu(false); openTools(); }}><Icon name="tools" /> Tools <span className="kbd">O</span></button>
                     <button onClick={() => { setMoreMenu(false); setHintMode(true); }}><Icon name="info" /> What&apos;s this? (explain buttons)</button>
-                    <button onClick={() => { setMoreMenu(false); location.href = "/community"; }}><Icon name="users" /> Community page</button>
-                    <button onClick={() => { setMoreMenu(false); setSuggest({}); }}><Icon name="bulb" /> Suggest a change</button>
+                    {communityOn && <button onClick={() => { setMoreMenu(false); location.href = "/community"; }}><Icon name="users" /> Community page</button>}
+                    {data?.settings?.suggestionsEnabled !== false && <button onClick={() => { setMoreMenu(false); setSuggest({}); }}><Icon name="bulb" /> Suggest a change</button>}
+                    {(role === "owner" || role === "admin") && (
+                      <button onClick={() => { setMoreMenu(false); toggleAsMember(); }}><Icon name="eye" /> {asMember ? "Back to admin view" : "View as a member"}</button>
+                    )}
                     {user && <button onClick={() => { setMoreMenu(false); setModal({ type: "profileEdit" }); }}><Icon name="user" /> Edit profile</button>}
                     <button onClick={() => { setMoreMenu(false); openWhatsNew(); }}><Icon name="chart" /> What&apos;s new {hasNews && <span className="dot-inline" />}<span className="kbd">W</span></button>
                     <button onClick={() => { setMoreMenu(false); setModal({ type: "customize" }); }}><Icon name="palette" /> Customize look <span className="kbd">P</span></button>
@@ -1724,8 +1784,9 @@ export default function HomePage() {
                 </>
               )}
             </div>
-            <button className={`icon-btn ${showAdmin ? "on" : ""} ${adminUnlocked ? "unlocked" : ""}`} title={adminUnlocked ? "Admin panel" : "Admin login"} onClick={toggleAdmin}>
+            <button className={`icon-btn ${showAdmin ? "on" : ""} ${adminUnlocked ? "unlocked" : ""}`} title={adminUnlocked ? `Admin panel${staffCount ? ` — ${staffCount} waiting for review` : ""}` : "Admin login"} onClick={toggleAdmin}>
               <Icon name="lock" />
+              {adminUnlocked && staffCount > 0 && <span className="icon-badge">{staffCount > 99 ? "99+" : staffCount}</span>}
             </button>
             {user ? (
               <div className="user-menu">
@@ -1772,7 +1833,7 @@ export default function HomePage() {
           </div>
         </header>
 
-        {data?.settings?.announcement && dismissed !== data.settings.announcement && (
+        {data?.settings?.announcement && announceLive && dismissed !== data.settings.announcement && (
           <div className="announcement">
             <Icon name="bulb" /> <span>{data.settings.announcement}</span>
             <button
@@ -2356,6 +2417,13 @@ export default function HomePage() {
                     ? <><PasswordStrength password={fPassword} /><div className="hint">At least 6 characters. Don&apos;t reuse a password from another site.</div></>
                     : <button type="button" className="link-btn forgot" onClick={() => { setFPassword(""); setFCode(""); setAuthMode("reset"); }}>Forgot password?</button>}
                 </div>
+                {authMode === "signup" && authExtras.signups === "invite" && (
+                  <div className="form-group">
+                    <label>Invite code</label>
+                    <input value={fInvite} onChange={(e) => setFInvite(e.target.value.toUpperCase())} required maxLength={12} autoComplete="off" className="mono" placeholder="Ask an admin for one" />
+                  </div>
+                )}
+                {authMode === "signup" && authExtras.signups === "closed" && <div className="form-error">Sign-ups are closed at the moment — ask an admin.</div>}
                 <label className="check remember">
                   <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} />
                   Keep me logged in on this device

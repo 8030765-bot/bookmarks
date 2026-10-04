@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { listUsers } from "@/lib/auth";
 import { BOARD_KINDS, BoardKind, acceptReply, createPost, deletePost, listPosts, replyPost, votePost } from "@/lib/community";
 import { errorResponse } from "@/lib/http";
-import { requireMember } from "@/lib/member";
+import { cleanPostText, requireCommunityOpen, requireMember } from "@/lib/member";
+import { bumpStat } from "@/lib/moderation";
 import { rateLimit } from "@/lib/ratelimit";
 import { getBookmarks } from "@/lib/store";
 
@@ -29,6 +30,8 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const kind = kindOf(body.kind);
     const me = await requireMember();
+    await requireCommunityOpen(me.staff);
+    await cleanPostText(body);
     const id = String(body.id || "");
     const action = String(body.action || "create");
     await rateLimit(`board:${me.user.toLowerCase()}`, action === "vote" ? 60 : 12, 60);
@@ -41,6 +44,7 @@ export async function POST(req: NextRequest) {
           body.round = challenge.round;
         }
         await createPost(kind, me.user, body, (await listUsers()).map((u) => u.username));
+        await bumpStat("posts");
         break;
       }
       case "vote":

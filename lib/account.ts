@@ -6,6 +6,7 @@ import { followersKey, getBookmarks, saveBookmarks } from "./store";
 import { deleteUserData, getUserData, renameUserData } from "./userdata";
 import { deletePushSubs } from "./push";
 import { deleteToolData, getToolData, removeTyping, renameToolData } from "./tools";
+import { checkNameAllowed, recordRename } from "./moderation";
 
 /**
  * Account-wide changes that touch several stores at once: changing your
@@ -14,7 +15,9 @@ import { deleteToolData, getToolData, removeTyping, renameToolData } from "./too
 const BANNED_KEY = "chat:banned";
 
 export async function renameAccount(oldName: string, newName: string, password: string) {
+  await checkNameAllowed(newName);
   const moved = await renameUserRecord(oldName, newName, password);
+  await recordRename(oldName, moved.username).catch(() => {});
   const a = oldName.toLowerCase();
   const b = moved.username.toLowerCase();
   const redis = Redis.fromEnv();
@@ -57,6 +60,11 @@ export async function renameAccount(oldName: string, newName: string, password: 
 
 export async function deleteAccount(username: string, password: string) {
   await checkOwnPassword(username, password);
+  await purgeAccount(username);
+}
+
+/** Remove an account and everything kept about it (used by "delete my account" and by admins). */
+export async function purgeAccount(username: string) {
   if ((await getRole(username)) === "owner") throw new Error("Hand ownership to someone else before deleting the owner account");
   const redis = Redis.fromEnv();
   const ud = await getUserData(username);
