@@ -108,6 +108,10 @@ export interface Look {
   bigButtons: boolean;
   /** little buzzes on phones */
   haptics: boolean;
+  /** ask before opening websites that aren't on the shared list */
+  leaveWarn: boolean;
+  /** interface language */
+  lang: "auto" | "en" | "es";
 }
 export const DEFAULT_ORDER: Section[] = ["today", "polls", "quick"];
 export const DEFAULT_LOOK: Look = {
@@ -118,7 +122,7 @@ export const DEFAULT_LOOK: Look = {
   bg: "none", animatedBg: false, gradientTitle: false, glow: false, sparkles: false, seasonal: true, snow: true, greeting: true, minimal: false,
   iconStyle: "line", emojiFont: "device",
   autoDark: "off",
-  highContrast: false, colorblind: false, underline: false, bigButtons: false, haptics: true,
+  highContrast: false, colorblind: false, underline: false, bigButtons: false, haptics: true, leaveWarn: false, lang: "auto",
 };
 
 /** Only keep values that make sense (old saved looks, pasted theme codes, synced settings). */
@@ -134,7 +138,8 @@ export function cleanLook(raw: Partial<Look> | null | undefined): Look {
   pick("density", oneOf(["comfy", "compact", "large"]));
   for (const k of ["motion", "newTab", "descriptions", "iconTint", "specialFolders", "hideEmpty", "iconGrid", "folderBorders", "smallHeader", "sideNav",
     "animatedBg", "gradientTitle", "glow", "sparkles", "seasonal", "snow", "greeting", "minimal", "highContrast", "colorblind", "underline",
-    "bigButtons", "haptics"] as const) pick(k, bool);
+    "bigButtons", "haptics", "leaveWarn"] as const) pick(k, bool);
+  pick("lang", oneOf(["auto", "en", "es"]));
   pick("font", oneOf(FONTS.map((f) => f.id)));
   pick("fontScale", num(0.8, 1.4));
   pick("weight", oneOf(["light", "normal", "bold"]));
@@ -270,6 +275,8 @@ export function applyLook(look: Look, ctx: LookContext = { prefersDark: true, re
   set("sidenav", look.sideNav);
   set("hide", look.hide.join(" ") || "none");
   set("bigtap", look.bigButtons);
+  // language: "auto" follows the device
+  set("lang", look.lang === "auto" ? (navigator.language?.toLowerCase().startsWith("es") ? "es" : "en") : look.lang);
   set("haptics", look.haptics);
   const style = root.style;
   style.setProperty("--fs-scale", String(look.fontScale));

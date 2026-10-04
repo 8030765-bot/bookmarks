@@ -1744,3 +1744,44 @@ main:focus{outline:none}
   .splash~.skeleton{display:none}
 }
 .install-steps{padding-left:1.3rem;display:flex;flex-direction:column;gap:.35rem;font-size:.9rem;margin:.6rem 0}
+
+/* ---------- batch 14: safety & help ---------- */
+.empty-tip{font-size:.8rem;color:var(--text-muted);margin:-.2rem 0 .9rem;padding:.5rem .7rem;border:1px dashed var(--border-light);border-radius:var(--radius-sm)}
+.rules-check{align-items:flex-start;margin:.2rem 0 .6rem;font-size:.8rem}
+.rules-check input{margin-top:.15rem;flex:0 0 auto}
+.rules-check a{color:var(--accent);text-decoration:underline}
+.session-bar{background:rgba(255,184,77,.12);color:var(--text)}
+.session-bar .link-btn{margin-left:.4rem}
+.key-tip{position:fixed;left:50%;bottom:1.25rem;transform:translateX(-50%);z-index:85;display:flex;align-items:center;gap:.5rem;padding:.5rem .6rem .5rem .9rem;border-radius:99px;background:var(--surface);border:1px solid var(--border-light);box-shadow:0 10px 30px rgba(0,0,0,.3);font-size:.82rem;max-width:calc(100vw - 24px)}
+@media (max-width:700px){.key-tip{display:none}}
+.tour{position:fixed;inset:0;z-index:700;background:rgba(0,0,0,.35)}
+.tour-ring{position:fixed;border-radius:12px;box-shadow:0 0 0 3px var(--accent),0 0 0 9999px rgba(0,0,0,.35);pointer-events:none;transition:all .25s ease}
+.tour-card{position:fixed;left:50%;width:min(340px,calc(100vw - 24px));margin-left:min(-170px,calc(-50vw + 12px));display:flex;flex-direction:column;gap:.35rem;padding:.9rem 1rem;border-radius:14px;background:var(--surface);border:1px solid var(--accent);box-shadow:0 16px 40px rgba(0,0,0,.45);font-size:.88rem}
+.tour-card p{color:var(--text-muted);font-size:.85rem}
+.tour-step{font-size:.7rem;color:var(--accent);font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.tour-actions{display:flex;align-items:center;justify-content:flex-end;gap:.4rem;margin-top:.3rem}
+.tour-actions .link-btn{margin-right:auto}
+.page-feedback{display:flex;align-items:center;justify-content:center;gap:.3rem;padding:.6rem 1rem 1.4rem;font-size:.78rem;color:var(--text-muted)}
+.page-feedback button{font-size:1.15rem;padding:.15rem .3rem;border-radius:8px;transition:transform .12s}
+.page-feedback button:hover{transform:scale(1.25);background:var(--surface-hover)}
+.whatsnew-list{padding-left:1.2rem;display:flex;flex-direction:column;gap:.3rem;font-size:.9rem;margin:.4rem 0}
+.footer-version{font-variant-numeric:tabular-nums}
+/* rules, privacy and help pages */
+.doc{max-width:720px;margin:0 auto;line-height:1.65}
+.doc h1{font-size:1.8rem;letter-spacing:-.03em;margin:.4rem 0 .6rem}
+.doc h2{font-size:1.1rem;margin:1.4rem 0 .5rem}
+.doc ul,.doc ol{padding-left:1.3rem;display:flex;flex-direction:column;gap:.3rem;color:var(--text-muted)}
+.doc li strong,.doc p strong{color:var(--text)}
+.doc a{color:var(--accent)}
+.doc input{margin-bottom:.5rem}
+.help-actions{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.5rem;margin:.6rem 0 1rem}
+.help-card{display:flex;flex-direction:column;align-items:flex-start;gap:.15rem;padding:.75rem .85rem;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);text-align:left;color:var(--text)!important;text-decoration:none!important}
+.help-card:hover{border-color:var(--accent)}
+.help-card span{font-size:1.4rem}
+.help-card em{font-style:normal;font-size:.76rem;color:var(--text-muted)}
+.faq{border:1px solid var(--border);border-radius:var(--radius-sm);padding:.55rem .75rem;margin-bottom:.4rem;background:var(--surface)}
+.faq summary{cursor:pointer;font-weight:600}
+.faq p{margin-top:.4rem;color:var(--text-muted);font-size:.9rem}
+.shortcut-table{border-collapse:collapse;width:100%;font-size:.88rem}
+.shortcut-table td{padding:.3rem .4rem;border-bottom:1px solid var(--border)}
+.shortcut-table td:first-child{width:110px}

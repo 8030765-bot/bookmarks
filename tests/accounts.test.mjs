@@ -134,7 +134,7 @@ ok("can't take someone's username", r.status === 400 && /taken/.test(r.json.erro
 r = await me("ben", { action: "rename", newName: "benny", password: "secret1" });
 ok("rename works", r.json.user === "benny", r.json.error);
 ok("…still logged in as the new name", (await call("ben", "/api/me")).json.user === "benny");
-r = await call("x", "/api/bookmarks");
+r = await call("ben", "/api/bookmarks");
 ok("…links credit the new name", r.json.folders.find((f) => f.name === "Ben's").links[0].addedBy === "benny");
 r = await call("x", "/api/profile?user=cat");
 r = await call("ann", "/api/profile?user=ann");

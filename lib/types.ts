@@ -230,6 +230,8 @@ export interface SiteSettings {
   rejectReasons?: string[];
   /** quick folder + tags to use when approving a link */
   approveTemplates?: { name: string; folderId: string; tags: string[] }[];
+  /** the site rules new members agree to (Markdown); a sensible default is used when empty */
+  rules?: string;
   /** the announcement only shows between these times (ISO) */
   announceFrom?: string;
   announceUntil?: string;

@@ -1146,6 +1146,7 @@ function applyAdminSettings(s: NonNullable<BookmarksData["settings"]>, patch: Re
     s.approveTemplates = l.length ? l : undefined;
   }
   for (const k of ["announceFrom", "announceUntil"] as const) if (typeof patch[k] === "string") s[k] = cleanDate(patch[k] as string);
+  if (typeof patch.rules === "string") s.rules = patch.rules.trim().slice(0, 5000) || undefined;
 }
 
 /**
@@ -1156,11 +1157,24 @@ export function viewFor(data: BookmarksData, viewer: { admin: boolean; member: b
   if (viewer.admin) return data;
   const now = Date.now();
   const live = (iso?: string) => !iso || Date.parse(iso) <= now;
+  const folders = data.folders
+    .filter((f) => live(f.showAt) && (viewer.member || f.perm?.view !== "members"))
+    .map((f) => (f.links.some((l) => !live(l.showAt)) ? { ...f, links: f.links.filter((l) => live(l.showAt)) } : f));
+  if (viewer.member) return { ...data, folders };
+  // people who aren't logged in don't see who added, liked or voted for things
+  const anon = (n: number) => Array.from({ length: n }, (_, i) => `#${i}`);
   return {
     ...data,
-    folders: data.folders
-      .filter((f) => live(f.showAt) && (viewer.member || f.perm?.view !== "members"))
-      .map((f) => (f.links.some((l) => !live(l.showAt)) ? { ...f, links: f.links.filter((l) => live(l.showAt)) } : f)),
+    folders: folders.map((f) => ({
+      ...f,
+      maintainers: undefined,
+      links: f.links.map((l) => ({
+        ...l, addedBy: undefined, likes: l.likes ? anon(l.likes.length) : l.likes,
+        communityNotes: l.communityNotes?.map((n) => ({ ...n, by: "" })),
+      })),
+    })),
+    activity: (data.activity || []).map((a) => ({ ...a, by: undefined, detail: a.detail.replace(/ \(suggested by [^)]*\)/, "") })),
+    polls: (data.polls || []).map((p) => ({ ...p, votes: Object.fromEntries(Object.values(p.votes).map((v, i) => [`#${i}`, v])) })),
   };
 }
 

@@ -44,6 +44,8 @@ import {
 import SideNav from "./components/SideNav";
 import { AddAnywhereModal, WeekChanges, downloadBookmarksHtml, downloadFolderCsv, embedCode } from "./components/DataViews";
 import { BottomNav, InstallModal, PullIndicator, buzz, usePullToRefresh } from "./components/Mobile";
+import { FeedbackModal, Tour, WhatsNewPopup, useFirstVisit, useLeaveWarning, useWhatsNewAfterUpdate } from "./components/Help";
+import { APP_VERSION } from "./components/changelog-data";
 
 /** Changes that can wait for the connection to come back (each keeps its retry id). */
 const OUTBOX_KEY = "outbox";
@@ -79,6 +81,7 @@ type Modal =
   | { type: "week" }
   | { type: "addAnywhere" }
   | { type: "install" }
+  | { type: "feedback"; kind: "bug" | "contact" }
   | { type: "profileEdit" }
   | { type: "recovery"; code: string; context: "signup" | "reset" }
   | null;
@@ -122,7 +125,9 @@ function QuickTabs({ lists, tab, setTab, onOpen, newTab }: {
   onOpen: (f: Folder, l: Link) => void; newTab: boolean;
 }) {
   const available = QUICK_TABS.filter((t) => lists[t.id].length > 0);
-  if (!available.length) return null;
+  if (!available.length) {
+    return <p className="empty-tip">💡 Tip: open a few websites, ⭐ star them or press Read later on a card — they&apos;ll show up here as shortcuts.</p>;
+  }
   const active = available.some((t) => t.id === tab) ? tab : available[0].id;
   return (
     <section className="quick">
@@ -521,6 +526,30 @@ export default function HomePage() {
   useEffect(() => { setAprilOff(readLocal("aprilOff", "") === new Date().toDateString()); }, []);
   const aprilOn = !!data?.settings?.aprilFools && !aprilOff;
   useEffect(() => { document.documentElement.setAttribute("data-april", aprilOn ? "on" : "off"); }, [aprilOn]);
+  // first visit: a short tour; later: a keyboard tip; after updates: what's new
+  const firstVisit = useFirstVisit();
+  const whatsNew = useWhatsNewAfterUpdate();
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get("tour") !== "1") return;
+    params.delete("tour");
+    window.history.replaceState(null, "", `${location.pathname}${params.toString() ? `?${params}` : ""}`);
+    setTimeout(firstVisit.startTour, 800);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // ask before leaving for websites that aren't on the list (if you turned it on)
+  const knownHostsRef = useRef<Set<string>>(new Set());
+  const knownHosts = useCallback(() => knownHostsRef.current, []);
+  useLeaveWarning(look.leaveWarn, knownHosts);
+  // you'll be logged out soon: offer to stay logged in
+  const [sessionLeft, setSessionLeft] = useState<number | null>(null);
+  const [rememberMeNow, setRememberMeNow] = useState(true);
+  const stayLoggedIn = async () => {
+    const res = await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "extend" }) });
+    const j = await res.json().catch(() => ({}));
+    if (res.ok) { setSessionLeft(j.sessionLeft); showToast("You'll stay logged in"); } else showToast(j.error || "Please log in again");
+  };
+
   // phones: pull down at the top to refresh
   const ptr = usePullToRefresh(async () => { await load(); loadRatings(); showToast("Up to date"); });
 
@@ -679,6 +708,8 @@ export default function HomePage() {
       setOwnerExists(!!j.ownerExists);
       if (j.role) { setAdminUnlocked(true); setAdminPassword(""); }
       setAuthExtras({ beta: !!j.beta, betaFlags: Array.isArray(j.betaFlags) ? j.betaFlags : [], signups: j.signups || "open" });
+      setSessionLeft(typeof j.sessionLeft === "number" ? j.sessionLeft : null);
+      setRememberMeNow(j.rememberMe !== false);
     }).catch(() => {}).finally(() => setAuthChecked(true));
     let saved: string | null = null;
     try { saved = sessionStorage.getItem(ADMIN_PW_KEY); } catch {}
@@ -801,6 +832,9 @@ export default function HomePage() {
     () => (data?.folders || []).flatMap((folder) => folder.links.map((link) => ({ folder, link }))),
     [data]
   );
+  useEffect(() => {
+    knownHostsRef.current = new Set(allRefs.map((r) => { try { return new URL(r.link.url).hostname.replace(/^www\./, ""); } catch { return ""; } }).filter(Boolean));
+  }, [allRefs]);
   const allTags = useMemo(() => {
     const counts = new Map<string, number>();
     allRefs.forEach(({ link }) => link.tags?.forEach((t) => counts.set(t, (counts.get(t) || 0) + 1)));
@@ -1442,7 +1476,7 @@ export default function HomePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(ticket
           ? { action: "login2fa", ticket, code: fTotp, remember: rememberMe }
-          : { action: authMode, username: fUsername, password: fPassword, remember: rememberMe, ...(authMode === "signup" && fInvite.trim() ? { invite: fInvite.trim() } : {}) }),
+          : { action: authMode, username: fUsername, password: fPassword, remember: rememberMe, ...(authMode === "signup" && fInvite.trim() ? { invite: fInvite.trim() } : {}), ...(authMode === "signup" ? { acceptRules: true } : {}) }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -1797,6 +1831,12 @@ export default function HomePage() {
           🛠️ The site is read-only for maintenance{data.settings.maintenanceMessage ? ` — ${data.settings.maintenanceMessage}` : ""}.{role === "owner" || role === "admin" ? " (Admins can still make changes.)" : ""}
         </div>
       )}
+      {user && sessionLeft !== null && sessionLeft < (rememberMeNow ? 3 * 86400 : 3600) && (
+        <div className="offline-bar session-bar" role="status">
+          ⏳ You&apos;ll be logged out {sessionLeft < 3600 ? `in ${Math.max(1, Math.round(sessionLeft / 60))} minutes` : sessionLeft < 86400 ? `in ${Math.round(sessionLeft / 3600)} hours` : `in ${Math.round(sessionLeft / 86400)} days`}.
+          <button className="link-btn" onClick={stayLoggedIn}>Stay logged in</button>
+        </div>
+      )}
       {asMember && (
         <div className="offline-bar member-bar" role="status">
           👀 You&apos;re seeing the site as a member does. <button className="link-btn" onClick={toggleAsMember}>Back to admin view</button>
@@ -1843,6 +1883,9 @@ export default function HomePage() {
                     <button onClick={() => { setMoreMenu(false); if (data) { downloadBookmarksHtml(data); showToast("Downloaded — import it in Chrome or Edge from Bookmarks → Import"); } }}><Icon name="download" /> Download for my browser</button>
                     <button onClick={() => { setMoreMenu(false); setTimeout(() => window.print(), 50); }}><Icon name="list" /> Print the list</button>
                     <button onClick={() => { setMoreMenu(false); setModal({ type: "install" }); }}><Icon name="download" /> Install the app</button>
+                    <button onClick={() => { setMoreMenu(false); location.href = "/help"; }}><Icon name="info" /> Help</button>
+                    <button onClick={() => { setMoreMenu(false); setModal({ type: "feedback", kind: "bug" }); }}><Icon name="bulb" /> Report a bug</button>
+                    <button onClick={() => { setMoreMenu(false); setModal({ type: "feedback", kind: "contact" }); }}><Icon name="chat" /> Message an admin</button>
                     <button onClick={() => { setMoreMenu(false); setHintMode(true); }}><Icon name="info" /> What&apos;s this? (explain buttons)</button>
                     {communityOn && <button onClick={() => { setMoreMenu(false); location.href = "/community"; }}><Icon name="users" /> Community page</button>}
                     {data?.settings?.suggestionsEnabled !== false && <button onClick={() => { setMoreMenu(false); setSuggest({}); }}><Icon name="bulb" /> Suggest a change</button>}
@@ -2116,7 +2159,7 @@ export default function HomePage() {
               {didYouMean && (
                 <p>Did you mean <button className="link-btn" onClick={() => setSearch(didYouMean)}><strong>{didYouMean}</strong></button>?</p>
               )}
-              <p>No websites match that search. Know a good one?</p>
+              <p>No websites match that search. Try fewer words, a tag like <code>#maths</code>, or <code>in:folder</code>. Know a good one?</p>
               <button className="btn btn-secondary" onClick={() => setSuggest({ kind: "addLink" })}><Icon name="bulb" /> Suggest a website</button>
             </div>
           )}
@@ -2212,6 +2255,10 @@ export default function HomePage() {
           {title} · Shared with the whole class ·{" "}
           <button className="link-btn" onClick={() => setModal({ type: "shortcuts" })}>Keyboard shortcuts (?)</button>
           {" · "}<a className="link-btn" href="/changelog">What&apos;s changed</a>
+          {" · "}<a className="link-btn" href="/help">Help</a>
+          {" · "}<a className="link-btn" href="/rules">Rules</a>
+          {" · "}<a className="link-btn" href="/privacy">Privacy</a>
+          {" · "}<a className="link-btn footer-version" href="/changelog" title="Version">v{APP_VERSION}</a>
           <EasterEgg id="footer" />
         </footer>
         <SitePet links={allRefs.length} />
@@ -2401,6 +2448,15 @@ export default function HomePage() {
       {modal?.type === "whatsnew" && <WhatsNew activity={data?.activity || []} onClose={() => setModal(null)} />}
       {modal?.type === "week" && data && <WeekChanges data={data} onClose={() => setModal(null)} onOpen={openCard} />}
       {modal?.type === "addAnywhere" && <AddAnywhereModal onClose={() => setModal(null)} toast={showToast} />}
+      {modal?.type === "feedback" && <FeedbackModal kind={modal.kind} user={user} onClose={() => setModal(null)} toast={showToast} />}
+      {whatsNew.show && !modal && <WhatsNewPopup onClose={whatsNew.close} />}
+      {firstVisit.tour && <Tour onDone={firstVisit.endTour} />}
+      {firstVisit.keyTip && !firstVisit.tour && (
+        <div className="key-tip" role="status">
+          ⌨️ Tip: press <span className="kbd">/</span> to search, <span className="kbd">N</span> to add a website, <span className="kbd">?</span> for every shortcut.
+          <button className="btn-icon sm" onClick={firstVisit.endKeyTip} aria-label="Got it" title="Got it"><Icon name="x" /></button>
+        </div>
+      )}
       {modal?.type === "install" && <InstallModal canInstall={canInstall} onInstall={() => { setModal(null); installApp(); }} onClose={() => setModal(null)} />}
       {modal?.type === "spin" && (
         <SpinWheel refs={allRefs} folders={sortedFolders} onOpen={(f, l) => trackAndOpen(f, l, true)} onClose={() => setModal(null)} />
@@ -2520,6 +2576,12 @@ export default function HomePage() {
                   </div>
                 )}
                 {authMode === "signup" && authExtras.signups === "closed" && <div className="form-error">Sign-ups are closed at the moment — ask an admin.</div>}
+                {authMode === "signup" && (
+                  <label className="check-row rules-check">
+                    <input type="checkbox" required />
+                    <span>I agree to the <a href="/rules" target="_blank" rel="noopener">site rules</a> and have read the <a href="/privacy" target="_blank" rel="noopener">privacy page</a></span>
+                  </label>
+                )}
                 <label className="check remember">
                   <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} />
                   Keep me logged in on this device

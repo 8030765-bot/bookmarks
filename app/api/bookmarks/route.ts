@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Redis } from "@upstash/redis";
 import { getBookmarks, handleAction, trackClick, viewFor, withClicks } from "@/lib/store";
-import { AuthContext, audit, getAuthContext } from "@/lib/roles";
+import { AuthContext, audit, checkAdmin, getAuthContext } from "@/lib/roles";
 import { errorResponse } from "@/lib/http";
 import { clientIp, rateLimit } from "@/lib/ratelimit";
 import { accountInfo } from "@/lib/auth";
 import { assertWritable, bumpStat, getFlags, inGroup, isFrozen, restriction } from "@/lib/moderation";
 import { createSuggestion } from "@/lib/suggestions";
 import { BookmarksData } from "@/lib/types";
+import { findDangerous } from "@/lib/safebrowsing";
+import { normalizeUrl } from "@/lib/url";
 
 export const dynamic = "force-dynamic";
 
@@ -18,9 +20,11 @@ const ALWAYS_OK = new Set(["trackClick", "toggleFavorite", "verifyAdmin"]);
 const SOCIAL = new Set(["toggleLike", "votePoll"]);
 
 const isAdminCtx = (ctx: AuthContext) => ctx.role === "owner" || ctx.role === "admin";
-/** The list as this person may see it. */
-async function shown(data: BookmarksData, ctx: AuthContext, asMember = false) {
-  return withClicks(viewFor(data, { admin: isAdminCtx(ctx) && !asMember, member: !!ctx.user }));
+/** The list as this person may see it (the shared admin password counts as admin until an owner exists). */
+async function shown(data: BookmarksData, ctx: AuthContext, asMember = false, password?: unknown) {
+  let admin = isAdminCtx(ctx);
+  if (!admin && typeof password === "string" && password) { try { checkAdmin(ctx, password); admin = true; } catch { /* not an admin */ } }
+  return withClicks(viewFor(data, { admin: admin && !asMember, member: !!ctx.user || admin }));
 }
 
 export async function GET(req: NextRequest) {
@@ -86,12 +90,19 @@ export async function POST(req: NextRequest) {
     ctx.contributor = !!ctx.user && (await inGroup("contributors", ctx.user));
     body.__auth = ctx;
 
+    if (action === "addLinks" || action === "addLink" || action === "editLink") {
+      // Google's list of known dangerous sites (only when a key is set up)
+      const urls = (action === "addLinks" ? (Array.isArray(body.links) ? body.links : []).map((l: { url?: unknown }) => l?.url) : [body.url])
+        .map((u: unknown) => { try { return typeof u === "string" && u ? normalizeUrl(u) : ""; } catch { return ""; } }).filter(Boolean);
+      const bad = await findDangerous(urls);
+      if (bad.length) throw new Error(`Google lists ${bad.length === 1 ? "that website" : `${bad.length} of those websites`} as dangerous, so it can't be added`);
+    }
     if (action === "addLinks" || action === "addLink") {
       const reason = await needsApproval(ctx, String(body.folderId || ""));
       if (reason) {
         if (action === "addLinks") throw new Error(`${reason} — add them one at a time so each can be checked`);
         await createSuggestion(ctx.user!, { kind: "addLink", name: body.name, url: body.url, folderId: body.folderId, note: body.notes });
-        return NextResponse.json({ ...(await shown(await getBookmarks(), ctx)), queued: `${reason} — yours is waiting for approval` });
+        return NextResponse.json({ ...(await shown(await getBookmarks(), ctx, false, body.password)), queued: `${reason} — yours is waiting for approval` });
       }
     }
 
@@ -102,7 +113,7 @@ export async function POST(req: NextRequest) {
       const fresh = await Redis.fromEnv().set(opKey, 1, { nx: true, ex: 300 });
       if (!fresh) {
         opKey = null;
-        return NextResponse.json(await shown(await getBookmarks(), ctx));
+        return NextResponse.json(await shown(await getBookmarks(), ctx, false, body.password));
       }
     }
 
@@ -114,7 +125,7 @@ export async function POST(req: NextRequest) {
       const detail = data.activity?.[0]?.detail;
       await audit(ctx, action, detail).catch(() => {});
     }
-    return NextResponse.json(await shown(data, ctx));
+    return NextResponse.json(await shown(data, ctx, false, body.password));
   } catch (e: unknown) {
     // the change failed, so a retry with the same id should be allowed to run
     if (opKey) await Redis.fromEnv().del(opKey).catch(() => {});

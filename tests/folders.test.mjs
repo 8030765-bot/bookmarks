@@ -94,8 +94,8 @@ ok("can't merge a folder into itself", r.status === 400);
 r = await admin({ action: "deleteFolder", folderId: sci.id });
 ok("sub-folders move up when the parent is deleted", byName(r.json, "Chemistry") && !byName(r.json, "Chemistry").parentId);
 
-// activity remembers the folder and who did it
-r = await call("x", "/api/bookmarks");
+// activity remembers the folder and who did it (members can see who; guests can't)
+r = await call("max", "/api/bookmarks");
 const entry = r.json.activity.find((a) => a.detail.includes("PhET sims"));
 ok("history records folder and person", entry?.folderId === phys.id && entry?.by === "max", JSON.stringify(entry));
 

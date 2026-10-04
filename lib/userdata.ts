@@ -100,6 +100,8 @@ export interface UserData {
   dndUntil?: string;
   /** chat messages you saved for later */
   savedMessages: SavedMessage[];
+  /** when you agreed to the site rules */
+  rulesAcceptedAt?: string;
 }
 export interface SavedMessage { id: string; channel: string; user: string; text: string; at: string; savedAt: string }
 
@@ -375,6 +377,12 @@ export async function importPersonal(username: string, file: Record<string, unkn
   if (JSON.stringify(data.settings).length > 20_000) throw new Error("Those settings are too big to save");
   await save(username, data);
   return counts;
+}
+
+export async function setRulesAccepted(username: string) {
+  const data = await getUserData(username);
+  data.rulesAcceptedAt = new Date().toISOString();
+  await save(username, data);
 }
 
 /** Move a whole account's data to a new username. */

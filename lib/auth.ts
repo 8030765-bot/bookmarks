@@ -37,6 +37,8 @@ interface SessionData {
   username: string;
   createdAt?: string;
   device?: string;
+  /** "keep me logged in" was ticked (older sessions didn't record it: assume yes) */
+  remember?: boolean;
 }
 
 function genRecoveryCode(): string {
@@ -108,7 +110,7 @@ async function createSession(username: string, remember = true): Promise<Session
   const ttl = remember ? SESSION_TTL_SECONDS : SHORT_SESSION_SECONDS;
   const redis = getRedis();
   // stored as an object so all-digit usernames don't get auto-parsed into numbers
-  const data: SessionData = { username, createdAt: new Date().toISOString(), device: currentDevice() };
+  const data: SessionData = { username, createdAt: new Date().toISOString(), device: currentDevice(), remember };
   await redis.set(sessionKey(token), data, { ex: ttl });
   await redis.sadd(userSessionsKey(username), token);
   await redis.expire(userSessionsKey(username), SESSION_TTL_SECONDS + 86400);
@@ -414,6 +416,29 @@ export async function logout(): Promise<void> {
     if (d?.username) await redis.srem(userSessionsKey(d.username), token);
   }
   cookies().delete(SESSION_COOKIE);
+}
+
+/** How long this login has left (seconds), for the "you'll be logged out soon" warning. */
+export async function sessionTimeLeft(): Promise<{ seconds: number; remember: boolean } | null> {
+  const token = cookies().get(SESSION_COOKIE)?.value;
+  if (!token || !/^[a-f0-9]{64}$/.test(token)) return null;
+  const redis = getRedis();
+  const [session, ttl] = await Promise.all([redis.get<SessionData>(sessionKey(token)), redis.ttl(sessionKey(token))]);
+  if (!session?.username || ttl < 0) return null;
+  return { seconds: ttl, remember: session.remember !== false };
+}
+/** "Stay logged in": start this login's clock again (same length as when you logged in). */
+export async function extendSession(): Promise<number> {
+  const token = cookies().get(SESSION_COOKIE)?.value;
+  if (!token || !/^[a-f0-9]{64}$/.test(token)) throw new Error("Log in first");
+  const redis = getRedis();
+  const session = await redis.get<SessionData>(sessionKey(token));
+  if (!session?.username) throw new Error("Log in first");
+  const remember = session.remember !== false;
+  const ttl = remember ? SESSION_TTL_SECONDS : SHORT_SESSION_SECONDS;
+  await redis.expire(sessionKey(token), ttl);
+  setSessionCookie(token, remember);
+  return ttl;
 }
 
 /** Returns the logged-in username, or null. */

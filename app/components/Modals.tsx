@@ -255,7 +255,7 @@ export function PromptModal({
   );
 }
 
-const SHORTCUTS: [string, string][] = [
+export const SHORTCUTS: [string, string][] = [
   ["Ctrl K", "Command menu"],
   ["/", "Search"],
   ["N", "Add a website"],

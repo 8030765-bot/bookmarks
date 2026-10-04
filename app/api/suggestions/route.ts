@@ -5,6 +5,7 @@ import { errorResponse } from "@/lib/http";
 import { cleanPostText, requireMember } from "@/lib/member";
 import { assertWritable, getFlags, restriction } from "@/lib/moderation";
 import { rateLimit } from "@/lib/ratelimit";
+import { findDangerous } from "@/lib/safebrowsing";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,9 @@ export async function POST(req: NextRequest) {
     if (why) throw new Error(why);
     await cleanPostText(body, ["note", "name", "description"]);
     await rateLimit(`suggest:${user.toLowerCase()}`, 15, 60);
+    if (typeof body.url === "string" && body.url && (await findDangerous([body.url])).length) {
+      throw new Error("Google lists that website as dangerous, so it can't be suggested");
+    }
     await createSuggestion(user, body);
     return NextResponse.json({ suggestions: await listForUser(user) });
   } catch (e: unknown) {

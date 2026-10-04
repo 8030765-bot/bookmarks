@@ -21,6 +21,7 @@ import {
 import { getRole } from "@/lib/roles";
 import { diffData, getBackup, listBackups } from "@/lib/backups";
 import { allResults, checkBatch } from "@/lib/linkcheck";
+import { deleteFeedback, listFeedback, pageRatings, replyFeedback } from "@/lib/feedback";
 
 export const dynamic = "force-dynamic";
 
@@ -29,9 +30,10 @@ export async function GET() {
   try {
     const ctx = await getAuthContext();
     if (!(ctx.role === "owner" || ctx.role === "admin" || ctx.role === "mod")) return NextResponse.json({ count: 0 });
-    const [suggestions, notes, reports] = await Promise.all([listSuggestions(), pendingNotes(), listReports()]);
+    const [suggestions, notes, reports, feedback] = await Promise.all([listSuggestions(), pendingNotes(), listReports(), listFeedback()]);
     const pending = suggestions.filter((s) => s.status === "pending").length;
-    return NextResponse.json({ count: pending + notes.length + reports.length, suggestions: pending, notes: notes.length, reports: reports.length });
+    const messages = feedback.filter((f) => !f.reply).length;
+    return NextResponse.json({ count: pending + notes.length + reports.length + messages, suggestions: pending, notes: notes.length, reports: reports.length, messages });
   } catch (e: unknown) {
     return errorResponse(e);
   }
@@ -90,16 +92,16 @@ export async function POST(req: NextRequest) {
           listUsers(), getAllMessages(), getBanned(), listSuggestions(), listRoles(), isAdmin ? listAudit() : Promise.resolve([]),
           allFlair(), pendingNotes(),
         ]);
-        const [lastSeen, timeouts, frozen, contributors, beta, names, noteCounts, reports, board, stats] = await Promise.all([
+        const [lastSeen, timeouts, frozen, contributors, beta, names, noteCounts, reports, board, stats, feedback, ratings] = await Promise.all([
           lastSeenRaw(), getTimeouts(), listFrozen(), listGroup("contributors"), listGroup("beta"), nameHistory(), allModNoteCounts(),
-          listReports(), listAdminBoard(), getStats(14),
+          listReports(), listAdminBoard(), getStats(14), listFeedback(), pageRatings(),
         ]);
         const adminOnly = isAdmin
           ? await Promise.all([listInvites(), listTrash(), listErrors(), adminLinkNotes(), dbUsage(messages.length)]).then(([invites, trash, errors, linkNotes, db]) => ({ invites, trash, errors, linkNotes, db }))
           : {};
         return NextResponse.json({
           users, banned, messageCount: messages.length, suggestions, roles, audit: auditLog, me: ctx, flair, notes,
-          lastSeen, timeouts, frozen, contributors, beta, names, noteCounts, reports, board, stats, modPermList: MOD_PERMS,
+          lastSeen, timeouts, frozen, contributors, beta, names, noteCounts, reports, board, stats, modPermList: MOD_PERMS, feedback, pageRatings: ratings,
           ...adminOnly,
         });
       }
@@ -297,6 +299,16 @@ export async function POST(req: NextRequest) {
         await log(r ? `${r.kind} “${r.targetName}” — ${body.outcome || "dismissed"}` : String(body.id || ""));
         return NextResponse.json({ reports: await listReports() });
       }
+      /* ---------- bug reports and messages ---------- */
+      case "replyFeedback":
+        await checkModPerm("reports");
+        await replyFeedback(String(body.id || ""), me, String(body.text || ""));
+        await log(String(body.id || ""));
+        return NextResponse.json({ feedback: await listFeedback() });
+      case "deleteFeedback":
+        await checkModPerm("reports");
+        await deleteFeedback(String(body.id || ""));
+        return NextResponse.json({ feedback: await listFeedback() });
       /* ---------- invites ---------- */
       case "createInvite":
         checkAdmin(ctx, password);

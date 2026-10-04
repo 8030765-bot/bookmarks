@@ -156,6 +156,7 @@ export function ThemeEditor({ look, onChange, onClose, startView, onStartView, f
               <label>Line spacing: {look.lineHeight.toFixed(1)}</label>
               <input type="range" min={1.2} max={2} step={0.1} value={look.lineHeight} onChange={(e) => set({ lineHeight: Number(e.target.value) })} />
             </div>
+            <Seg label="Language · Idioma" value={look.lang} onChange={(v) => set({ lang: v })} options={[["auto", "Automatic"], ["en", "English"], ["es", "Español"]]} />
             <Seg label="Icons" value={look.iconStyle} onChange={(v) => set({ iconStyle: v })} options={[["line", "Line icons"], ["emoji", "Emoji icons"]]} />
             <Seg label="Emoji style" value={look.emojiFont} onChange={(v) => set({ emojiFont: v })} options={[["device", "My device's"], ["noto", "Google's (same everywhere)"]]} />
             <Toggle label="Greeting" hint="“Good morning, …” under the title." checked={look.greeting} onChange={(v) => set({ greeting: v })} />
@@ -233,6 +234,7 @@ export function ThemeEditor({ look, onChange, onClose, startView, onStartView, f
             <Toggle label="Colourblind-safe colours" hint="Blue and orange instead of green and red." checked={look.colorblind} onChange={(v) => set({ colorblind: v })} />
             <Toggle label="Always underline links" checked={look.underline} onChange={(v) => set({ underline: v })} />
             <Toggle label="Bigger buttons" hint="Easier to tap on phones and tablets." checked={look.bigButtons} onChange={(v) => set({ bigButtons: v })} />
+            <Toggle label="Warn before leaving" hint="Ask before opening a website that isn't on the shared list (links in chat, the wiki and posts)." checked={look.leaveWarn} onChange={(v) => set({ leaveWarn: v })} />
             <Toggle label="Animations" hint="Turn off to reduce motion." checked={look.motion} onChange={(v) => set({ motion: v })} />
             <p className="hint">Tip: press <span className="kbd">?</span> for keyboard shortcuts, and use <strong>What&apos;s this?</strong> in the ⋯ menu to learn what any button does.</p>
           </>

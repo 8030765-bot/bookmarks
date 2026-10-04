@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { login, loginWithCode, logout, resetWithCode, setSessionCookie, signup } from "@/lib/auth";
+import { extendSession, login, loginWithCode, logout, resetWithCode, sessionTimeLeft, setSessionCookie, signup } from "@/lib/auth";
+import { setRulesAccepted } from "@/lib/userdata";
 import { getAuthContext, getRole, ownerExists } from "@/lib/roles";
 import { errorResponse } from "@/lib/http";
 import { clientIp, rateLimit } from "@/lib/ratelimit";
@@ -11,8 +12,11 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const { user, role, ownerExists } = await getAuthContext();
-    const [contributor, beta, flags] = await Promise.all([inGroup("contributors", user), inGroup("beta", user), getFlags()]);
-    return NextResponse.json({ user, role, ownerExists, contributor, beta, betaFlags: flags.betaFlags || [], signups: flags.signups || "open" });
+    const [contributor, beta, flags, left] = await Promise.all([inGroup("contributors", user), inGroup("beta", user), getFlags(), user ? sessionTimeLeft() : null]);
+    return NextResponse.json({
+      user, role, ownerExists, contributor, beta, betaFlags: flags.betaFlags || [], signups: flags.signups || "open",
+      sessionLeft: left?.seconds ?? null, rememberMe: left?.remember ?? null,
+    });
   } catch {
     return NextResponse.json({ user: null, role: null, ownerExists: false });
   }
@@ -40,6 +44,9 @@ export async function POST(req: NextRequest) {
     const password = String(body.password || "");
     const remember = body.remember !== false;
     const ip = clientIp(req);
+    if (action === "extend") {
+      return NextResponse.json({ sessionLeft: await extendSession() });
+    }
     if (action === "logout") {
       await logout();
       return NextResponse.json({ user: null });
@@ -69,6 +76,8 @@ export async function POST(req: NextRequest) {
       await checkSignup(username, typeof body.invite === "string" ? body.invite : "");
       const session = await signup(username, password, remember);
       await bumpStat("signups");
+      // they ticked "I agree to the site rules" on the sign-up form
+      if (body.acceptRules === true) await setRulesAccepted(session.username).catch(() => {});
       // signup includes the one-time recovery code so the client can show it
       return loggedIn(session, remember, { recoveryCode: session.recoveryCode });
     }

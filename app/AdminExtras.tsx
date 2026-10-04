@@ -26,6 +26,8 @@ export interface Extras {
   modPermList?: { id: string; label: string }[];
   audit?: { at: string; actor: string; role: string; action: string; detail?: string }[];
   me?: { user: string | null; role: string | null };
+  feedback?: { id: string; kind: "bug" | "contact"; text: string; user?: string; page?: string; device?: string; at: string; reply?: { by: string; text: string; at: string } }[];
+  pageRatings?: Record<string, { good: number; ok: number; bad: number }>;
 }
 type AdminFn = (a: string, p?: Record<string, any>) => Promise<any>;
 type Run = (action: string, payload?: Record<string, any>) => Promise<boolean>;
@@ -365,8 +367,47 @@ export function ReportsTab({ info, admin, run, data, refresh, toast, isAdmin }: 
           </div>
         );
       })}
+      <FeedbackList info={info} admin={admin} refresh={refresh} toast={toast} />
       {isAdmin && <TrashList info={info} admin={admin} run={run} toast={toast} refresh={refresh} />}
     </>
+  );
+}
+
+/** Bug reports and "message an admin", with replies; and how pages are rated. */
+function FeedbackList({ info, admin, refresh, toast }: { info: Extras; admin: AdminFn; refresh: () => void; toast: Toast }) {
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const items = info.feedback || [];
+  const ratings = Object.entries(info.pageRatings || {}).sort((a, b) => (b[1].good + b[1].ok + b[1].bad) - (a[1].good + a[1].ok + a[1].bad));
+  return (
+    <section>
+      <h3 className="admin-h">Bug reports &amp; messages {items.filter((f) => !f.reply).length > 0 && `(${items.filter((f) => !f.reply).length} new)`}</h3>
+      {items.length === 0 && <div className="admin-empty">Nothing yet.</div>}
+      {items.map((f) => (
+        <div key={f.id} className={`sugg-card ${f.reply ? "approved" : "pending"}`}>
+          <div className="sugg-top"><span className="pill">{f.kind === "bug" ? "🐞 bug" : "✉️ message"}</span><strong>{f.user || "someone not logged in"}</strong><span className="row-sub inline">{ago(f.at)}{f.page ? ` · ${f.page}` : ""}</span></div>
+          <div className="sugg-body">
+            <div className="sugg-note" style={{ whiteSpace: "pre-wrap" }}>{f.text}</div>
+            {f.device && <div className="row-sub">{f.device}</div>}
+            {f.reply ? <div className="row-sub">↳ {f.reply.by}: “{f.reply.text}” · {ago(f.reply.at)}</div> : f.user && (
+              <div className="status-row">
+                <input value={drafts[f.id] || ""} onChange={(e) => setDrafts({ ...drafts, [f.id]: e.target.value })} placeholder="Reply (they get a notification)" maxLength={1000} />
+                <button className="btn btn-primary btn-sm" disabled={!drafts[f.id]?.trim()} onClick={async () => { try { await admin("replyFeedback", { id: f.id, text: drafts[f.id] }); toast("Reply sent"); refresh(); } catch (e: any) { toast(e.message); } }}>Reply</button>
+              </div>
+            )}
+            <div className="sugg-actions"><button className="btn btn-secondary btn-sm" onClick={async () => { await admin("deleteFeedback", { id: f.id }); refresh(); }}>{f.reply ? "Remove" : "Done"}</button></div>
+          </div>
+        </div>
+      ))}
+      {ratings.length > 0 && (
+        <>
+          <h3 className="admin-h">How pages feel</h3>
+          <table className="mod-stats">
+            <thead><tr><th>Page</th><th>😀</th><th>😐</th><th>🙁</th></tr></thead>
+            <tbody>{ratings.map(([page, r]) => <tr key={page}><td className="mono">{page}</td><td>{r.good}</td><td>{r.ok}</td><td>{r.bad}</td></tr>)}</tbody>
+          </table>
+        </>
+      )}
+    </section>
   );
 }
 function TrashList({ info, admin, run, toast, refresh }: { info: Extras; admin: AdminFn; run: Run; toast: Toast; refresh: () => void }) {
@@ -401,6 +442,7 @@ export function ControlsTab({ data, info, admin, run, refresh, toast }: { data: 
   const [from, setFrom] = useState(s.announceFrom?.slice(0, 16) || "");
   const [until, setUntil] = useState(s.announceUntil?.slice(0, 16) || "");
   const [tpl, setTpl] = useState({ name: "", folderId: data.folders[0]?.id || "", tags: "" });
+  const [rules, setRules] = useState(s.rules || "");
   const save = (settings: Record<string, unknown>, done?: string) => run("setSettings", { settings }).then((ok) => { if (ok && done) toast(done); });
   const flag = (label: string, hint: string, key: string, value: boolean, invert = false) => (
     <label className="toggle-row compact">
@@ -513,6 +555,13 @@ export function ControlsTab({ data, info, admin, run, refresh, toast }: { data: 
         <button className="btn btn-secondary btn-sm" onClick={() => save({ announceFrom: from ? new Date(from).toISOString() : "", announceUntil: until ? new Date(until).toISOString() : "" }, "Schedule saved")}>Save</button>
       </div>
       <p className="hint">Write the announcement itself in the Site tab. Leave both empty to always show it.</p>
+
+      <h3 className="admin-h">Site rules</h3>
+      <div className="form-group">
+        <label>Shown at <a className="link-btn" href="/rules" target="_blank" rel="noopener">/rules</a> — new members agree to them when they sign up. Markdown works. Leave empty for the standard rules.</label>
+        <textarea value={rules} onChange={(e) => setRules(e.target.value)} rows={6} maxLength={5000} placeholder="# Site rules…" />
+        <button className="btn btn-secondary btn-sm" onClick={() => save({ rules }, "Rules saved")}>Save</button>
+      </div>
 
       <h3 className="admin-h">Settings file</h3>
       <div className="admin-toolbar">
