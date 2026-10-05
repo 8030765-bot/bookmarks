@@ -1827,3 +1827,12 @@ main:focus{outline:none}
 .pic-card img.wide{width:100%;height:auto;aspect-ratio:3;border-radius:6px}
 .chat-msg.tinted:not(.mine) .chat-text{background:color-mix(in srgb,var(--pc) 12%,var(--bg));border-color:color-mix(in srgb,var(--pc) 35%,var(--border))}
 .bday{margin-left:.2rem}
+/* ---------- QoL batch B: adding & editing ---------- */
+.drop-overlay{position:fixed;inset:0;z-index:900;pointer-events:none;display:flex;align-items:flex-end;justify-content:center;padding-bottom:2.5rem;background:color-mix(in srgb,var(--accent) 8%,transparent);outline:3px dashed color-mix(in srgb,var(--accent) 60%,transparent);outline-offset:-10px}
+.drop-overlay div{background:var(--surface);border:1px solid var(--border-light);border-radius:999px;padding:.55rem 1.1rem;font-weight:600;box-shadow:var(--shadow)}
+.draft-note{display:flex;align-items:center;gap:.5rem;justify-content:space-between;font-size:.8rem;padding:.45rem .7rem;border-radius:8px;background:var(--surface-hover);margin-bottom:.6rem}
+.draft-note.ok{background:var(--success-dim);color:var(--success)}
+.char-count{float:right;font-weight:400;font-size:.72rem;color:var(--text-muted)}.char-count.near{color:var(--warning)}
+.check-inline{white-space:nowrap;display:inline-flex;align-items:center;gap:.35rem;font-size:.82rem;margin-right:auto;cursor:pointer}
+.icon-preview{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;background:var(--surface-hover)}
+.fav-custom{border-radius:5px;object-fit:cover}

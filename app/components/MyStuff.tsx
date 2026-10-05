@@ -23,7 +23,7 @@ export default function MyStuff({
   newTab: boolean;
   onToggle: () => void;
   act: (body: Record<string, unknown>) => Promise<any>;
-  toast: (msg: string) => void;
+  toast: (msg: string, action?: { label: string; run: () => void }) => void;
 }) {
   const folders = useMemo(() => Array.from(new Set(items.map((i) => i.folder || ""))).filter(Boolean).sort(), [items]);
   const [current, setCurrent] = useState<string>("");
@@ -104,7 +104,11 @@ export default function MyStuff({
                   <div className="card-actions">
                     <button className="ca" title="Move to a folder" onClick={async () => { const to = prompt("Move to which folder? (leave empty for none)", l.folder || ""); if (to !== null) await act({ action: "moveMyStuff", id: l.id, folder: to }); }}><Icon name="folder" /></button>
                     <button className="ca" title="Copy link" onClick={() => navigator.clipboard.writeText(l.url).then(() => toast("Link copied")).catch(() => {})}><Icon name="copy" /></button>
-                    <button className="ca danger" title="Remove" onClick={() => act({ action: "removeMyStuff", id: l.id })}><Icon name="trash" /></button>
+                    <button className="ca danger" title="Remove" onClick={async () => {
+                      const j = await act({ action: "removeMyStuff", id: l.id });
+                      if (j.error) { toast(j.error); return; }
+                      toast(`Removed ${l.name}`, { label: "Undo", run: () => { act({ action: "addMyStuff", name: l.name, url: l.url, folder: l.folder || "" }); } });
+                    }}><Icon name="trash" /></button>
                   </div>
                 </div>
               ))}

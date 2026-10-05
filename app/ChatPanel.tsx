@@ -70,7 +70,7 @@ export default function ChatPanel({
   canModerate: boolean;
   isAdmin?: boolean;
   onNeedLogin: () => void;
-  showToast: (msg: string) => void;
+  showToast: (msg: string, action?: { label: string; run: () => void }) => void;
   /** people whose messages you've hidden (lowercase) */
   blocked?: string[];
   onBlock?: (username: string) => void;
@@ -458,7 +458,16 @@ export default function ChatPanel({
                 <button onClick={() => { act({ action: "answer", id: m.id, answered: !m.answered }, m.answered ? "Marked unanswered" : "Marked answered ✓"); setMenuFor(null); }}><Icon name="check" /> {m.answered ? "Not answered" : "Mark answered"}</button>
               )}
               {canModerate && <button onClick={() => { act({ action: "pin", id: m.id, pinned: !s.pins.some((p) => p.id === m.id) }, s.pins.some((p) => p.id === m.id) ? "Unpinned" : "Pinned"); setMenuFor(null); }}><Icon name="pin" /> {s.pins.some((p) => p.id === m.id) ? "Unpin" : "Pin"}</button>}
-              {(mine || canModerate) && <button className="danger" onClick={() => { if (confirm(mine ? "Delete your message?" : "Delete this message for everyone?")) act({ action: "delete", id: m.id, password: adminPassword || undefined }); setMenuFor(null); }}><Icon name="trash" /> Delete</button>}
+              {(mine || canModerate) && <button className="danger" onClick={async () => {
+                setMenuFor(null);
+                if (!mine) { if (confirm("Delete this message for everyone?")) act({ action: "delete", id: m.id, password: adminPassword || undefined }); return; }
+                // your own: no "are you sure", just an Undo (which sends it again)
+                try {
+                  await post({ action: "delete", id: m.id });
+                  if (!m.kind) showToast("Message deleted", { label: "Undo", run: () => { post({ text: m.text, replyTo: m.replyTo?.id }).catch((err: any) => showToast(err.message)); } });
+                  else showToast("Message deleted");
+                } catch (err: any) { showToast(err.message); }
+              }}><Icon name="trash" /> Delete</button>}
               {user && onBlock && !mine && <button onClick={() => { if (confirm(`Hide all messages from ${m.user}? You can undo this in Account & security.`)) onBlock(m.user); setMenuFor(null); }}><Icon name="eyeOff" /> Block {m.user}</button>}
               {user && !mine && (
                 <button onClick={async () => {

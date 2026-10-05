@@ -62,9 +62,17 @@ export function iconColor(host: string): Promise<string> {
   return p;
 }
 
-export default function Favicon({ url, name, size = 22, className = "" }: { url: string; name: string; size?: number; className?: string }) {
+export default function Favicon({ url, name, size = 22, className = "", custom }: { url: string; name: string; size?: number; className?: string; custom?: string }) {
   const host = hostOf(url);
   const [failed, setFailed] = useState(!host || !host.includes("."));
+  // an uploaded icon (falls back to the site's own if it isn't approved yet or is gone)
+  const [customFailed, setCustomFailed] = useState<string | null>(null);
+  if (custom && customFailed !== custom) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img className={`fav-custom ${className}`} src={`/api/img/${custom}`} alt="" width={size} height={size} loading="lazy" decoding="async" onError={() => setCustomFailed(custom)} />
+    );
+  }
 
   if (failed) {
     const h = hue(host || name);

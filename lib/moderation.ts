@@ -346,7 +346,7 @@ export async function deleteAdminBoard(id: string) {
 }
 
 /* ---------- trash: deleted links and folders, restorable for 30 days ---------- */
-export interface TrashItem { id: string; kind: "link" | "folder"; at: string; by?: string; folderId?: string; folderName?: string; item: unknown }
+export interface TrashItem { id: string; kind: "link" | "folder"; at: string; by?: string; folderId?: string; folderName?: string; item: unknown; /** where a link sat in its folder */ index?: number }
 const TRASH_KEY = "trash";
 export async function addToTrash(items: Omit<TrashItem, "id" | "at">[]) {
   if (!items.length) return;

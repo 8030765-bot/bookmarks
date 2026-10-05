@@ -133,7 +133,12 @@ export default function LinkCard({
   function commitRename() {
     setRenaming(false);
     const name = draft.trim();
-    if (name && name !== link.name) actions.adminEdit(folder, link, { name });
+    if (admin) { if (name && name !== link.name) actions.adminEdit(folder, link, { name }); return; }
+    // not an editor: your own name for it (only you see it)
+    if (name !== displayName) {
+      actions.pref(link.id, { rename: name && name !== link.name ? name : "" });
+      actions.toast(name && name !== link.name ? `Renamed just for you — the real name is “${link.name}”` : "Back to its real name");
+    }
   }
 
   const showMeta = !!(link.sticker || link.tags?.length || link.clicks || link.notes || link.addedBy || me || agg?.count || link.status || link.cost ||
@@ -194,11 +199,11 @@ export default function LinkCard({
         title={title}
       >
         <span className="card-icon">
-          <Favicon url={link.url} name={displayName} size={22} />
+          <Favicon url={link.url} name={displayName} size={22} custom={link.iconImg} />
           {link.emoji && <span className="card-emoji" aria-hidden="true">{link.emoji}</span>}
         </span>
         <span className="card-body">
-          <span className="card-name" onDoubleClick={(e) => { if (!admin) return; e.preventDefault(); setDraft(link.name); setRenaming(true); }}>
+          <span className="card-name" title={admin ? "Double-click to rename" : "Double-click to rename it just for you"} onDoubleClick={(e) => { e.preventDefault(); setDraft(admin ? link.name : displayName); setRenaming(true); }}>
             {renaming ? (
               <input
                 ref={renameRef}

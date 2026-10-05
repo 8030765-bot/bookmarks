@@ -8,7 +8,8 @@ import { notify } from "./userdata";
 import { REV_KEYS } from "./revs";
 import { fansKey } from "./social";
 import { getClub, isMember } from "./clubs";
-import { addToTrash, setFlags, takeFromTrash } from "./moderation";
+import { addToTrash, listTrash, setFlags, takeFromTrash } from "./moderation";
+import { getImageMeta } from "./images";
 import { backupIfNeeded, getBackup } from "./backups";
 const KEY = "bookmarks:shared";
 const PREV_KEY = "bookmarks:shared:prev";
@@ -99,6 +100,8 @@ const COSTS = ["free", "paid", "account"] as const;
  */
 function applyExtras(data: BookmarksData, link: Link, body: Record<string, unknown>, admin: boolean) {
   if (typeof body.emoji === "string") link.emoji = cleanName(body.emoji, 8) || undefined;
+  // checked by checkIcon() before we get here
+  if (typeof body.iconImg === "string") link.iconImg = /^[a-f0-9]{32}$/.test(body.iconImg) ? body.iconImg : undefined;
   if (typeof body.lang === "string") link.lang = /^[a-z]{2}(-[a-z]{2})?$/i.test(body.lang) ? body.lang.toLowerCase() : undefined;
   if (typeof body.cost === "string") link.cost = (COSTS as readonly string[]).includes(body.cost) ? (body.cost as Link["cost"]) : undefined;
   if (typeof body.mobile === "boolean") link.mobile = body.mobile || undefined;
@@ -294,6 +297,10 @@ function credit(body: Record<string, unknown>) {
   return typeof body.suggestedBy === "string" && body.suggestedBy ? ` (suggested by ${body.suggestedBy})` : "";
 }
 type LinkRef = { folderId: string; linkId: string };
+/** A link this person added in the last 15 minutes (they may delete it again). */
+function isOwnFreshLink(link: Link | undefined, me: string | undefined) {
+  return !!link && !!me && link.addedBy?.toLowerCase() === me.toLowerCase() && Date.now() - Date.parse(link.createdAt || "") < 15 * 60_000;
+}
 function linkRefs(body: Record<string, unknown>): LinkRef[] {
   if (!Array.isArray(body.items)) throw new Error("Missing items");
   return (body.items as LinkRef[]).map((r) => ({ folderId: String(r.folderId), linkId: String(r.linkId) }));
@@ -346,6 +353,13 @@ export async function handleAction(
     return folder;
   };
   const log = (action: string, detail: string, folderId?: string) => pushActivity(data, action, detail, { folderId, by: me });
+  /** A custom icon must be an uploaded icon, by this person (or any, for admins). */
+  const checkIcon = async () => {
+    if (typeof body.iconImg !== "string" || !body.iconImg) return;
+    const meta = await getImageMeta(body.iconImg);
+    if (!meta || meta.kind !== "icon") throw new Error("That icon is gone — upload it again");
+    if (meta.owner.toLowerCase() !== (me || "").toLowerCase() && !isAdmin()) throw new Error("Use an icon you uploaded");
+  };
   switch (action) {
     case "verifyAdmin": {
       requireAdmin(password);
@@ -360,6 +374,7 @@ export async function handleAction(
       const folder = findFolder(folderId);
       await requireCanAdd(folder);
       if (folder.rule) throw new Error("Smart folders fill themselves — add the link to a normal folder");
+      await checkIcon();
       const tags = cleanTags(body.tags);
       const user = me;
       const addedBy = typeof body.suggestedBy === "string" && body.suggestedBy ? body.suggestedBy : user;
@@ -412,6 +427,7 @@ export async function handleAction(
       const { folder, link } = findLink(data, String(body.folderId || ""), String(body.linkId || ""));
       await requireFolderEditor(folder);
       assertNotChanged(link.updatedAt, body);
+      await checkIcon();
       if (typeof body.name === "string" && body.name.trim()) link.name = cleanName(body.name);
       if (typeof body.url === "string" && body.url.trim()) link.url = cleanUrl(body.url);
       if (Array.isArray(body.tags) || typeof body.tags === "string") link.tags = cleanTags(body.tags);
@@ -425,13 +441,15 @@ export async function handleAction(
     }
     case "deleteLink": {
       const folder = findFolder(body.folderId);
-      await requireFolderEditor(folder);
       const linkId = String(body.linkId || "");
-      const before = folder.links.find((l) => l.id === linkId);
+      const index = folder.links.findIndex((l) => l.id === linkId);
+      const before = folder.links[index];
+      // you can take back a link you added in the last 15 minutes (Ctrl+Z after adding)
+      if (!isOwnFreshLink(before, me)) await requireFolderEditor(folder);
       folder.links = folder.links.filter((l) => l.id !== linkId);
       log("delete", `Deleted link “${before?.name || linkId}”${credit(body)}`, folder.id);
       await saveBookmarks(data);
-      if (before) await addToTrash([{ kind: "link", by: me, folderId: folder.id, folderName: folder.name, item: before }]).catch(() => {});
+      if (before) await addToTrash([{ kind: "link", by: me, folderId: folder.id, folderName: folder.name, item: before, index }]).catch(() => {});
       await getRedis().hdel(CLICKS_KEY, linkId).catch(() => {});
       return data;
     }
@@ -1073,6 +1091,22 @@ export async function handleAction(
       }
       if (!changed) throw new Error("No links matched");
       pushActivity(data, "edit", `Replaced “${find}” with “${replace}” in ${changed} links`);
+      await saveBookmarks(data);
+      return data;
+    }
+    case "restoreLink": {
+      // "Undo" after deleting a link: anyone who could delete it can put it back
+      const linkId = String(body.linkId || "");
+      const t = (await listTrash()).find((x) => x.kind === "link" && (x.item as Link)?.id === linkId);
+      if (!t) throw new Error("That's no longer in the trash");
+      const folder = data.folders.find((f) => f.id === t.folderId);
+      if (!folder) throw new Error("Its folder is gone — an admin can bring it back from the trash");
+      const link = t.item as Link;
+      if (!(me && t.by?.toLowerCase() === me.toLowerCase() && link.addedBy?.toLowerCase() === me.toLowerCase())) await requireFolderEditor(folder);
+      if (data.folders.some((f) => f.links.some((l) => l.id === link.id))) throw new Error("It's already back");
+      await takeFromTrash(t.id);
+      folder.links.splice(typeof t.index === "number" && t.index >= 0 ? Math.min(t.index, folder.links.length) : folder.links.length, 0, link);
+      log("restore", `Put back “${link.name}”`, folder.id);
       await saveBookmarks(data);
       return data;
     }

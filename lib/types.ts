@@ -16,6 +16,8 @@ export interface Link {
   likes?: string[];
   /** emoji shown on the card next to the name */
   emoji?: string;
+  /** an uploaded icon (image id) shown instead of the site's own */
+  iconImg?: string;
   /** shown first in its folder (admin) */
   pinned?: boolean;
   /** hidden from everyone but admins after this date (ISO) */

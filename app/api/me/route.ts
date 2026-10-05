@@ -9,9 +9,10 @@ import { errorResponse } from "@/lib/http";
 import { rateLimit } from "@/lib/ratelimit";
 import { follow, getFollowing, giveKudos, setHideOnline, setSeenFriends } from "@/lib/social";
 import { removePicture, uploadPicture } from "@/lib/pictures";
+import { saveImage } from "@/lib/images";
 import { addPushSub, hasPush, pushConfigured, pushPublicKey, removePushSub } from "@/lib/push";
 import {
-  clearNotifications, setDnd, setNotifyPrefs,
+  clearNotifications, restoreNotifications, setDnd, setNotifyPrefs,
   addMyStuff, getUserData, importMyStuff, markNotificationsRead, moveMyStuff, recordAggregateRating, removeMyStuff, renameMyStuffFolder,
   deleteView, importPersonal, saveMessage, saveSettings, saveView, setBlocked, setFolderOrder, setFolderPref, setLinkPref, setProfile, setRating, toggleFavorite,
 } from "@/lib/userdata";
@@ -65,6 +66,15 @@ export async function POST(req: NextRequest) {
         const role = await getRole(user);
         const kind = body.kind === "banner" ? "banner" : "avatar";
         return NextResponse.json(await uploadPicture(user, role, kind, body.data, body.still));
+      }
+      case "uploadImage": {
+        // a custom icon for a website (chat pictures go through /api/chat)
+        await rateLimit(`img:${user.toLowerCase()}`, 20, 60 * 60);
+        if (body.kind !== "icon") throw new Error("Unknown kind of picture");
+        const role = await getRole(user);
+        const staff = role === "owner" || role === "admin" || role === "mod";
+        const meta = await saveImage(user, "icon", body.data, { approved: staff });
+        return NextResponse.json({ id: meta.id, pending: meta.status === "pending" });
       }
       case "removePicture":
         return NextResponse.json({ profile: await removePicture(user, body.kind === "banner" ? "banner" : "avatar") });
@@ -137,6 +147,8 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ links: await setLinkPref(user, String(body.linkId || ""), (body.patch || {}) as Record<string, unknown>) });
       case "readNotifications":
         return NextResponse.json({ ok: true, notifications: await markNotificationsRead(user, typeof body.id === "string" ? body.id : undefined) });
+      case "restoreNotifications":
+        return NextResponse.json({ notifications: await restoreNotifications(user, body.notifications) });
       case "clearNotifications":
         return NextResponse.json({ notifications: await clearNotifications(user, typeof body.id === "string" ? body.id : undefined) });
       case "notifyPrefs":

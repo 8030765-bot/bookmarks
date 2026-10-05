@@ -480,6 +480,24 @@ export async function clearNotifications(username: string, id?: string): Promise
   await save(username, data);
   return data.notifications;
 }
+/** "Undo" after clearing notifications: put them back (your own inbox only, so nothing new can be made up). */
+export async function restoreNotifications(username: string, list: unknown) {
+  const data = await getUserData(username);
+  const have = new Set(data.notifications.map((n) => n.id));
+  const kinds = new Set<string>(["mention", "reply", "suggestion", "like", "comment", "dm", "role", "system", "follow"]);
+  const back: Notification[] = [];
+  for (const raw of (Array.isArray(list) ? list : []).slice(0, MAX_NOTIFS) as Record<string, unknown>[]) {
+    const id = String(raw?.id || "");
+    if (!/^[\w-]{1,64}$/.test(id) || have.has(id) || !kinds.has(String(raw.kind)) || !Number.isFinite(Date.parse(String(raw.at)))) continue;
+    back.push({
+      id, kind: raw.kind as NotifyKind, text: String(raw.text || "").slice(0, 300), at: new Date(String(raw.at)).toISOString(), read: raw.read === true,
+      from: typeof raw.from === "string" ? raw.from.slice(0, 20) : undefined, link: typeof raw.link === "string" && raw.link.startsWith("/") ? raw.link.slice(0, 200) : undefined,
+    });
+  }
+  data.notifications = [...data.notifications, ...back].sort((a, b) => b.at.localeCompare(a.at)).slice(0, MAX_NOTIFS);
+  await save(username, data);
+  return data.notifications;
+}
 const KINDS: NotifyKind[] = ["mention", "reply", "suggestion", "like", "comment", "dm", "role", "system", "follow"];
 export async function setNotifyPrefs(username: string, patch: Record<string, unknown>) {
   const data = await getUserData(username);

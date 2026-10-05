@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { BookmarksData, Folder, Link, LinkStatus } from "@/lib/types";
 import { Icon } from "./Icon";
 import Favicon from "./Favicon";
-import { COLORS, hostOf, nameFromUrl, normUrl, urlsIn } from "./ui";
+import { COLORS, hostOf, nameFromUrl, normUrl, readLocal, urlsIn, writeLocal } from "./ui";
+import { ImageCropper } from "./ImageCropper";
 
 export interface LinkValues {
   name: string;
@@ -20,6 +21,8 @@ export interface LinkValues {
   checklist: string[];
   related: { name: string; url: string }[];
   readMins?: number;
+  /** an uploaded icon (image id), "" for none */
+  iconImg: string;
   // admin only
   pinned: boolean;
   verified: boolean;
@@ -40,6 +43,21 @@ const COLOR_NAMES: Record<string, string> = {
 const LANGS: [string, string][] = [["", "—"], ["en", "English"], ["es", "Spanish"], ["fr", "French"], ["de", "German"], ["pt", "Portuguese"], ["zh", "Chinese"], ["ja", "Japanese"], ["ar", "Arabic"], ["hi", "Hindi"]];
 const STATUSES: [string, string][] = [["", "Not set"], ["works", "Works"], ["login", "Needs login"], ["slow", "Slow"], ["broken", "Broken"]];
 const STICKERS: [string, string][] = [["", "None"], ["hot", "🔥 Hot"], ["new", "🆕 New"], ["essential", "⭐ Essential"]];
+
+// the bits normalizeUrl() strips (kept in step with lib/url.ts)
+const TRACKING = /^(utm_[a-z]+|fbclid|gclid|dclid|gbraid|wbraid|msclkid|mc_cid|mc_eid|igshid|yclid|_hsenc|_hsmi|ref_src|mkt_tok|oly_anon_id|oly_enc_id|vero_id|twclid|ttclid)$/i;
+function trackingBits(raw: string) {
+  try {
+    const u = new URL(/^[a-z]+:\/\//i.test(raw.trim()) ? raw.trim() : `https://${raw.trim()}`);
+    return Array.from(u.searchParams.keys()).filter((k) => TRACKING.test(k) || (k === "si" && /(^|\.)(youtube\.com|youtu\.be|spotify\.com)$/i.test(u.hostname)));
+  } catch {
+    return [];
+  }
+}
+/** What you were typing in "Add a website", kept if the box closes by accident. */
+interface AddDraft { url: string; name: string; notes: string; tags: string[]; folderId: string; tip: string; emoji: string; at: number }
+const DRAFT_KEY = "draft:addLink";
+const LAST_FOLDER_KEY = "lastAddFolder";
 
 /** "Name | link" or just a link on each line. */
 function parseBulk(text: string): { name: string; url: string }[] {
@@ -79,20 +97,34 @@ export default function LinkModal({
   onClose: () => void;
 }) {
   const editing = mode.kind === "edit" ? mode.link : null;
+  // a half-typed "Add a website" from last time (not when a link was pasted/dropped in)
+  const [draft] = useState<AddDraft | null>(() => {
+    if (mode.kind !== "add" || mode.url || mode.bulk) return null;
+    const d = readLocal<AddDraft | null>(DRAFT_KEY, null);
+    return d && Date.now() - d.at < 7 * 86400_000 && (d.url || d.name || d.notes) ? d : null;
+  });
+  const [draftNote, setDraftNote] = useState(!!draft);
+  const lastFolder = mode.kind === "add" && !mode.folderId ? readLocal<string>(LAST_FOLDER_KEY, "") : "";
   const [bulk, setBulk] = useState<string | null>(mode.kind === "add" && mode.bulk ? mode.bulk : null);
   const [bulkNaming, setBulkNaming] = useState(false);
-  const [url, setUrl] = useState(editing?.url || (mode.kind === "add" ? mode.url || "" : ""));
-  const [name, setName] = useState(editing?.name || (mode.kind === "add" && mode.url ? nameFromUrl(mode.url) : ""));
-  const [nameTouched, setNameTouched] = useState(!!editing);
+  const [url, setUrl] = useState(editing?.url || (mode.kind === "add" ? mode.url || draft?.url || "" : ""));
+  const [name, setName] = useState(editing?.name || (mode.kind === "add" && mode.url ? nameFromUrl(mode.url) : draft?.name || ""));
+  const [nameTouched, setNameTouched] = useState(!!editing || !!draft?.name);
   const [folderId, setFolderId] = useState(
-    mode.kind === "edit" ? mode.folder.id : mode.folderId || data.folders[0]?.id || ""
+    mode.kind === "edit" ? mode.folder.id
+      : mode.folderId || [draft?.folderId, lastFolder].find((id) => id && data.folders.some((f) => f.id === id && !f.rule)) || data.folders[0]?.id || ""
   );
-  const [tags, setTags] = useState<string[]>(editing?.tags || []);
+  const [tags, setTags] = useState<string[]>(editing?.tags || draft?.tags || []);
   const [tagInput, setTagInput] = useState("");
   const [color, setColor] = useState(editing?.color || "");
-  const [notes, setNotes] = useState(editing?.notes || "");
-  const [emoji, setEmoji] = useState(editing?.emoji || "");
-  const [tip, setTip] = useState(editing?.tip || "");
+  const [notes, setNotes] = useState(editing?.notes || draft?.notes || "");
+  const [emoji, setEmoji] = useState(editing?.emoji || draft?.emoji || "");
+  const [tip, setTip] = useState(editing?.tip || draft?.tip || "");
+  const [iconImg, setIconImg] = useState(editing?.iconImg || "");
+  const [iconPending, setIconPending] = useState(false);
+  const [cropIcon, setCropIcon] = useState(false);
+  const [another, setAnother] = useState(() => readLocal<boolean>("addAnother", false));
+  const [added, setAdded] = useState("");
   const [lang, setLang] = useState(editing?.lang || "");
   const [cost, setCost] = useState<string>(editing?.cost || "");
   const [mobile, setMobile] = useState(!!editing?.mobile);
@@ -106,7 +138,7 @@ export default function LinkModal({
   const [keyword, setKeyword] = useState(editing?.keyword || "");
   const [expiresAt, setExpiresAt] = useState(editing?.expiresAt ? editing.expiresAt.slice(0, 10) : "");
   const [alsoIn, setAlsoIn] = useState<string[]>(editing?.alsoIn || []);
-  const [showMore, setShowMore] = useState(!!(editing?.notes || editing?.color || editing?.emoji || editing?.tip || editing?.checklist || editing?.related));
+  const [showMore, setShowMore] = useState(!!(editing?.notes || editing?.color || editing?.emoji || editing?.tip || editing?.checklist || editing?.related || editing?.iconImg || draft?.notes || draft?.tip || draft?.emoji));
   const [showAdmin, setShowAdmin] = useState(!!(editing?.pinned || editing?.verified || editing?.sticker || editing?.status || editing?.keyword || editing?.expiresAt || editing?.alsoIn));
   const [newFolder, setNewFolder] = useState<string | null>(null);
   const [lookup, setLookup] = useState<"idle" | "busy" | "done" | "fail">("idle");
@@ -133,6 +165,22 @@ export default function LinkModal({
   }, [url, data, editing]);
 
   const host = url.trim() ? hostOf(/^[a-z]+:\/\//i.test(url.trim()) ? url.trim() : `https://${url.trim()}`) : "";
+  const tracking = useMemo(() => trackingBits(url), [url]);
+
+  // keep what you're typing, in case the box gets closed by accident
+  useEffect(() => {
+    if (mode.kind !== "add" || bulk !== null) return;
+    const t = setTimeout(() => {
+      if (url.trim() || name.trim() || notes.trim()) writeLocal(DRAFT_KEY, { url, name, notes, tags, folderId, tip, emoji, at: Date.now() } satisfies AddDraft);
+      else writeLocal(DRAFT_KEY, null);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [mode.kind, bulk, url, name, notes, tags, folderId, tip, emoji]);
+  function startFresh() {
+    writeLocal(DRAFT_KEY, null);
+    setDraftNote(false);
+    setUrl(""); setName(""); setNameTouched(false); setNotes(""); setTags([]); setTip(""); setEmoji("");
+  }
 
   // look the page up for a proper title + description (adding only)
   useEffect(() => {
@@ -201,7 +249,7 @@ export default function LinkModal({
         }));
         setBulkNaming(false);
       }
-      if (await onBulk(target, items, allTagsNow)) onClose();
+      if (await onBulk(target, items, allTagsNow)) { writeLocal(LAST_FOLDER_KEY, target); onClose(); }
       return;
     }
     const ok = await onSubmit({
@@ -226,9 +274,20 @@ export default function LinkModal({
       keyword: keyword.trim(),
       expiresAt,
       alsoIn,
+      iconImg,
     });
-    if (ok) onClose();
+    if (!ok) return;
+    if (editing) { onClose(); return; }
+    writeLocal(DRAFT_KEY, null);
+    writeLocal(LAST_FOLDER_KEY, target);
+    if (!another) { onClose(); return; }
+    // "add another": keep the folder and tags, clear the rest
+    setAdded(name.trim());
+    setUrl(""); setName(""); setNameTouched(false); setNotes(""); setTip(""); setEmoji(""); setIconImg(""); setReadMins(undefined); setLookup("idle");
+    setDraftNote(false);
+    requestAnimationFrame(() => urlRef.current?.focus());
   }
+  const urlRef = useRef<HTMLInputElement>(null);
 
   const bulkLinks = bulk !== null ? parseBulk(bulk) : [];
 
@@ -236,6 +295,13 @@ export default function LinkModal({
     <div className="modal-overlay" onClick={() => !submitting && onClose()}>
       <div className="modal wide link-modal" onClick={(e) => e.stopPropagation()}>
         <h2>{editing ? "Edit website" : bulk !== null ? "Add several websites" : "Add a website"}</h2>
+        {draftNote && bulk === null && (
+          <div className="draft-note">
+            <span>📝 Picked up where you left off.</span>
+            <button type="button" className="link-btn" onClick={startFresh}>Start fresh</button>
+          </div>
+        )}
+        {added && <div className="draft-note ok">✓ Added “{added}” — add the next one.</div>}
         <form onSubmit={submit}>
           {bulk !== null ? (
             <div className="form-group">
@@ -255,6 +321,7 @@ export default function LinkModal({
                     {host ? <Favicon key={host} url={`https://${host}`} name={host} size={18} /> : <Icon name="link" />}
                   </span>
                   <input
+                    ref={urlRef}
                     value={url}
                     onChange={(e) => onUrlChange(e.target.value)}
                     placeholder="Paste a link, e.g. coolmathgames.com"
@@ -268,6 +335,7 @@ export default function LinkModal({
                     Already on the site as <strong>{duplicate.link.name}</strong> in {duplicate.folder.emoji} {duplicate.folder.name}.
                   </div>
                 )}
+                {tracking.length > 0 && <div className="hint">🧹 The tracking bits ({tracking.slice(0, 3).join(", ")}{tracking.length > 3 ? "…" : ""}) will be removed when it&apos;s saved.</div>}
                 {lookup === "busy" && <div className="hint">Looking up the site…</div>}
                 {lookup === "done" && <div className="hint">✓ Filled in from the site — change anything you like.</div>}
                 {!editing && (
@@ -276,7 +344,7 @@ export default function LinkModal({
               </div>
 
               <div className="form-group">
-                <label>Name</label>
+                <label>Name <span className={`char-count ${name.length > 90 ? "near" : ""}`}>{name.length}/100</span></label>
                 <input
                   value={name}
                   onChange={(e) => { setName(e.target.value); setNameTouched(true); }}
@@ -348,7 +416,7 @@ export default function LinkModal({
               {showMore && (
                 <>
                   <div className="form-group">
-                    <label>Description</label>
+                    <label>Description <span className={`char-count ${notes.length > 450 ? "near" : ""}`}>{notes.length}/500</span></label>
                     <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="What is this site for?" maxLength={500} />
                   </div>
                   <div className="form-row">
@@ -373,9 +441,20 @@ export default function LinkModal({
                     </div>
                   </div>
                   <div className="form-group">
-                    <label>Tip for everyone</label>
+                    <label>Tip for everyone <span className={`char-count ${tip.length > 180 ? "near" : ""}`}>{tip.length}/200</span></label>
                     <input value={tip} onChange={(e) => setTip(e.target.value)} placeholder="e.g. Sign in with Google first" maxLength={200} />
                   </div>
+                  {canFetch && (
+                    <div className="form-group">
+                      <label>Icon</label>
+                      <div className="pic-row">
+                        <span className="icon-preview"><Favicon url={host ? `https://${host}` : ""} name={name || "?"} size={22} custom={iconImg || undefined} /></span>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setCropIcon(true)}>Upload an icon</button>
+                        {iconImg && <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setIconImg(""); setIconPending(false); }}>Use the site&apos;s own</button>}
+                      </div>
+                      <div className="hint">{iconPending ? "Uploaded — everyone sees it once a moderator has checked it." : "For sites with an ugly or missing icon."}</div>
+                    </div>
+                  )}
                   <label className="toggle-row compact">
                     <div><strong>Works on phones</strong><span>Shows a 📱 label.</span></div>
                     <input type="checkbox" role="switch" checked={mobile} onChange={(e) => setMobile(e.target.checked)} />
@@ -463,7 +542,7 @@ export default function LinkModal({
                 <div className="card static" style={color ? ({ "--card-accent": color } as React.CSSProperties) : undefined}>
                   <span className="card-main">
                     <span className="card-icon">
-                      <Favicon key={host} url={host ? `https://${host}` : ""} name={name || "?"} size={22} />
+                      <Favicon key={host + iconImg} url={host ? `https://${host}` : ""} name={name || "?"} size={22} custom={iconImg || undefined} />
                       {emoji && <span className="card-emoji">{emoji}</span>}
                     </span>
                     <span className="card-body">
@@ -484,6 +563,11 @@ export default function LinkModal({
           )}
 
           <div className="modal-actions">
+            {!editing && bulk === null && (
+              <label className="check-inline" title="Keep this box open after adding, for the next one">
+                <input type="checkbox" checked={another} onChange={(e) => { setAnother(e.target.checked); writeLocal("addAnother", e.target.checked); }} /> Add another
+              </label>
+            )}
             <button type="button" className="btn btn-secondary" onClick={onClose} disabled={submitting}>Cancel</button>
             <button type="submit" className="btn btn-primary" disabled={submitting || bulkNaming || (bulk !== null ? !bulkLinks.length : !url.trim() || !name.trim())}>
               {bulkNaming ? "Finding names…" : submitting ? "Saving…" : editing ? "Save changes" : bulk !== null ? `Add ${Math.min(50, bulkLinks.length)} for everyone` : "Add for everyone"}
@@ -491,6 +575,23 @@ export default function LinkModal({
           </div>
         </form>
       </div>
+      {cropIcon && (
+        <ImageCropper
+          title="Website icon"
+          aspect={1}
+          outW={64}
+          round={false}
+          onCancel={() => setCropIcon(false)}
+          onDone={async (r) => {
+            const res = await fetch("/api/me", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "uploadImage", kind: "icon", data: r.data }) });
+            const j = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(j.error || "Couldn't upload that");
+            setIconImg(j.id);
+            setIconPending(!!j.pending);
+            setCropIcon(false);
+          }}
+        />
+      )}
     </div>
   );
 }

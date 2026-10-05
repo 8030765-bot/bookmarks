@@ -193,7 +193,7 @@ export default function SearchBox({
               {s.kind === "op" && (<><Icon name="search" /> <span className="ss-main"><code>{s.text}</code></span><span className="ss-hint">{s.help}</span></>)}
               {s.kind === "tag" && (<><Icon name="tag" /> <span className="ss-main">#{s.tag}</span><span className="ss-hint">{s.count}</span></>)}
               {s.kind === "folder" && (<><span className="ss-emoji">{s.folder.emoji}</span> <span className="ss-main">{s.folder.name}</span><span className="ss-hint">folder</span></>)}
-              {s.kind === "link" && (<><Favicon url={s.ref.link.url} name={s.ref.link.name} size={16} /> <span className="ss-main">{s.ref.link.name}</span><span className="ss-hint">{s.ref.folder.emoji} {s.ref.folder.name}</span></>)}
+              {s.kind === "link" && (<><Favicon url={s.ref.link.url} name={s.ref.link.name} size={16} custom={s.ref.link.iconImg} /> <span className="ss-main">{s.ref.link.name}</span><span className="ss-hint">{s.ref.folder.emoji} {s.ref.folder.name}</span></>)}
             </div>
           ))}
         </div>

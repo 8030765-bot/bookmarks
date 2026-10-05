@@ -42,6 +42,7 @@ import {
   EasterEgg, HintMode, SitePet, Snow, confetti, funToast, randomLoadingLine, useLogoClicks, useNewYearFireworks, useSparkles, useUnlocked,
 } from "./components/Fun";
 import SideNav from "./components/SideNav";
+import { recordUndo, redoLast, undoLast } from "./components/undo";
 import { AddAnywhereModal, WeekChanges, downloadBookmarksHtml, downloadFolderCsv, embedCode } from "./components/DataViews";
 import { BottomNav, InstallModal, PullIndicator, buzz, usePullToRefresh } from "./components/Mobile";
 import { FeedbackModal, Tour, WhatsNewPopup, useFirstVisit, useLeaveWarning, useWhatsNewAfterUpdate } from "./components/Help";
@@ -441,6 +442,9 @@ export default function HomePage() {
   useTimerAlarm(useCallback((m: string) => showToast(m, undefined, 6000), [showToast]));
   const myThanksSet = useMemo(() => new Set(community.info?.myThanks || []), [community.info?.myThanks]);
   const personal = usePersonal(user);
+  // undo steps run later, so they read the latest personal data through this
+  const personalRef = useRef(personal);
+  personalRef.current = personal;
   // 🎂 confetti on your birthday (once a day)
   const myBirthday = personal.profile.birthday;
   useEffect(() => {
@@ -838,6 +842,33 @@ export default function HomePage() {
   }
   const adminPw = () => (adminUnlocked ? adminPassword : undefined);
   const undo = () => api("undo", { password: adminPassword }).then((d) => d && showToast("Undone"));
+  /** Ctrl+Z / the Undo button on a toast: take back your own latest change. */
+  const runUndo = async () => {
+    try { const label = await undoLast(); showToast(label ? `Undone: ${label}` : "Nothing to undo"); } catch (e: any) { showToast(e.message || "Couldn't undo that"); }
+  };
+  const runRedo = async () => {
+    try { const label = await redoLast(); showToast(label ? `Redone: ${label}` : "Nothing to redo"); } catch (e: any) { showToast(e.message || "Couldn't redo that"); }
+  };
+  /** An api() call that must work (for undo steps): throws its error instead of returning false. */
+  const must = async (action: string, payload: Record<string, unknown>) => {
+    const next = await api(action, payload, { quiet: true });
+    if (!next) throw new Error(lastErrorRef.current || "Couldn't do that");
+    return next;
+  };
+  /** Every field of a link, for putting an edit back. */
+  const linkFields = (l: Link) => ({
+    name: l.name, url: l.url, tags: l.tags || [], color: l.color || "", notes: l.notes || "", emoji: l.emoji || "", tip: l.tip || "",
+    lang: l.lang || "", cost: l.cost || "", mobile: !!l.mobile, checklist: l.checklist || [], related: l.related || [], readMins: l.readMins || 0,
+    iconImg: l.iconImg || "",
+    ...(adminUnlocked ? {
+      pinned: !!l.pinned, verified: !!l.verified, sticker: l.sticker || "", status: l.status || "", keyword: l.keyword || "",
+      expiresAt: l.expiresAt || "", alsoIn: l.alsoIn || [],
+    } : {}),
+  });
+  const setRatingTo = (linkId: string, target: number) => {
+    const cur = personalRef.current.ratings[linkId] || 0;
+    if (cur !== target) personalRef.current.rate(linkId, target || cur); // rating the same again clears it
+  };
 
   // ---------- derived ----------
   const allRefs: LinkRef[] = useMemo(
@@ -1152,6 +1183,10 @@ export default function HomePage() {
       else window.location.href = href;
     }
   }
+  async function restoreNotifications(list: { id: string }[]) {
+    await fetch("/api/me", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "restoreNotifications", notifications: list }) }).catch(() => {});
+    personal.reload();
+  }
   function randomBookmark() {
     if (!allRefs.length) { showToast("No websites yet"); return; }
     const pick = allRefs[Math.floor(Math.random() * allRefs.length)];
@@ -1218,6 +1253,14 @@ export default function HomePage() {
     const common = { ...fields, password: adminPw() };
     if (modal.mode.kind === "add") {
       const ok = await api("addLink", { ...common, folderId: values.folderId });
+      if (ok && !queuedRef.current) {
+        const made = [...(ok.folders.find((x) => x.id === values.folderId)?.links || [])].reverse().find((l) => l.name === values.name.trim());
+        if (made) recordUndo({
+          label: `Added ${made.name}`,
+          undo: () => must("deleteLink", { folderId: values.folderId, linkId: made.id, password: adminPassword }),
+          redo: () => must("restoreLink", { linkId: made.id, password: adminPw() }),
+        });
+      }
       if (ok) showToast(queuedRef.current || `Added ${values.name} for everyone`, undefined, queuedRef.current ? 6000 : undefined);
       return !!ok;
     }
@@ -1231,7 +1274,21 @@ export default function HomePage() {
     if (ok && values.folderId !== folder.id) {
       ok = await api("moveLinkTo", { folderId: folder.id, linkId: link.id, targetFolderId: values.folderId, password: adminPassword });
     }
-    if (ok) showToast(queuedRef.current || "Saved");
+    if (ok) {
+      const moved = values.folderId !== folder.id;
+      recordUndo({
+        label: `Edited ${link.name}`,
+        undo: async () => {
+          if (moved) await must("moveLinkTo", { folderId: values.folderId, linkId: link.id, targetFolderId: folder.id, password: adminPassword });
+          await must("editLink", { folderId: folder.id, linkId: link.id, ...linkFields(link), password: adminPassword, force: true });
+        },
+        redo: async () => {
+          await must("editLink", { folderId: folder.id, linkId: link.id, ...common, force: true });
+          if (moved) await must("moveLinkTo", { folderId: folder.id, linkId: link.id, targetFolderId: values.folderId, password: adminPassword });
+        },
+      });
+      showToast(queuedRef.current || "Saved", { label: "Undo", run: runUndo });
+    }
     return !!ok;
   }
   async function addMany(folderId: string, links: { name: string; url: string }[], tags: string[]): Promise<boolean> {
@@ -1268,31 +1325,72 @@ export default function HomePage() {
   const cardActions: LinkCardActions = {
     newTab: look.newTab,
     open: (f, l) => trackAndOpen(f, l),
-    star: (_f, l) => { if (!user) { showToast("Log in to save favorites"); openLogin(); return; } personal.toggleFavorite(l.id); },
+    star: (_f, l) => {
+      if (!user) { showToast("Log in to save favorites"); openLogin(); return; }
+      const was = favoriteSet.has(l.id);
+      personal.toggleFavorite(l.id);
+      const flip = () => personalRef.current.toggleFavorite(l.id);
+      recordUndo({ label: `${was ? "Unstarred" : "Starred"} ${l.name}`, undo: flip, redo: flip });
+    },
     copy: (l) => navigator.clipboard.writeText(l.url).then(() => showToast("Link copied")).catch(() => showToast("Couldn't copy")),
     edit: (f, l) => setModal({ type: "link", mode: { kind: "edit", folder: f, link: l } }),
     remove: async (f, l) => {
       if (await api("deleteLink", { folderId: f.id, linkId: l.id, password: adminPassword })) {
-        showToast(`Deleted ${l.name}`, { label: "Undo", run: undo });
+        recordUndo({
+          label: `Deleted ${l.name}`,
+          undo: () => must("restoreLink", { linkId: l.id, password: adminPw() }),
+          redo: () => must("deleteLink", { folderId: f.id, linkId: l.id, password: adminPassword }),
+        });
+        showToast(`Deleted ${l.name}`, { label: "Undo", run: runUndo });
       }
     },
     suggest: (f, l) => setSuggest({ kind: "editLink", folderId: f.id, linkId: l.id }),
     like: (f, l) => {
       if (!user) { showToast("Log in to like websites"); openLogin(); return; }
       const me = user.toLowerCase();
-      patchLinkLocally(f.id, l.id, (x) => {
-        const likes = x.likes || [];
-        return { ...x, likes: likes.includes(me) ? likes.filter((u) => u !== me) : [...likes, me] };
-      });
-      api("toggleLike", { folderId: f.id, linkId: l.id }, { quiet: true }).then((ok) => { if (!ok) load(); });
+      const flip = () => {
+        patchLinkLocally(f.id, l.id, (x) => {
+          const likes = x.likes || [];
+          return { ...x, likes: likes.includes(me) ? likes.filter((u) => u !== me) : [...likes, me] };
+        });
+        return api("toggleLike", { folderId: f.id, linkId: l.id }, { quiet: true }).then((ok) => { if (!ok) load(); });
+      };
+      const was = !!l.likes?.includes(me);
+      flip();
+      recordUndo({ label: `${was ? "Unliked" : "Liked"} ${l.name}`, undo: flip, redo: flip });
     },
     filterTag: (t) => { toggleTag(t); setShowTags(true); window.scrollTo({ top: 0, behavior: "smooth" }); },
-    rate: (linkId, stars) => { if (!user) { showToast("Log in to rate"); openLogin(); return; } personal.rate(linkId, stars); },
+    rate: (linkId, stars) => {
+      if (!user) { showToast("Log in to rate"); openLogin(); return; }
+      const before = personal.ratings[linkId] || 0;
+      const after = before === stars ? 0 : stars;
+      personal.rate(linkId, stars);
+      recordUndo({ label: after ? `Rated ${after}★` : "Cleared your rating", undo: () => setRatingTo(linkId, before), redo: () => setRatingTo(linkId, after) });
+    },
     openProfile: (u) => setProfileView(u),
-    pref: (linkId, patch) => personal.setLinkPref(linkId, patch),
+    pref: (linkId, patch) => {
+      const old = (personal.links[linkId] || {}) as Record<string, unknown>;
+      const back = Object.fromEntries(Object.entries(patch).map(([k, v]) => [k, old[k] ?? (typeof v === "boolean" ? false : typeof v === "string" ? "" : Array.isArray(v) ? [] : undefined)]));
+      personal.setLinkPref(linkId, patch);
+      const names: Record<string, string> = { later: "Read later", done: "Done", hidden: "Hide", note: "Private note", rename: "Your name for it", checks: "Checklist" };
+      const name = allRefs.find((r) => r.link.id === linkId)?.link.name || "a link";
+      recordUndo({
+        label: `${names[Object.keys(patch)[0]] || "Change"} · ${name}`,
+        undo: () => personalRef.current.setLinkPref(linkId, back),
+        redo: () => personalRef.current.setLinkPref(linkId, patch),
+      });
+    },
     adminEdit: async (f, l, patch) => {
       const ok = await api("editLink", { folderId: f.id, linkId: l.id, ...patch, password: adminPassword });
-      if (ok) showToast("Saved");
+      if (ok) {
+        const back = Object.fromEntries(Object.keys(patch).map((k) => [k, (l as unknown as Record<string, unknown>)[k] ?? ""]));
+        recordUndo({
+          label: `Renamed ${l.name}`,
+          undo: () => must("editLink", { folderId: f.id, linkId: l.id, ...back, password: adminPassword }),
+          redo: () => must("editLink", { folderId: f.id, linkId: l.id, ...patch, password: adminPassword }),
+        });
+        showToast("Saved", { label: "Undo", run: runUndo });
+      }
     },
     menu: (f, l, at) => setCardMenu({ folder: f, link: l, ...at }),
     select: (linkId, shift) => toggleSelect(linkId, shift),
@@ -1575,6 +1673,13 @@ export default function HomePage() {
       if (f) { e.preventDefault(); jumpToFolder(f.id); }
       return;
     }
+    // Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z): your last 10 changes (text boxes keep their own undo)
+    const zy = e.key.toLowerCase();
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && (zy === "z" || zy === "y") && !t.closest("input, textarea, select, [contenteditable]") && !modal && !showCmd && !suggest && !prompt) {
+      e.preventDefault();
+      if (zy === "y" || e.shiftKey) runRedo(); else runUndo();
+      return;
+    }
     if (e.metaKey || e.ctrlKey || e.altKey || t.closest("input, textarea, select, [contenteditable]")) return;
     if (modal || showCmd || suggest || prompt || cardMenu) return;
     const k = e.key.toLowerCase();
@@ -1627,6 +1732,41 @@ export default function HomePage() {
     const handler = (e: KeyboardEvent) => keys.current?.(e);
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // drag a link in from another tab and drop it anywhere (folders handle their own drops)
+  const [dropHint, setDropHint] = useState(false);
+  const onDropUrls = useRef<(urls: string[]) => void>();
+  onDropUrls.current = (urls) => {
+    if (modal || suggest || showCmd || prompt) return;
+    if (urls.length > 1) openAdd(activeFolder || undefined, undefined, urls.join("\n"));
+    else openAdd(activeFolder || undefined, urls[0]);
+  };
+  useEffect(() => {
+    let depth = 0;
+    const hasUrl = (e: DragEvent) => !!e.dataTransfer && Array.from(e.dataTransfer.types).includes("text/uri-list");
+    const enter = (e: DragEvent) => { if (!hasUrl(e)) return; depth++; setDropHint(true); };
+    const leave = (e: DragEvent) => { if (!hasUrl(e)) return; depth = Math.max(0, depth - 1); if (!depth) setDropHint(false); };
+    const over = (e: DragEvent) => { if (hasUrl(e)) e.preventDefault(); };
+    const drop = (e: DragEvent) => {
+      depth = 0;
+      setDropHint(false);
+      if (!hasUrl(e) || e.defaultPrevented) return;
+      e.preventDefault();
+      const list = (e.dataTransfer!.getData("text/uri-list") || e.dataTransfer!.getData("text/plain")).split(/\r?\n/).filter((l) => l && !l.startsWith("#")).join("\n");
+      const found = urlsIn(list);
+      if (found.length) onDropUrls.current?.(found);
+    };
+    window.addEventListener("dragenter", enter);
+    window.addEventListener("dragleave", leave);
+    window.addEventListener("dragover", over);
+    window.addEventListener("drop", drop);
+    return () => {
+      window.removeEventListener("dragenter", enter);
+      window.removeEventListener("dragleave", leave);
+      window.removeEventListener("dragover", over);
+      window.removeEventListener("drop", drop);
+    };
   }, []);
 
   // paste a link anywhere on the page (not in a text box) to add it
@@ -1965,6 +2105,7 @@ export default function HomePage() {
         </div>
       </div>
 
+      {dropHint && <div className="drop-overlay" aria-hidden="true"><div>🔗 Drop it on a folder, or anywhere to add it</div></div>}
       {look.sideNav && <SideNav folders={topFolders} active={activeFolder} onJump={jumpToFolder} counts={(f) => f.links.length} />}
       <div className="app">
         <header className="hero">
@@ -2083,7 +2224,7 @@ export default function HomePage() {
             {personal.views.map((v) => (
               <span key={v.id} className="view-chip">
                 <button onClick={() => applyView(v)} title={[v.q, ...v.tags.map((t) => `#${t}`)].filter(Boolean).join(" ")}>{v.name}</button>
-                <button className="view-x" onClick={() => personal.deleteView(v.id)} aria-label={`Delete view ${v.name}`}>×</button>
+                <button className="view-x" onClick={() => { personal.deleteView(v.id); showToast(`Deleted the view “${v.name}”`, { label: "Undo", run: () => personal.saveView(v) }); }} aria-label={`Delete view ${v.name}`}>×</button>
               </span>
             ))}
             {filtering && <button className="pick dashed" onClick={saveCurrentView}><Icon name="plus" /> Save this view</button>}
@@ -2658,8 +2799,16 @@ export default function HomePage() {
             else if (n.from) setProfileView(n.from);
           }}
           onReadOne={(id) => personal.markRead(id || undefined)}
-          onRemove={(id) => personal.removeNotification(id)}
-          onClearAll={() => personal.removeNotification()}
+          onRemove={(id) => {
+            const gone = personal.notifications.filter((n) => n.id === id);
+            personal.removeNotification(id);
+            showToast("Notification removed", { label: "Undo", run: () => restoreNotifications(gone) });
+          }}
+          onClearAll={() => {
+            const gone = personal.notifications;
+            personal.removeNotification();
+            showToast(`Cleared ${gone.length} notification${gone.length === 1 ? "" : "s"}`, { label: "Undo", run: () => restoreNotifications(gone) });
+          }}
           onPrefs={personal.setNotifyPrefs}
           onDnd={personal.setDnd}
           onSound={(on, name) => {
