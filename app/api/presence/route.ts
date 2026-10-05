@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Redis } from "@upstash/redis";
 import { getCurrentUser } from "@/lib/auth";
-import { HIDE_ONLINE_KEY, touchLastSeen } from "@/lib/social";
+import { HIDE_ONLINE_KEY, hiddenOnlineFor, touchLastSeen } from "@/lib/social";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +26,10 @@ export async function POST(req: NextRequest) {
     if (user && !hidden) await touchLastSeen(user);
     await redis.zremrangebyscore(KEY, 0, now - WINDOW_MS);
     const members = await redis.zrange<string[]>(KEY, 0, -1);
-    const users = members.filter((m) => m.startsWith("u:")).map((m) => m.slice(2)).sort((a, b) => a.localeCompare(b));
+    const named = members.filter((m) => m.startsWith("u:")).map((m) => m.slice(2));
+    // people who only show they're online to those they follow
+    const hide = await hiddenOnlineFor(user, named);
+    const users = named.filter((n) => !hide.has(n.toLowerCase())).sort((a, b) => a.localeCompare(b));
     return NextResponse.json({ count: members.length, users });
   } catch {
     return NextResponse.json({ count: 0, users: [] });

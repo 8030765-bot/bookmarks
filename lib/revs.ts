@@ -10,6 +10,8 @@ export const REV_KEYS = {
   chat: "rev:chat",
   ratings: "rev:ratings",
   suggestions: "rev:suggestions",
+  /** names, pictures and colours people show next to their name */
+  faces: "rev:faces",
 } as const;
 export type RevName = keyof typeof REV_KEYS;
 export const userRevKey = (username: string) => `rev:user:${username.toLowerCase()}`;

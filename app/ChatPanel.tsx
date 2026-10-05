@@ -3,7 +3,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { ChatChannel, ChatMessage } from "@/lib/types";
 import { Icon } from "./components/Icon";
 import { holdFast, useOnRevChange } from "./components/sync";
-import { UserChip } from "./components/People";
+import { UserChip, useFaces } from "./components/People";
 import ChatText, { KnownLink, applyShortcodes } from "./components/ChatText";
 import EmojiPicker from "./components/EmojiPicker";
 import { readLocal, writeLocal } from "./components/ui";
@@ -376,12 +376,15 @@ export default function ChatPanel({
     showToast(next.includes(channel) ? `Muted #${current?.name || channel}` : `Unmuted #${current?.name || channel}`);
   };
 
+  const faceMap = useFaces();
   const myLast = [...messages].reverse().find((m) => m.user === user && (!m.kind || m.kind === "text" || m.kind === "me"));
   const threadMessages = threadOf ? messages.filter((m) => m.replyTo?.id === threadOf.id) : [];
   const shown = threadOf ? [threadOf, ...threadMessages] : messages;
   const counter = text.length > s.maxLen * 0.8;
 
   function renderMessage(m: ChatMessage, i: number, list: ChatMessage[]) {
+    // their profile colour tints the bubble
+    const tint = !m.kind ? faceMap?.[m.user.toLowerCase()]?.c : undefined;
     const mine = m.user === user;
     const prev = list[i - 1];
     const grouped = !!prev && prev.user === m.user && !m.replyTo && !m.kind && !prev.kind
@@ -399,11 +402,12 @@ export default function ChatPanel({
         {divider && <div className="chat-new-line"><span>New messages</span></div>}
         <div
           data-msg-id={m.id}
-          className={`chat-msg ${mine ? "mine" : ""} ${grouped ? "grouped" : ""} ${mentions(m.text, user) ? "mentioned" : ""} ${m.kind ? `kind-${m.kind}` : ""} ${staffMsg ? "staff" : ""} ${highlight === m.id ? "highlight" : ""}`}
+          className={`chat-msg ${mine ? "mine" : ""} ${grouped ? "grouped" : ""} ${mentions(m.text, user) ? "mentioned" : ""} ${m.kind ? `kind-${m.kind}` : ""} ${staffMsg ? "staff" : ""} ${highlight === m.id ? "highlight" : ""} ${tint ? "tinted" : ""}`}
+          style={tint ? ({ "--pc": tint } as React.CSSProperties) : undefined}
         >
           {!grouped && (
             <div className="chat-meta">
-              <UserChip username={m.user} role={role} online={online.includes(m.user)} className="chat-user" onOpen={mention} />
+              <UserChip username={m.user} role={role} online={online.includes(m.user)} className="chat-user" onOpen={mention} face />
               {role && role !== "mod" && <span className={`pill role-${role}`}>{role}</span>}
               <span className="muted" title={new Date(m.at).toLocaleString()}>{timeLabel(m.at)}</span>
               {m.edited && <span className="muted">(edited)</span>}

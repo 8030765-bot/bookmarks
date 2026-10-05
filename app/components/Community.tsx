@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityEntry, Contributor, Folder, Link, Poll } from "@/lib/types";
 import { Icon } from "./Icon";
+import { Avatar, useDisplayName } from "./People";
 import Favicon from "./Favicon";
 import { COLORS, LinkRef, timeAgo } from "./ui";
 
@@ -72,8 +73,8 @@ export function LeaderboardModal({ me, online, onClose }: { me: string | null; o
             <div key={c.username} className={`leader ${me?.toLowerCase() === c.username.toLowerCase() ? "me" : ""}`}>
               <button className="leader-row" onClick={() => setOpen(open === c.username ? null : c.username)}>
                 <span className="rank">{MEDALS[i] || i + 1}</span>
-                <span className="avatar">{c.username[0]?.toUpperCase()}{onlineSet.has(c.username.toLowerCase()) && <span className="avatar-dot" />}</span>
-                <span className="leader-name">{c.username}{me?.toLowerCase() === c.username.toLowerCase() && <em> (you)</em>}</span>
+                <Avatar name={c.username} size={28} online={onlineSet.has(c.username.toLowerCase())} />
+                <span className="leader-name"><DisplayName username={c.username} />{me?.toLowerCase() === c.username.toLowerCase() && <em> (you)</em>}</span>
                 <span className="leader-score">{c.score} pts</span>
               </button>
               {open === c.username && (
@@ -315,4 +316,8 @@ export function parseBookmarksHtml(html: string): { name: string; links: { name:
   });
   if (loose.length) folders.unshift({ name: "Imported", links: loose });
   return folders;
+}
+
+function DisplayName({ username }: { username: string }) {
+  return <>{useDisplayName(username)}</>;
 }

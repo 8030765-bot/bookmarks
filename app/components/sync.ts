@@ -7,14 +7,14 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
  * moves. Polls every 2.5s while you're using the page, every 10s when idle,
  * and not at all while the tab is hidden.
  */
-export type Revs = { bookmarks: number; chat: number; ratings: number; suggestions: number; user: number };
+export type Revs = { bookmarks: number; chat: number; ratings: number; suggestions: number; faces: number; user: number };
 export type SyncStatus = "ok" | "offline" | "quota";
 
 const ACTIVE_MS = 2500;
 const IDLE_MS = 10_000;
 const IDLE_AFTER_MS = 60_000;
 
-let revs: Revs = { bookmarks: -1, chat: -1, ratings: -1, suggestions: -1, user: -1 };
+let revs: Revs = { bookmarks: -1, chat: -1, ratings: -1, suggestions: -1, faces: -1, user: -1 };
 let status: SyncStatus = "ok";
 const subs = new Set<() => void>();
 const emit = () => subs.forEach((f) => f());
@@ -75,6 +75,7 @@ export function useSyncLoop(user: string | null) {
               chat: Number(json.chat) || 0,
               ratings: Number(json.ratings) || 0,
               suggestions: Number(json.suggestions) || 0,
+              faces: Number(json.faces) || 0,
               user: Number(json.user) || 0,
             };
             const changed = (Object.keys(next) as (keyof Revs)[]).some((k) => next[k] !== revs[k]);

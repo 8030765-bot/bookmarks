@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listUsers } from "@/lib/auth";
+import { earnedBadges } from "@/lib/badges";
 import { getAuthContext } from "@/lib/roles";
 import { getRole } from "@/lib/roles";
 import { getBookmarks } from "@/lib/store";
 import { getUserData, liveProfile } from "@/lib/userdata";
-import { lastSeenAll, socialCounts } from "@/lib/social";
+import { lastSeenFor, socialCounts } from "@/lib/social";
 import { errorResponse } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest) {
     const self = viewer?.toLowerCase() === match.username.toLowerCase();
     const staff = ctx.role === "owner" || ctx.role === "admin" || ctx.role === "mod";
     const [ud, role, data, social, seen] = await Promise.all([
-      getUserData(match.username), getRole(match.username), getBookmarks(), socialCounts(match.username, viewer), lastSeenAll(),
+      getUserData(match.username), getRole(match.username), getBookmarks(), socialCounts(match.username, viewer), lastSeenFor(viewer),
     ]);
     const profile = liveProfile(ud.profile);
     if (profile.visibility === "private" && !self && !staff) {
@@ -55,10 +56,18 @@ export async function GET(req: NextRequest) {
       .slice(0, 6);
     // your own page also shows what you've been up to
     const activity = self ? (data.activity || []).filter((a) => a.by?.toLowerCase() === lower).slice(0, 15) : undefined;
-    const { visibility, hideOnline, ...shown } = profile;
+    const signupRank = [...users].sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || "")).findIndex((u) => u.username === match.username);
+    const badges = earnedBadges({
+      added, likes: likesReceived, kudos: social.kudos, followers: social.followers, ratings: Object.keys(ud.ratings).length,
+      signupRank, joined: match.createdAt, role,
+    });
+    // waiting pictures are only for their owner; the rest of the privacy settings too
+    const { visibility, hideOnline, lastSeenTo, picPending, bannerPending, ...shown } = profile;
+    const pinned = (profile.badges || []).filter((b) => badges.includes(b));
     return NextResponse.json({
       username: match.username,
-      profile: self ? profile : shown,
+      profile: self ? profile : { ...shown, picGif: viewer ? shown.picGif : undefined, badges: pinned.length ? pinned : undefined },
+      badges,
       role,
       joined: match.createdAt,
       added,

@@ -96,7 +96,7 @@ function Community() {
       </header>
       {info && info.newMembers.length > 0 && (
         <div className="welcome-row">
-          👋 Say hi to our newest members: {info.newMembers.map((u, i) => <span key={u}>{i > 0 && ", "}<UserChip username={u} /></span>)}
+          👋 Say hi to our newest members: {info.newMembers.map((u, i) => <span key={u}>{i > 0 && ", "}<UserChip username={u} face /></span>)}
         </div>
       )}
 
@@ -214,13 +214,13 @@ function Roadmap({ me, toast }: { me: string | null; toast: (m: string) => void 
                     <p>{s.note}</p>
                   </div>
                   <div className="post-meta">
-                    <UserChip username={s.user} /><span className="muted-inline">{timeAgo(s.createdAt)}</span>
+                    <UserChip username={s.user} face /><span className="muted-inline">{timeAgo(s.createdAt)}</span>
                     <button className="link-btn" onClick={() => setOpen(open === s.id ? null : s.id)}>💬 {s.comments?.length || 0}</button>
                   </div>
                   {open === s.id && (
                     <div className="replies">
                       {(s.comments || []).map((c) => (
-                        <div key={c.id} className="reply"><div className="post-meta"><UserChip username={c.user} /><span className="muted-inline">{timeAgo(c.at)}</span></div><p className="post-text">{c.text}</p></div>
+                        <div key={c.id} className="reply"><div className="post-meta"><UserChip username={c.user} face /><span className="muted-inline">{timeAgo(c.at)}</span></div><p className="post-text">{c.text}</p></div>
                       ))}
                       <form className="board-form-row" onSubmit={async (e) => { e.preventDefault(); if (await post({ action: "comment", id: s.id, text: comment })) setComment(""); }}>
                         <input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Add a comment" maxLength={500} />
@@ -300,7 +300,7 @@ function HallOfFame({ info, data }: { info: (CommunityInfo & { leaders: Contribu
         {info.leaders.slice(0, 10).map((c, i) => (
           <div key={c.username} className="fame-row">
             <span className="fame-rank">{MEDALS[i] || i + 1}</span>
-            <UserChip username={c.username} />
+            <UserChip username={c.username} face />
             <span className="muted-inline">{c.score} pts · {c.added} added</span>
           </div>
         ))}
@@ -311,7 +311,7 @@ function HallOfFame({ info, data }: { info: (CommunityInfo & { leaders: Contribu
         {info.helpers.map((h, i) => (
           <div key={h.username} className="fame-row">
             <span className="fame-rank">{MEDALS[i] || i + 1}</span>
-            <UserChip username={h.username} />
+            <UserChip username={h.username} face />
             <span className="muted-inline">{h.accepted} best · {h.answers} answers</span>
           </div>
         ))}
@@ -361,7 +361,7 @@ function Recap({ data, info }: { data: BookmarksData | null; info: (CommunityInf
       {topAdders.length > 0 && (
         <section className="fame-card">
           <h3>Who added the most</h3>
-          {topAdders.map(([u, n], i) => <div key={u} className="fame-row"><span className="fame-rank">{MEDALS[i]}</span><UserChip username={u} /><span className="muted-inline">{n} websites</span></div>)}
+          {topAdders.map(([u, n], i) => <div key={u} className="fame-row"><span className="fame-rank">{MEDALS[i]}</span><UserChip username={u} face /><span className="muted-inline">{n} websites</span></div>)}
         </section>
       )}
       {busiest && <p className="recap-line">Busiest folder: <strong>{busiest[0]}</strong> with {busiest[1]} new websites.</p>}

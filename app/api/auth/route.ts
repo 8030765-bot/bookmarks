@@ -1,15 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
-import { extendSession, login, loginWithCode, logout, resetWithCode, sessionTimeLeft, setSessionCookie, signup } from "@/lib/auth";
+import { extendSession, login, loginWithCode, logout, resetWithCode, sessionTimeLeft, setSessionCookie, signup, usernameTaken, validateUsername } from "@/lib/auth";
 import { setRulesAccepted } from "@/lib/userdata";
 import { getAuthContext, getRole, ownerExists } from "@/lib/roles";
 import { errorResponse } from "@/lib/http";
 import { clientIp, rateLimit } from "@/lib/ratelimit";
 import { notify } from "@/lib/userdata";
-import { bumpStat, checkSignup, getFlags, inGroup } from "@/lib/moderation";
+import { bumpStat, checkNameAllowed, checkSignup, getFlags, inGroup } from "@/lib/moderation";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // "is this username free?" while someone types it
+  const check = req.nextUrl.searchParams.get("check");
+  if (check !== null) {
+    try {
+      await rateLimit(`namecheck:${clientIp(req)}`, 120, 60);
+      const name = check.trim();
+      validateUsername(name);
+      await checkNameAllowed(name);
+      if (await usernameTaken(name)) return NextResponse.json({ available: false, reason: "That username is already taken" });
+      return NextResponse.json({ available: true });
+    } catch (e: unknown) {
+      return NextResponse.json({ available: false, reason: e instanceof Error ? e.message : "Can't use that name" });
+    }
+  }
   try {
     const { user, role, ownerExists } = await getAuthContext();
     const [contributor, beta, flags, left] = await Promise.all([inGroup("contributors", user), inGroup("beta", user), getFlags(), user ? sessionTimeLeft() : null]);

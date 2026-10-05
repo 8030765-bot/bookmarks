@@ -28,6 +28,7 @@ export interface Extras {
   me?: { user: string | null; role: string | null };
   feedback?: { id: string; kind: "bug" | "contact"; text: string; user?: string; page?: string; device?: string; at: string; reply?: { by: string; text: string; at: string } }[];
   pageRatings?: Record<string, { good: number; ok: number; bad: number }>;
+  pictures?: { id: string; owner: string; kind: string; type: string; bytes: number; at: string }[];
 }
 type AdminFn = (a: string, p?: Record<string, any>) => Promise<any>;
 type Run = (action: string, payload?: Record<string, any>) => Promise<boolean>;
@@ -343,6 +344,7 @@ export function ReportsTab({ info, admin, run, data, refresh, toast, isAdmin }: 
   const resolve = async (id: string, outcome = "dismissed") => { try { await admin("resolveReport", { id, outcome }); refresh(); } catch (e: any) { toast(e.message); } };
   return (
     <>
+      <PicturesQueue info={info} admin={admin} refresh={refresh} toast={toast} />
       <h3 className="admin-h">Reports {reports.length > 0 && `(${reports.length})`}</h3>
       {reports.length === 0 && <div className="admin-empty">No reports. 🎉</div>}
       {reports.map((r) => {
@@ -354,6 +356,7 @@ export function ReportsTab({ info, admin, run, data, refresh, toast, isAdmin }: 
               <div className="sugg-note">“{r.reason}”</div>
               {r.extra && <div className="row-sub">{r.extra}</div>}
               {link && <div className="row-sub">{link.f.emoji} {link.f.name} · {link.l.url}</div>}
+              {r.kind === "picture" && r.extra && /^[a-f0-9]{32}$/.test(r.extra) && <img className="queue-pic" src={`/api/img/${r.extra}`} alt={`${r.targetId}'s picture`} />}
               <div className="sugg-actions">
                 {link && isAdmin && <button className="btn btn-danger btn-sm" onClick={async () => { if (confirm(`Delete “${link.l.name}”? It goes to the trash.`) && (await run("deleteLink", { folderId: link.f.id, linkId: link.l.id }))) resolve(r.id, "link deleted"); }}>Delete link</button>}
                 {link && isAdmin && <button className="btn btn-secondary btn-sm" onClick={async () => { if (await run("editLink", { folderId: link.f.id, linkId: link.l.id, status: "broken" })) resolve(r.id, "marked broken"); }}>Mark broken</button>}
@@ -361,6 +364,9 @@ export function ReportsTab({ info, admin, run, data, refresh, toast, isAdmin }: 
                   const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", ch: r.extra?.split(":")[0] || "general", id: r.targetId }) });
                   if (res.ok) resolve(r.id, "message deleted"); else toast((await res.json().catch(() => ({}))).error || "Couldn't delete");
                 }}>Delete message</button>}
+                {r.kind === "picture" && <button className="btn btn-danger btn-sm" onClick={async () => {
+                  try { await admin("removePicture", { username: r.targetId, reason: r.reason }); resolve(r.id, "picture removed"); } catch (e: any) { toast(e.message); }
+                }}>Remove picture</button>}
                 <button className="btn btn-secondary btn-sm" onClick={() => resolve(r.id)}>Dismiss</button>
               </div>
             </div>
@@ -370,6 +376,61 @@ export function ReportsTab({ info, admin, run, data, refresh, toast, isAdmin }: 
       <FeedbackList info={info} admin={admin} refresh={refresh} toast={toast} />
       {isAdmin && <TrashList info={info} admin={admin} run={run} toast={toast} refresh={refresh} />}
     </>
+  );
+}
+
+/**
+ * New profile pictures, banners and other uploads waiting for a check.
+ * Keys: A approves the first one, R rejects it.
+ */
+function PicturesQueue({ info, admin, refresh, toast }: { info: Extras; admin: AdminFn; refresh: () => void; toast: Toast }) {
+  const pics = info.pictures || [];
+  const [busy, setBusy] = useState(false);
+  const review = async (id: string, ok: boolean, reason?: string) => {
+    setBusy(true);
+    try { await admin("reviewPicture", { id, ok, reason }); refresh(); } catch (e: any) { toast(e.message); } finally { setBusy(false); }
+  };
+  const reject = (id: string) => { const why = prompt("Why not? (optional — they'll see this)"); if (why !== null) review(id, false, why.trim() || undefined); };
+  useEffect(() => {
+    if (!pics.length) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (busy || e.ctrlKey || e.metaKey || e.altKey || (t && (t.closest("input, textarea, select, [contenteditable]")))) return;
+      if (e.key === "a" || e.key === "A") { e.preventDefault(); review(pics[0].id, true); }
+      if (e.key === "r" || e.key === "R") { e.preventDefault(); reject(pics[0].id); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+  if (!pics.length) return null;
+  const label: Record<string, string> = { avatar: "profile picture", banner: "banner", chat: "chat picture", icon: "website icon" };
+  return (
+    <section>
+      <h3 className="admin-h">Pictures to check ({pics.length})</h3>
+      <p className="hint">Press <span className="kbd">A</span> to approve the first one, <span className="kbd">R</span> to reject it.</p>
+      <div className="pic-queue">
+        {pics.map((p, i) => (
+          <div key={p.id} className={`pic-card ${i === 0 ? "first" : ""}`}>
+            <img className={p.kind === "banner" ? "wide" : ""} src={`/api/img/${p.id}`} alt={`${p.owner}'s new ${label[p.kind] || "picture"}`} />
+            <div className="row-sub"><strong>{p.owner}</strong> · {label[p.kind] || p.kind}{p.type === "image/gif" ? " (moving)" : ""} · {ago(p.at)}</div>
+            <div className="sugg-actions">
+              <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => review(p.id, true)}>Approve</button>
+              <button className="btn btn-danger btn-sm" disabled={busy} onClick={() => reject(p.id)}>Reject</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      {pics.length > 1 && (
+        <button className="btn btn-secondary btn-sm mt" disabled={busy} onClick={async () => {
+          if (!confirm(`Approve all ${pics.length} pictures?`)) return;
+          setBusy(true);
+          for (const p of pics) { try { await admin("reviewPicture", { id: p.id, ok: true }); } catch {} }
+          setBusy(false);
+          refresh();
+          toast(`Approved ${pics.length} pictures`);
+        }}>Approve all {pics.length}</button>
+      )}
+    </section>
   );
 }
 

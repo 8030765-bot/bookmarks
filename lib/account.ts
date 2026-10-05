@@ -1,4 +1,5 @@
 import { Redis } from "@upstash/redis";
+import { deleteImage } from "./images";
 import { accountInfo, checkOwnPassword, deleteUser, listSessions, loginHistory, renameUserRecord } from "./auth";
 import { getRole, setRole } from "./roles";
 import { deleteSocial, fansKey, followingKey, renameSocial } from "./social";
@@ -72,6 +73,8 @@ export async function purgeAccount(username: string) {
   await deleteSocial(username);
   await setRole(username, null);
   await redis.srem(BANNED_KEY, username.toLowerCase());
+  // their uploaded pictures go too
+  for (const id of [ud.profile.pic, ud.profile.picGif, ud.profile.picPending, ud.profile.bannerPic, ud.profile.bannerPending]) await deleteImage(id);
   await deleteUserData(username);
   await deleteToolData(username);
   await removeTyping(username);

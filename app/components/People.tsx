@@ -2,6 +2,8 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { makeQr } from "./qr";
 import { timeAgo } from "./ui";
+import { useOnRevChange } from "./sync";
+import { badgeById } from "@/lib/badges";
 
 export interface MiniProfile {
   avatar?: string;
@@ -10,19 +12,78 @@ export interface MiniProfile {
   displayName?: string;
   status?: string;
   statusEmoji?: string;
+  /** uploaded picture (image id) */
+  pic?: string;
+  picGif?: string;
+  availability?: "away" | "busy";
+  badges?: string[];
 }
 
-/** Round avatar: your emoji on your colour, with an optional ring style and online dot. */
+/* ---------- everyone's face (picture/emoji, colour, display name), loaded once per page ---------- */
+interface Face { a?: string; c?: string; b?: string; n?: string; p?: string; g?: string; v?: "away" | "busy"; s?: string; d?: string }
+/** "MM-DD" for today, to spot birthdays. */
+export const todayMD = () => { const n = new Date(); return `${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`; };
+let faces: Record<string, Face> | null = null;
+let facesLoading = false;
+const faceSubs = new Set<() => void>();
+export function refreshFaces() {
+  facesLoading = true;
+  fetch("/api/faces", { cache: "no-store" })
+    .then((r) => r.json())
+    .then((j) => { if (j.faces) { faces = j.faces; faceSubs.forEach((f) => f()); } })
+    .catch(() => {})
+    .finally(() => { facesLoading = false; });
+}
+export function useFace(name: string | null | undefined): Face | undefined {
+  useEffect(() => { if (!faces && !facesLoading) refreshFaces(); }, []);
+  return useSyncExternalStore(
+    (cb) => { faceSubs.add(cb); return () => { faceSubs.delete(cb); }; },
+    () => (name && faces ? faces[name.toLowerCase()] : undefined),
+    () => undefined,
+  );
+}
+/** Everyone's faces at once (for long lists like chat). */
+export function useFaces(): Record<string, Face> | null {
+  useEffect(() => { if (!faces && !facesLoading) refreshFaces(); }, []);
+  return useSyncExternalStore(
+    (cb) => { faceSubs.add(cb); return () => { faceSubs.delete(cb); }; },
+    () => faces,
+    () => null,
+  );
+}
+/** Keep faces fresh when someone changes their picture or name. Mount once per page. */
+export function useFacesSync() {
+  useOnRevChange("faces", refreshFaces);
+}
+const fromFace = (f?: Face): MiniProfile => ({ avatar: f?.a, color: f?.c, border: f?.b, displayName: f?.n, pic: f?.p, picGif: f?.g, availability: f?.v });
+/** The name to show for someone: their display name if they set one. */
+export function useDisplayName(username: string) {
+  return useFace(username)?.n || username;
+}
+
+/**
+ * Round avatar: an uploaded picture (a moving one plays while hovered), or
+ * an emoji on their colour, with an optional ring and online dot. Pass
+ * `profile` when you have it; otherwise it's looked up by name.
+ */
 export function Avatar({ name, profile, size = 28, online }: { name: string; profile?: MiniProfile; size?: number; online?: boolean }) {
-  const color = profile?.color || "var(--accent)";
+  const face = useFace(profile ? null : name);
+  const pr = profile || fromFace(face);
+  const [hover, setHover] = useState(false);
+  const [broken, setBroken] = useState<string | null>(null);
+  const color = pr.color || "var(--accent)";
+  const picId = hover && pr.picGif ? pr.picGif : pr.pic;
+  const showPic = !!picId && broken !== picId;
   return (
     <span
-      className={`avatar-x border-${profile?.border || "none"}`}
-      style={{ width: size, height: size, fontSize: size * (profile?.avatar ? 0.55 : 0.42), "--pc": color } as React.CSSProperties}
+      className={`avatar-x border-${pr.border || "none"} ${showPic ? "has-pic" : ""}`}
+      style={{ width: size, height: size, fontSize: size * (pr.avatar ? 0.55 : 0.42), "--pc": color } as React.CSSProperties}
       aria-hidden="true"
+      onMouseEnter={pr.picGif ? () => setHover(true) : undefined}
+      onMouseLeave={pr.picGif ? () => setHover(false) : undefined}
     >
-      {profile?.avatar || name.charAt(0).toUpperCase()}
-      {online && <span className="avatar-dot" />}
+      {showPic ? <img src={`/api/img/${picId}`} alt="" loading="lazy" decoding="async" onError={() => setBroken(picId!)} /> : pr.avatar || name.charAt(0).toUpperCase()}
+      {online && <span className={`avatar-dot ${pr.availability || ""}`} />}
     </span>
   );
 }
@@ -73,13 +134,18 @@ function loadCard(username: string): Promise<CardData | null> {
  * A username you can hover for a mini profile card, and click to open the
  * full profile. Owner / admin / mod names are coloured.
  */
-export function UserChip({ username, role, online, className = "", onOpen }: {
+export function UserChip({ username, role, online, className = "", onOpen, face = false }: {
   username: string;
   role?: string | null;
   online?: boolean;
   className?: string;
   onOpen?: (u: string) => void;
+  /** show their picture before the name */
+  face?: boolean;
 }) {
+  const myFace = useFace(username);
+  const shownName = myFace?.n || username;
+  const birthday = !!myFace?.d && myFace.d === todayMD();
   const [card, setCard] = useState<CardData | null>(null);
   const [show, setShow] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout>>();
@@ -100,8 +166,9 @@ export function UserChip({ username, role, online, className = "", onOpen }: {
         className={`user-chip ${roleClass(r)} ${className}`}
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (onOpen) onOpen(username); else location.href = `/u/${encodeURIComponent(username)}`; }}
       >
-        {online && <span className="mini-dot" aria-label="online" />}
-        {card?.profile?.displayName || username}
+        {face ? <Avatar name={username} size={18} online={online} /> : online && <span className="mini-dot" aria-label="online" />}
+        {card?.profile?.displayName || shownName}
+        {birthday && <span className="bday" title="It's their birthday today!">🎂</span>}
       </button>
       {flair && <span className="flair">{flair}</span>}
       {show && (
@@ -119,7 +186,11 @@ export function UserChip({ username, role, online, className = "", onOpen }: {
                   <span className="muted-inline">@{card.username}{card.role ? ` · ${card.role}` : ""}</span>
                 </span>
               </span>
+              {card.profile?.availability && <span className={`hc-avail ${card.profile.availability}`}>{card.profile.availability === "busy" ? "⛔ Busy" : "🌙 Away"}</span>}
               {card.profile?.status && <span className="hc-status">{card.profile.statusEmoji} {card.profile.status}</span>}
+              {card.profile?.badges?.length ? (
+                <span className="hc-badges">{card.profile.badges.map((b) => { const d = badgeById(b); return d ? <span key={b} className="badge-chip" title={d.how}>{d.emoji} {d.name}</span> : null; })}</span>
+              ) : null}
               {card.profile?.bio && <span className="hc-bio">{card.profile.bio.replace(/[*_`#>]/g, "").slice(0, 120)}</span>}
               <span className="hc-stats">
                 <span><strong>{card.added || 0}</strong> added</span>
@@ -133,6 +204,26 @@ export function UserChip({ username, role, online, className = "", onOpen }: {
       )}
     </span>
   );
+}
+
+/** "✓ that name is free" under a username box, checked as you type. */
+export function NameCheck({ name, current }: { name: string; current?: string }) {
+  const [res, setRes] = useState<{ name: string; available: boolean; reason?: string } | null>(null);
+  const n = name.trim();
+  useEffect(() => {
+    if (n.length < 3 || n.toLowerCase() === current?.toLowerCase()) return;
+    const ctl = new AbortController();
+    const t = setTimeout(() => {
+      fetch(`/api/auth?check=${encodeURIComponent(n)}`, { signal: ctl.signal })
+        .then((r) => r.json()).then((j) => setRes({ name: n, ...j })).catch(() => {});
+    }, 350);
+    return () => { clearTimeout(t); ctl.abort(); };
+  }, [n, current]);
+  if (!n) return null;
+  if (n.length < 3) return <div className="name-check">At least 3 characters</div>;
+  if (n.toLowerCase() === current?.toLowerCase()) return null;
+  if (!res || res.name !== n) return <div className="name-check">Checking…</div>;
+  return <div className={`name-check ${res.available ? "ok" : "bad"}`} aria-live="polite">{res.available ? `✓ “${n}” is free` : `✗ ${res.reason}`}</div>;
 }
 
 /* ---------- QR code ---------- */

@@ -1,7 +1,8 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { Icon } from "./Icon";
-import { PasswordStrength, QrCode } from "./People";
+import { NameCheck, PasswordStrength, QrCode } from "./People";
+import { makeZip, type ZipEntry } from "./zip";
 import type { Profile } from "./Personal";
 import { timeAgo } from "./ui";
 
@@ -191,11 +192,16 @@ export default function AccountModal({
                 </button>
               ))}
             </div>
-            <label className="toggle-row compact">
-              <div><strong>Hide when I&apos;m online</strong><span>You won&apos;t show in the online list or as &quot;active 5 min ago&quot;.</span></div>
-              <input type="checkbox" role="switch" checked={!!profile.hideOnline} onChange={(e) => onProfile({ hideOnline: e.target.checked })} />
-              <span className="switch" aria-hidden="true" />
-            </label>
+            <div className="admin-h">Who can see when I&apos;m online</div>
+            <div className="seg">
+              {([["everyone", "Everyone"], ["friends", "People I follow"], ["nobody", "Nobody"]] as const).map(([v, label]) => {
+                const cur = profile.hideOnline ? "nobody" : profile.lastSeenTo === "friends" ? "friends" : "everyone";
+                return (
+                  <button key={v} className={cur === v ? "on" : ""} onClick={() => onProfile({ hideOnline: v === "nobody", lastSeenTo: v === "friends" ? "friends" : ("" as any) })}>{label}</button>
+                );
+              })}
+            </div>
+            <p className="hint">This covers the online list, the green dot and &quot;active 5 min ago&quot;.</p>
             <label className="toggle-row compact">
               <div><strong>Sync my settings</strong><span>Your theme, layout and sort follow you to other devices.</span></div>
               <input type="checkbox" role="switch" checked={syncOn} onChange={(e) => onSyncChange(e.target.checked)} />
@@ -222,7 +228,10 @@ export default function AccountModal({
             <div className="admin-h">Download my data</div>
             <p className="modal-text">Everything the site stores about you — profile, favorites, ratings, notes, settings, logins — as one file.</p>
             <div className="admin-toolbar">
-              <a className="btn btn-secondary btn-sm" href="/api/me?export=1" download><Icon name="download" /> Download</a>
+              <a className="btn btn-secondary btn-sm" href="/api/me?export=1" download><Icon name="download" /> Download (.json)</a>
+              <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => run(async () => { await downloadZip(user, profile); toast("Downloaded everything as a ZIP"); })} title="Your data, your pictures and your private links in one ZIP file">
+                <Icon name="download" /> Everything (.zip)
+              </button>
               <label className="btn btn-secondary btn-sm" title="Bring back your settings, notes, saved views, favorites and My Stuff from a downloaded file">
                 <Icon name="upload" /> Import from a file
                 <input type="file" accept="application/json,.json" hidden onChange={async (e) => {
@@ -252,6 +261,7 @@ export default function AccountModal({
                 toast(`You're now ${j.user}`); setNewName(""); setRenamePw(""); onRenamed(j.user); load();
               }); }}>
                 <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New username" maxLength={20} pattern="[A-Za-z0-9_]{3,20}" required />
+                <NameCheck name={newName} current={user} />
                 <input type="password" value={renamePw} onChange={(e) => setRenamePw(e.target.value)} placeholder="Your password" required />
                 <button className="btn btn-secondary btn-sm" disabled={busy}>Change username</button>
                 <div className="hint">Your links, likes and followers move with you. You can do this once every 30 days.</div>
@@ -274,4 +284,48 @@ export default function AccountModal({
       </div>
     </div>
   );
+}
+
+const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+/** Everything about your account as one ZIP: the data file, your pictures, and your private links as a bookmarks file. */
+async function downloadZip(user: string, profile: Profile) {
+  const res = await fetch("/api/me?export=1", { cache: "no-store" });
+  if (!res.ok) throw new Error("Couldn't get your data — try again");
+  const text = await res.text();
+  const data = JSON.parse(text);
+  const files: ZipEntry[] = [{ name: "my-data.json", data: text }];
+  const pics: [string | undefined, string][] = [[profile.pic, "profile-picture"], [profile.picGif, "profile-picture-moving"], [profile.bannerPic, "profile-banner"], [profile.picPending, "profile-picture-waiting"], [profile.bannerPending, "profile-banner-waiting"]];
+  for (const [id, name] of pics) {
+    if (!id) continue;
+    const r = await fetch(`/api/img/${id}`).catch(() => null);
+    if (!r?.ok) continue;
+    const ext = (r.headers.get("content-type") || "image/webp").split("/")[1] || "webp";
+    files.push({ name: `pictures/${name}.${ext === "jpeg" ? "jpg" : ext}`, data: new Uint8Array(await r.arrayBuffer()) });
+  }
+  const mine = (data.myStuff || []) as { name: string; url: string; folder?: string; createdAt?: string }[];
+  if (mine.length) {
+    const byFolder = new Map<string, typeof mine>();
+    for (const l of mine) byFolder.set(l.folder || "", [...(byFolder.get(l.folder || "") || []), l]);
+    const item = (l: (typeof mine)[number]) => `    <DT><A HREF="${esc(l.url)}"${l.createdAt ? ` ADD_DATE="${Math.floor(Date.parse(l.createdAt) / 1000)}"` : ""}>${esc(l.name)}</A>`;
+    const body = Array.from(byFolder).map(([folder, links]) => folder
+      ? `    <DT><H3>${esc(folder)}</H3>\n    <DL><p>\n${links.map((l) => "    " + item(l)).join("\n")}\n    </DL><p>`
+      : links.map(item).join("\n")).join("\n");
+    files.push({ name: "my-private-links.html", data: `<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">\n<TITLE>My Stuff</TITLE>\n<H1>My Stuff</H1>\n<DL><p>\n${body}\n</DL><p>\n` });
+  }
+  files.push({
+    name: "README.txt",
+    data: `Everything Theo's Bookmarks stores about ${user}, downloaded ${new Date().toLocaleString()}.\r\n\r\n`
+      + `my-data.json - your profile, favorites, ratings, notes, settings, notifications and logins.\r\n`
+      + `  (Account & security > Your data > Import from a file brings your settings back.)\r\n`
+      + `pictures/ - your profile picture and banner.\r\n`
+      + (mine.length ? `my-private-links.html - your My Stuff links; any browser can import this file.\r\n` : ""),
+  });
+  const url = URL.createObjectURL(makeZip(files));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `theos-bookmarks-${user}-${new Date().toISOString().slice(0, 10)}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }

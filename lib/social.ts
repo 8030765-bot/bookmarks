@@ -10,6 +10,7 @@ export const fansKey = (u: string) => `fans:${u.toLowerCase()}`;
 const KUDOS_KEY = "kudos"; // hash: username -> count
 const LAST_SEEN_KEY = "lastseen"; // hash: username -> ms
 export const HIDE_ONLINE_KEY = "hideonline"; // set of usernames who hide their online status
+export const SEEN_FRIENDS_KEY = "seenfriends"; // set of usernames who only show it to people they follow
 const KUDOS_PER_DAY = 3;
 
 function getRedis() {
@@ -85,6 +86,32 @@ export async function lastSeenAll(): Promise<Record<string, number>> {
   const hide = new Set(hidden);
   return Object.fromEntries(Object.entries(raw || {}).filter(([k]) => !hide.has(k)).map(([k, v]) => [k, Number(v)]));
 }
+/**
+ * Last-seen times this viewer may know: drops people who hide it, and people
+ * who only show it to those they follow (unless they follow the viewer).
+ */
+export async function lastSeenFor(viewer: string | null | undefined): Promise<Record<string, number>> {
+  const redis = getRedis();
+  const [all, friendsOnly] = await Promise.all([lastSeenAll(), redis.smembers(SEEN_FRIENDS_KEY)]);
+  if (!friendsOnly.length) return all;
+  const v = viewer?.toLowerCase();
+  const allowed = await Promise.all(friendsOnly.map((u) => (!v ? Promise.resolve(0) : u === v ? Promise.resolve(1) : redis.sismember(followingKey(u), v))));
+  friendsOnly.forEach((u, i) => { if (!allowed[i]) delete all[u]; });
+  return all;
+}
+/** For the online list: the names (lowercase) this viewer isn't allowed to see online. */
+export async function hiddenOnlineFor(viewer: string | null | undefined, names: string[]): Promise<Set<string>> {
+  const redis = getRedis();
+  const friendsOnly = new Set(await redis.smembers(SEEN_FRIENDS_KEY));
+  const v = viewer?.toLowerCase();
+  const check = names.map((n) => n.toLowerCase()).filter((n) => friendsOnly.has(n) && n !== v);
+  const ok = await Promise.all(check.map((n) => (v ? redis.sismember(followingKey(n), v) : Promise.resolve(0))));
+  return new Set(check.filter((_, i) => !ok[i]));
+}
+export async function setSeenFriends(u: string, on: boolean) {
+  if (on) await getRedis().sadd(SEEN_FRIENDS_KEY, u.toLowerCase());
+  else await getRedis().srem(SEEN_FRIENDS_KEY, u.toLowerCase());
+}
 export async function setHideOnline(u: string, hide: boolean) {
   const redis = getRedis();
   if (hide) await redis.sadd(HIDE_ONLINE_KEY, u.toLowerCase());
@@ -107,6 +134,7 @@ export async function renameSocial(oldName: string, newName: string) {
   if (kudos) { await redis.hset(KUDOS_KEY, { [b]: kudos }); await redis.hdel(KUDOS_KEY, a); }
   await redis.hdel(LAST_SEEN_KEY, a);
   if (await redis.sismember(HIDE_ONLINE_KEY, a)) { await redis.srem(HIDE_ONLINE_KEY, a); await redis.sadd(HIDE_ONLINE_KEY, b); }
+  if (await redis.sismember(SEEN_FRIENDS_KEY, a)) { await redis.srem(SEEN_FRIENDS_KEY, a); await redis.sadd(SEEN_FRIENDS_KEY, b); }
 }
 
 /** Account deletion: forget someone's social traces. */
@@ -120,4 +148,5 @@ export async function deleteSocial(u: string) {
   await redis.hdel(KUDOS_KEY, a);
   await redis.hdel(LAST_SEEN_KEY, a);
   await redis.srem(HIDE_ONLINE_KEY, a);
+  await redis.srem(SEEN_FRIENDS_KEY, a);
 }

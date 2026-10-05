@@ -11,7 +11,7 @@ import { FolderInfo, FolderMenu, FolderMenuState, PickModal, TagManager, folderM
 import { MatchContext, closestWord, exactMatch, forgivingMatch, matchLink, parseQuery, relevance } from "./components/query";
 import SearchBox from "./components/SearchBox";
 import MyStuff from "./components/MyStuff";
-import { PasswordStrength } from "./components/People";
+import { Avatar, MiniProfile, NameCheck, PasswordStrength, todayMD, useFacesSync } from "./components/People";
 const AccountModal = dynamic(() => import("./components/Account"), { ssr: false });
 const ClubsModal = dynamic(() => import("./components/Clubs"), { ssr: false });
 import ScrollMap from "./components/ScrollMap";
@@ -39,7 +39,7 @@ import {
 import { ThemeEditor } from "./components/ThemeEditor";
 import { DEFAULT_ORDER, PALETTES, cleanLook, decodeTheme, greetingFor, holidayLogo } from "./components/look";
 import {
-  EasterEgg, HintMode, SitePet, Snow, randomLoadingLine, useLogoClicks, useNewYearFireworks, useSparkles, useUnlocked,
+  EasterEgg, HintMode, SitePet, Snow, confetti, funToast, randomLoadingLine, useLogoClicks, useNewYearFireworks, useSparkles, useUnlocked,
 } from "./components/Fun";
 import SideNav from "./components/SideNav";
 import { AddAnywhereModal, WeekChanges, downloadBookmarksHtml, downloadFolderCsv, embedCode } from "./components/DataViews";
@@ -423,6 +423,7 @@ export default function HomePage() {
 
   // one shared poll tells every part of the page when its data changed
   useSyncLoop(user);
+  useFacesSync();
   const syncStatus = useSyncStatus();
   useEffect(() => { setOffline(syncStatus === "offline"); }, [syncStatus]);
   const serverRev = useRev("bookmarks");
@@ -440,6 +441,17 @@ export default function HomePage() {
   useTimerAlarm(useCallback((m: string) => showToast(m, undefined, 6000), [showToast]));
   const myThanksSet = useMemo(() => new Set(community.info?.myThanks || []), [community.info?.myThanks]);
   const personal = usePersonal(user);
+  // 🎂 confetti on your birthday (once a day)
+  const myBirthday = personal.profile.birthday;
+  useEffect(() => {
+    if (!user || !myBirthday || myBirthday !== todayMD()) return;
+    const key = `bdayShown:${user}`;
+    const day = new Date().toDateString();
+    if (readLocal<string>(key, "") === day) return;
+    writeLocal(key, day);
+    const t = setTimeout(() => { confetti(); funToast(`🎂 Happy birthday, ${personal.profile.displayName || user}!`); }, 1200);
+    return () => clearTimeout(t);
+  }, [user, myBirthday]); // eslint-disable-line react-hooks/exhaustive-deps
   const favoriteSet = useMemo(() => new Set(personal.favorites), [personal.favorites]);
 
   // ---------- settings that follow you between devices ----------
@@ -1925,7 +1937,7 @@ export default function HomePage() {
             {user ? (
               <div className="user-menu">
                 <button className="avatar-btn" onClick={() => setUserMenu((o) => !o)} aria-expanded={userMenu} title={user}>
-                  {user.charAt(0).toUpperCase()}
+                  <Avatar name={user} profile={personal.profile as MiniProfile} size={32} />
                 </button>
                 {userMenu && (
                   <>
@@ -2553,7 +2565,7 @@ export default function HomePage() {
                 <div className="form-group">
                   <label>Username</label>
                   <input value={fUsername} onChange={(e) => setFUsername(e.target.value)} required autoFocus autoComplete="username" maxLength={20} />
-                  {authMode === "signup" && <div className="hint">3–20 letters, numbers or _. This is the name others see.</div>}
+                  {authMode === "signup" && <><NameCheck name={fUsername} /><div className="hint">3–20 letters, numbers or _. This is the name others see.</div></>}
                 </div>
                 <div className="form-group">
                   <label>Password</label>
@@ -2699,7 +2711,10 @@ export default function HomePage() {
       )}
       {modal?.type === "profileEdit" && (
         <ProfileModal
+          user={user || ""}
           profile={personal.profile}
+          onUploadPicture={personal.uploadPicture}
+          onRemovePicture={personal.removePicture}
           links={allRefs.filter((r) => favoriteSet.has(r.link.id) || r.link.addedBy?.toLowerCase() === user?.toLowerCase()).map((r) => ({ id: r.link.id, name: r.link.name }))}
           onSave={personal.saveProfile}
           onClose={() => setModal(null)}

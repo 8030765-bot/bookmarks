@@ -22,6 +22,8 @@ import { getRole } from "@/lib/roles";
 import { diffData, getBackup, listBackups } from "@/lib/backups";
 import { allResults, checkBatch } from "@/lib/linkcheck";
 import { deleteFeedback, listFeedback, pageRatings, replyFeedback } from "@/lib/feedback";
+import { listPending } from "@/lib/images";
+import { removePicture, reviewPicture } from "@/lib/pictures";
 
 export const dynamic = "force-dynamic";
 
@@ -30,10 +32,13 @@ export async function GET() {
   try {
     const ctx = await getAuthContext();
     if (!(ctx.role === "owner" || ctx.role === "admin" || ctx.role === "mod")) return NextResponse.json({ count: 0 });
-    const [suggestions, notes, reports, feedback] = await Promise.all([listSuggestions(), pendingNotes(), listReports(), listFeedback()]);
+    const [suggestions, notes, reports, feedback, pictures] = await Promise.all([listSuggestions(), pendingNotes(), listReports(), listFeedback(), listPending()]);
     const pending = suggestions.filter((s) => s.status === "pending").length;
     const messages = feedback.filter((f) => !f.reply).length;
-    return NextResponse.json({ count: pending + notes.length + reports.length + messages, suggestions: pending, notes: notes.length, reports: reports.length, messages });
+    return NextResponse.json({
+      count: pending + notes.length + reports.length + messages + pictures.length,
+      suggestions: pending, notes: notes.length, reports: reports.length, messages, pictures: pictures.length,
+    });
   } catch (e: unknown) {
     return errorResponse(e);
   }
@@ -96,12 +101,13 @@ export async function POST(req: NextRequest) {
           lastSeenRaw(), getTimeouts(), listFrozen(), listGroup("contributors"), listGroup("beta"), nameHistory(), allModNoteCounts(),
           listReports(), listAdminBoard(), getStats(14), listFeedback(), pageRatings(),
         ]);
+        const pictures = await listPending();
         const adminOnly = isAdmin
           ? await Promise.all([listInvites(), listTrash(), listErrors(), adminLinkNotes(), dbUsage(messages.length)]).then(([invites, trash, errors, linkNotes, db]) => ({ invites, trash, errors, linkNotes, db }))
           : {};
         return NextResponse.json({
           users, banned, messageCount: messages.length, suggestions, roles, audit: auditLog, me: ctx, flair, notes,
-          lastSeen, timeouts, frozen, contributors, beta, names, noteCounts, reports, board, stats, modPermList: MOD_PERMS, feedback, pageRatings: ratings,
+          lastSeen, timeouts, frozen, contributors, beta, names, noteCounts, reports, board, stats, modPermList: MOD_PERMS, feedback, pageRatings: ratings, pictures,
           ...adminOnly,
         });
       }
@@ -298,6 +304,24 @@ export async function POST(req: NextRequest) {
         const r = await resolveReport(String(body.id || ""));
         await log(r ? `${r.kind} “${r.targetName}” — ${body.outcome || "dismissed"}` : String(body.id || ""));
         return NextResponse.json({ reports: await listReports() });
+      }
+      /* ---------- uploaded pictures ---------- */
+      case "reviewPicture": {
+        await checkModPerm("reports");
+        const ok = body.ok === true;
+        const m = await reviewPicture(String(body.id || ""), ok, me, typeof body.reason === "string" ? body.reason.slice(0, 200) : undefined);
+        await log(`${ok ? "approved" : "rejected"} ${m.owner}'s ${m.kind}`);
+        return NextResponse.json({ pictures: await listPending() });
+      }
+      case "removePicture": {
+        await checkModPerm("reports");
+        if (!username) throw new Error("Missing username");
+        const kind = body.kind === "banner" ? "banner" : "avatar";
+        await removePicture(username, kind);
+        await logMod(username, { action: `removed ${kind === "banner" ? "banner" : "picture"}`, by: me, reason: typeof body.reason === "string" ? body.reason : undefined });
+        await notify(username, { kind: "system", from: me, text: `A moderator removed your profile ${kind === "banner" ? "banner" : "picture"}${body.reason ? `: ${String(body.reason).slice(0, 200)}` : ""}.` });
+        await log(`${username}'s ${kind}`);
+        return NextResponse.json({ ok: true });
       }
       /* ---------- bug reports and messages ---------- */
       case "replyFeedback":

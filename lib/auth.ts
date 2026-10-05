@@ -78,6 +78,10 @@ function verifyPassword(password: string, stored: string): boolean {
 export function validateUsername(username: string) {
   if (!/^[a-zA-Z0-9_]{3,20}$/.test(username)) throw new Error("Username must be 3–20 letters, numbers or _");
 }
+/** For "is this name free?" while someone types. */
+export async function usernameTaken(username: string) {
+  return (await getRedis().exists(userKey(username))) > 0;
+}
 export function validateCredentials(username: string, password: string) {
   validateUsername(username);
   if (password.length < 6 || password.length > 100) {

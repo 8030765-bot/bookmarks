@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   try {
     const u = (req.nextUrl.searchParams.get("u") || "").replace(/[^a-zA-Z0-9_]/g, "").slice(0, 20);
     const redis = Redis.fromEnv();
-    const keys = [REV_KEYS.bookmarks, REV_KEYS.chat, REV_KEYS.ratings, REV_KEYS.suggestions, ...(u ? [userRevKey(u)] : [])];
+    const keys = [REV_KEYS.bookmarks, REV_KEYS.chat, REV_KEYS.ratings, REV_KEYS.suggestions, REV_KEYS.faces, ...(u ? [userRevKey(u)] : [])];
     const vals = await redis.mget<(number | string | null)[]>(...keys);
     let bookmarks = vals[0];
     if (bookmarks === null) {
@@ -31,7 +31,8 @@ export async function GET(req: NextRequest) {
         chat: n(vals[1]),
         ratings: n(vals[2]),
         suggestions: n(vals[3]),
-        user: u ? n(vals[4]) : null,
+        faces: n(vals[4]),
+        user: u ? n(vals[5]) : null,
       },
       { headers: { "Cache-Control": "no-store" } }
     );

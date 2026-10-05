@@ -7,7 +7,8 @@ import { deleteAccount, exportAccount, renameAccount } from "@/lib/account";
 import { normalizeUrl } from "@/lib/url";
 import { errorResponse } from "@/lib/http";
 import { rateLimit } from "@/lib/ratelimit";
-import { follow, getFollowing, giveKudos, setHideOnline } from "@/lib/social";
+import { follow, getFollowing, giveKudos, setHideOnline, setSeenFriends } from "@/lib/social";
+import { removePicture, uploadPicture } from "@/lib/pictures";
 import { addPushSub, hasPush, pushConfigured, pushPublicKey, removePushSub } from "@/lib/push";
 import {
   clearNotifications, setDnd, setNotifyPrefs,
@@ -56,8 +57,17 @@ export async function POST(req: NextRequest) {
       case "profile": {
         const profile = await setProfile(user, body.profile || {});
         if (typeof body.profile?.hideOnline === "boolean") await setHideOnline(user, !!profile.hideOnline);
+        if (typeof body.profile?.lastSeenTo === "string") await setSeenFriends(user, profile.lastSeenTo === "friends");
         return NextResponse.json({ profile });
       }
+      case "uploadPicture": {
+        await rateLimit(`pic:${user.toLowerCase()}`, 10, 60 * 60);
+        const role = await getRole(user);
+        const kind = body.kind === "banner" ? "banner" : "avatar";
+        return NextResponse.json(await uploadPicture(user, role, kind, body.data, body.still));
+      }
+      case "removePicture":
+        return NextResponse.json({ profile: await removePicture(user, body.kind === "banner" ? "banner" : "avatar") });
       case "settings":
         return NextResponse.json({ settings: await saveSettings(user, (body.settings || {}) as Record<string, unknown>) });
       case "favorite":

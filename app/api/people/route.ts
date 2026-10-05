@@ -4,7 +4,7 @@ import { listUsers } from "@/lib/auth";
 import { getAuthContext, listRoles } from "@/lib/roles";
 import { getBookmarks } from "@/lib/store";
 import { Profile, liveProfile } from "@/lib/userdata";
-import { kudosAll, lastSeenAll } from "@/lib/social";
+import { kudosAll, lastSeenFor } from "@/lib/social";
 import { errorResponse } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const ctx = await getAuthContext();
-    const [users, roles, data, seen, kudos] = await Promise.all([listUsers(), listRoles(), getBookmarks(), lastSeenAll(), kudosAll()]);
+    const [users, roles, data, seen, kudos] = await Promise.all([listUsers(), listRoles(), getBookmarks(), lastSeenFor(ctx.user), kudosAll()]);
     const redis = Redis.fromEnv();
     const blobs = users.length
       ? await redis.mget<({ profile?: Profile } | null)[]>(...users.map((u) => `userdata:${u.username.toLowerCase()}`))
@@ -32,6 +32,8 @@ export async function GET() {
           username: u.username,
           displayName: p.displayName,
           avatar: p.avatar,
+          pic: p.pic,
+          availability: p.availability,
           color: p.color,
           border: p.border,
           status: p.status,

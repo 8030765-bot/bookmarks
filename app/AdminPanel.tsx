@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BookmarksData, ChatMessage, Folder, Link, Suggestion } from "@/lib/types";
 import { Icon } from "./components/Icon";
+import { Avatar } from "./components/People";
 import { suggestionSummary } from "./SuggestModal";
 import Favicon from "./components/Favicon";
 import { parseBookmarksHtml, pollCounts } from "./components/Community";
@@ -146,7 +147,7 @@ export default function AdminPanel({
           <button key={t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)} title={t.label}>
             {t.id === "suggestions" && pending > 0 && <span className="tab-badge">{pending}</span>}
             {t.id === "community" && (info?.notes?.length || 0) > 0 && <span className="tab-badge">{info!.notes!.length}</span>}
-            {t.id === "reports" && (info?.reports?.length || 0) > 0 && <span className="tab-badge">{info!.reports!.length}</span>}
+            {t.id === "reports" && (info?.reports?.length || 0) + (info?.pictures?.length || 0) > 0 && <span className="tab-badge">{(info?.reports?.length || 0) + (info?.pictures?.length || 0)}</span>}
             <Icon name={t.icon} />
             <span>{t.label}</span>
           </button>
@@ -219,7 +220,7 @@ function RolesTab({ admin, info, refreshInfo, showToast }: { admin: (a: string, 
           const isMe = u.username.toLowerCase() === me;
           return (
             <div key={u.username} className="admin-row">
-              <span className="avatar">{u.username[0]?.toUpperCase()}</span>
+              <Avatar name={u.username} size={28} />
               <div className="row-main">
                 <div className="row-title">{u.username}{isMe && <em> (you)</em>}{r && <span className={`pill role-${r}`}>{ROLE_LABELS[r]}</span>}</div>
                 <div className="row-sub">joined {timeAgo(u.createdAt)}</div>
@@ -420,7 +421,7 @@ function SuggestionsTab({
           <div key={x.id} data-sugg-index={idx >= 0 ? idx : undefined} className={`sugg-card ${x.status} ${idx === focus && filter === "pending" ? "kb-focus" : ""}`}>
             <div className="sugg-top">
               {x.status === "pending" && <input type="checkbox" checked={picked.has(x.id)} onChange={() => setPicked((p) => { const n = new Set(p); if (n.has(x.id)) n.delete(x.id); else n.add(x.id); return n; })} aria-label="Pick" />}
-              <span className="avatar sm">{x.user[0]?.toUpperCase()}</span>
+              <Avatar name={x.user} size={22} />
               <strong>{x.user}</strong>
               <span className="sugg-kind">{KIND_TEXT[x.kind]}</span>
               <span className="row-sub inline">{timeAgo(x.createdAt)}</span>

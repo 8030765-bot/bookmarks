@@ -213,11 +213,11 @@ export async function nameHistory(): Promise<Record<string, string[]>> {
 }
 
 /* ---------- reports ---------- */
-export interface Report { id: string; kind: "link" | "message" | "post" | "user"; targetId: string; targetName: string; reason: string; by: string; at: string; extra?: string }
+export interface Report { id: string; kind: "link" | "message" | "post" | "user" | "picture"; targetId: string; targetName: string; reason: string; by: string; at: string; extra?: string }
 const REPORTS_KEY = "reports";
 export async function createReport(by: string, input: Record<string, unknown>) {
   const kind = String(input.kind || "");
-  if (!["link", "message", "post", "user"].includes(kind)) throw new Error("Unknown kind of report");
+  if (!["link", "message", "post", "user", "picture"].includes(kind)) throw new Error("Unknown kind of report");
   const targetId = String(input.targetId || "").slice(0, 120);
   if (!targetId) throw new Error("Missing what you're reporting");
   const reason = String(input.reason || "").trim().slice(0, 300);

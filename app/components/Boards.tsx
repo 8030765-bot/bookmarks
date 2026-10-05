@@ -180,7 +180,7 @@ function PostCard({ p, cfg, me, staff, busy, run }: {
       <div className="post-main">
         <div className="post-meta">
           {p.emoji && <span className="post-emoji">{p.emoji}</span>}
-          <UserChip username={p.user} />
+          <UserChip username={p.user} face />
           {p.to && <> → <UserChip username={p.to} /></>}
           <span className="muted-inline">{timeAgo(p.at)}</span>
           {p.acceptedId && <span className="pill approved">✓ solved</span>}
@@ -210,7 +210,7 @@ function PostCard({ p, cfg, me, staff, busy, run }: {
               return (
                 <div key={r.id} className={`reply ${accepted ? "accepted" : ""}`}>
                   <div className="post-meta">
-                    <UserChip username={r.user} />
+                    <UserChip username={r.user} face />
                     <span className="muted-inline">{timeAgo(r.at)}</span>
                     {accepted && <span className="pill approved">✓ best answer</span>}
                   </div>

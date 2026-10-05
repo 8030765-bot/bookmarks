@@ -32,6 +32,21 @@ export interface Profile {
   visibility?: "everyone" | "members" | "private";
   /** don't show when you're online or last active */
   hideOnline?: boolean;
+  /** who sees when you were last online: everyone (missing) or only people you follow */
+  lastSeenTo?: "friends";
+  /** set by hand: "away" or "busy" (missing = automatic) */
+  availability?: "away" | "busy";
+  /** badges you picked to show off (ids from lib/badges) */
+  badges?: string[];
+  /** "MM-DD", no year */
+  birthday?: string;
+  /* pictures: image ids from lib/images — only lib/pictures changes these */
+  pic?: string;
+  /** the moving version when your picture is a GIF (pic is its still frame) */
+  picGif?: string;
+  picPending?: string;
+  bannerPic?: string;
+  bannerPending?: string;
 }
 export interface PrivateLink {
   id: string;
@@ -237,8 +252,32 @@ export async function setProfile(username: string, patch: Partial<Profile>) {
   }
   if (typeof patch.visibility === "string") p.visibility = ["members", "private"].includes(patch.visibility) ? patch.visibility : undefined;
   if (typeof patch.hideOnline === "boolean") p.hideOnline = patch.hideOnline || undefined;
+  if (typeof patch.lastSeenTo === "string") p.lastSeenTo = patch.lastSeenTo === "friends" ? "friends" : undefined;
+  if (typeof patch.availability === "string") p.availability = patch.availability === "away" || patch.availability === "busy" ? patch.availability : undefined;
+  if (Array.isArray(patch.badges)) {
+    const ids = Array.from(new Set(patch.badges.map(String).filter((id) => /^[a-z0-9-]{1,30}$/.test(id)))).slice(0, 3);
+    p.badges = ids.length ? ids : undefined;
+  }
+  if (typeof patch.birthday === "string") {
+    const m = /^(\d\d)-(\d\d)$/.exec(patch.birthday);
+    p.birthday = m && +m[1] >= 1 && +m[1] <= 12 && +m[2] >= 1 && +m[2] <= 31 ? patch.birthday : undefined;
+  }
   (Object.keys(p) as (keyof Profile)[]).forEach((k) => { if (p[k] === undefined) delete p[k]; });
   await save(username, data);
+  await bumpRev(REV_KEYS.faces);
+  return p;
+}
+
+type PictureFields = Pick<Profile, "pic" | "picGif" | "picPending" | "bannerPic" | "bannerPending">;
+/** Pictures are set only after checks (see lib/pictures), never straight from a request. */
+export async function setPictureFields(username: string, patch: Partial<PictureFields>) {
+  const data = await getUserData(username);
+  const p = data.profile;
+  for (const [k, v] of Object.entries(patch) as [keyof PictureFields, string | undefined][]) {
+    if (v) p[k] = v; else delete p[k];
+  }
+  await save(username, data);
+  await bumpRev(REV_KEYS.faces);
   return p;
 }
 
@@ -471,7 +510,8 @@ export async function notify(toUsername: string, n: Omit<Notification, "id" | "a
   const keep = (x: Notification) => now - Date.parse(x.at) < (x.read ? 30 : 90) * 86400_000;
   data.notifications = [entry, ...data.notifications.filter(keep)].slice(0, MAX_NOTIFS);
   await save(toUsername, data);
-  const quiet = data.dndUntil && Date.parse(data.dndUntil) > Date.now();
+  // "busy" on your profile keeps things quiet too
+  const quiet = (data.dndUntil && Date.parse(data.dndUntil) > Date.now()) || data.profile.availability === "busy";
   if (!quiet) {
     await sendPush(toUsername, { title: PUSH_TITLES[n.kind] || "Theo's Bookmarks", body: n.text.slice(0, 160), url: n.link || "/", tag: n.kind }).catch(() => {});
   }

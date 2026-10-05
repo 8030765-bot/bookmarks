@@ -7,7 +7,8 @@ import Favicon from "../../components/Favicon";
 import Markdown from "../../components/Markdown";
 import { Icon } from "../../components/Icon";
 import { Avatar, roleClass } from "../../components/People";
-import type { Profile } from "../../components/Personal";
+import { ReportPictureButton, type Profile } from "../../components/Personal";
+import { BADGES } from "@/lib/badges";
 import { ageLabel, safeHref, timeAgo } from "../../components/ui";
 import { PALETTES, decodeTheme } from "../../components/look";
 
@@ -28,7 +29,11 @@ interface FullProfile {
   self?: boolean;
   hidden?: boolean;
   membersOnly?: boolean;
+  badges?: string[];
 }
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const birthdayLabel = (b: string) => { const [m, d] = b.split("-").map(Number); return `${d} ${MONTHS[m - 1] || ""}`; };
+const isBirthdayToday = (b?: string) => { if (!b) return false; const n = new Date(); return b === `${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`; };
 
 async function post(body: Record<string, unknown>) {
   const res = await fetch("/api/me", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -78,11 +83,12 @@ export default function ProfilePage() {
       )}
       {p && !p.hidden && !p.membersOnly && (
         <>
-          <header className={`pp-hero banner-${pr.banner || "none"}`} style={{ "--pc": pr.color || "var(--accent)" } as React.CSSProperties}>
-            <Avatar name={p.username} profile={pr} size={84} online={online} />
+          <header className={`pp-hero banner-${pr.banner || "none"} ${pr.bannerPic ? "has-banner-img" : ""}`} style={{ "--pc": pr.color || "var(--accent)", ...(pr.bannerPic ? { backgroundImage: `url(/api/img/${pr.bannerPic})` } : {}) } as React.CSSProperties}>
+            <Avatar name={p.username} profile={pr as any} size={84} online={online} />
             <div className="pp-names">
               <h1 className={roleClass(p.role)}>{pr.displayName || p.username}</h1>
               <div className="pp-handle">@{p.username}{p.role && <span className={`pill role-${p.role}`}>{p.role}</span>}{p.social?.followsYou && <span className="pill">follows you</span>}</div>
+              {pr.availability && <div className="pp-status">{pr.availability === "busy" ? "⛔ Busy" : "🌙 Away"}</div>}
               {pr.status && <div className="pp-status">{pr.statusEmoji} {pr.status}</div>}
               {theme && (
                 <div className="pp-theme">
@@ -93,6 +99,7 @@ export default function ProfilePage() {
               )}
               <div className="pp-meta">
                 {p.joined && <span>Joined {ageLabel(p.joined)}</span>}
+                {pr.birthday && <span>{isBirthdayToday(pr.birthday) ? "🎉 Birthday today!" : `🎂 ${birthdayLabel(pr.birthday)}`}</span>}
                 {p.lastSeen && <span>{online ? "🟢 Online now" : `Active ${timeAgo(new Date(p.lastSeen).toISOString())}`}</span>}
               </div>
             </div>
@@ -103,11 +110,12 @@ export default function ProfilePage() {
                     {p.social?.youFollow ? "Following ✓" : "Follow"}
                   </button>
                   <button className="btn btn-secondary btn-sm" onClick={async () => { const j = await post({ action: "kudos", username: p.username }); setMsg(j.error || `Kudos sent ⭐ — ${j.left} left today`); load(); }}>⭐ Kudos</button>
+                  {pr.pic && <ReportPictureButton username={p.username} pic={pr.pic} onDone={setMsg} />}
                   <button className="btn btn-secondary btn-sm" title="Hide their chat messages from you" onClick={async () => { if (confirm(`Block ${p.username}? Their chat messages will be hidden from you.`)) { await post({ action: "block", username: p.username, on: true }); setMsg(`Blocked ${p.username}`); } }}>Block</button>
                 </>
               )}
               {p.self && <Link className="btn btn-primary btn-sm" href="/?edit=profile"><Icon name="edit" /> Edit profile</Link>}
-              <button className="btn btn-secondary btn-sm" onClick={share}><Icon name="share" /> Share</button>
+              <button className="btn btn-secondary btn-sm" onClick={share}><Icon name="copy" /> Copy link</button>
             </div>
           </header>
           {msg && <p className="hint pp-msg">{msg}</p>}
@@ -120,6 +128,18 @@ export default function ProfilePage() {
             <div><strong>{p.social?.kudos || 0}</strong><span>kudos ⭐</span></div>
           </div>
 
+          {p.badges?.length ? (
+            <section className="pp-section">
+              <div className="admin-h">Badges</div>
+              <div className="badge-list">
+                {BADGES.map((b) => {
+                  const has = p.badges!.includes(b.id);
+                  if (!has && !p.self) return null;
+                  return <span key={b.id} className={`badge-chip ${has ? "" : "locked"} ${pr.badges?.includes(b.id) ? "pinned" : ""}`} title={b.how}>{has ? b.emoji : "🔒"} {b.name}{!has && <small> — {b.how}</small>}</span>;
+                })}
+              </div>
+            </section>
+          ) : null}
           {pr.bio && <section className="pp-section"><Markdown text={pr.bio} /></section>}
           {pr.into?.length ? (
             <section className="pp-section">

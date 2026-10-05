@@ -252,7 +252,7 @@ export default function LinkCard({
           {steps > 0 && <span className="meta-steps" title="Checklist">☑ {ticked}/{steps}</span>}
           {link.readMins ? <span className="meta-clicks">{link.readMins} min read</span> : null}
           {(link.clicks || 0) > 0 && <span className="meta-clicks">{link.clicks} visit{link.clicks === 1 ? "" : "s"}</span>}
-          {link.addedBy && <span className="meta-by">by <UserChip username={link.addedBy} className="meta-by" onOpen={actions.openProfile} /></span>}
+          {link.addedBy && <span className="meta-by">by <UserChip username={link.addedBy} className="meta-by" onOpen={actions.openProfile} face /></span>}
           {pref.done && <span className="meta-done" title="You marked this done"><Icon name="check" /> done</span>}
           <StarRating linkId={link.id} mine={env.myRatings[link.id]} avg={agg?.avg} count={agg?.count} canRate={!!me} onRate={actions.rate} />
         </div>
