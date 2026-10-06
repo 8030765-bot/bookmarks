@@ -4,7 +4,7 @@ import { Icon } from "./Icon";
 import { NameCheck, PasswordStrength, QrCode } from "./People";
 import { makeZip, type ZipEntry } from "./zip";
 import type { Profile } from "./Personal";
-import { timeAgo } from "./ui";
+import { readLocal, timeAgo, writeLocal } from "./ui";
 
 interface AccountState {
   username: string;
@@ -54,7 +54,9 @@ export default function AccountModal({
   toast: (msg: string) => void;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<Tab>("security");
+  // opens on the tab you used last
+  const [tab, setTabState] = useState<Tab>(() => { const t = readLocal<string>("accountTab", "security"); return (["security", "privacy", "account"].includes(t) ? t : "security") as Tab; });
+  const setTab = (t: Tab) => { setTabState(t); writeLocal("accountTab", t); };
   const [info, setInfo] = useState<AccountState | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);

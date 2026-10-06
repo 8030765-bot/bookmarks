@@ -4,7 +4,7 @@ import { BookmarksData } from "@/lib/types";
 import { Icon } from "./Icon";
 import Favicon from "./Favicon";
 import type { Notification } from "./Personal";
-import { safeHref, timeAgo } from "./ui";
+import { readLocal, safeHref, timeAgo, writeLocal } from "./ui";
 
 const KIND_ICON: Record<string, string> = { like: "heart", mention: "chat", reply: "reply", suggestion: "bulb", comment: "chat", dm: "chat", role: "lock", system: "bell", follow: "users" };
 const FILTERS: { id: string; label: string; kinds: string[] }[] = [
@@ -124,7 +124,9 @@ export function NotificationPanel({
     setReplyMsg("");
     onReadOne(n.id);
   }
-  const [tab, setTab] = useState<"inbox" | "toasts" | "settings">("inbox");
+  // opens on the tab you used last
+  const [tab, setTabState] = useState<"inbox" | "toasts" | "settings">(() => { const t = readLocal<string>("notifTab", "inbox"); return t === "toasts" || t === "settings" ? t : "inbox"; });
+  const setTab = (t: "inbox" | "toasts" | "settings") => { setTabState(t); writeLocal("notifTab", t); };
   const kinds = FILTERS.find((f) => f.id === filter)?.kinds || [];
   const list = kinds.length ? notifications.filter((n) => kinds.includes(n.kind)) : notifications;
   const groups = useMemo(() => groupNotifications(list), [list]);

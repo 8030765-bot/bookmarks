@@ -314,10 +314,16 @@ export default function HomePage() {
     // the folder chips stick right under the top bar, whose height changes on phones
     const el = topbarRef.current;
     if (!el) return;
-    const set = () => document.documentElement.style.setProperty("--topbar-h", `${el.offsetHeight}px`);
+    const set = () => {
+      document.documentElement.style.setProperty("--topbar-h", `${el.offsetHeight}px`);
+      const nav = document.querySelector<HTMLElement>(".folder-nav.sticky");
+      document.documentElement.style.setProperty("--nav-h", `${nav ? nav.offsetHeight : 0}px`);
+    };
     set();
     const ro = new ResizeObserver(set);
     ro.observe(el);
+    const nav = document.querySelector<HTMLElement>(".folder-nav.sticky");
+    if (nav) ro.observe(nav);
     return () => ro.disconnect();
   }, [loading]);
   useEffect(() => {
@@ -1886,6 +1892,8 @@ export default function HomePage() {
       cmd("extra", look.specialFolders ? "Hide Recently added / Popular folders" : "Show Recently added / Popular folders", "chart", () => changeLook({ ...look, specialFolders: !look.specialFolders })),
       cmd("empty", look.hideEmpty ? "Show empty folders" : "Hide empty folders", "folder", () => changeLook({ ...look, hideEmpty: !look.hideEmpty })),
       cmd("motion", look.motion ? "Turn animations off" : "Turn animations on", "settings", () => changeLook({ ...look, motion: !look.motion })),
+      cmd("focusmode", look.focus ? "Leave focus mode" : "Focus mode — just the websites", "eye", () => changeLook({ ...look, focus: !look.focus })),
+      cmd("sticky", look.stickyHeaders ? "Stop folder names sticking at the top" : "Keep folder names at the top while scrolling", "folder", () => changeLook({ ...look, stickyHeaders: !look.stickyHeaders })),
       cmd("newtab", look.newTab ? "Open websites in this tab" : "Open websites in a new tab", "external", () => changeLook({ ...look, newTab: !look.newTab })),
       ...(hiddenCount || showHidden ? [cmd("hidden", showHidden ? "Hide my hidden websites" : "Show my hidden websites", "eye", () => setShowHidden((x) => !x))] : []),
       ...(personal.folderOrder.length ? [cmd("resetorder", "Reset my folder order", "reset", () => personal.setFolderOrder([]))] : []),
@@ -2050,7 +2058,12 @@ export default function HomePage() {
         </div>
       ) : offline && (
         <div className="offline-bar" role="status">
-          <span className="offline-dot" /> You&apos;re offline — showing the copy saved on this device. Changes from others will appear when you reconnect.
+          <span className="offline-dot" />
+          <span>
+            You&apos;re offline — showing the copy saved on this device.{" "}
+            <span className="offline-more">You can still open websites, search, and use My Stuff and the tools; adding websites is saved here and sent when you&apos;re back. Chat and likes wait for the connection.</span>{" "}
+            <button className="link-btn" onClick={() => { load(); }}>Try again</button>
+          </span>
         </div>
       )}
       {data?.settings?.maintenance && (
@@ -2180,6 +2193,12 @@ export default function HomePage() {
         </div>
       </div>
 
+      {look.focus && (
+        <div className="focus-pill" role="status">
+          🎯 Focus mode
+          <button className="btn btn-secondary btn-sm" onClick={() => changeLook({ ...look, focus: false })}>Show everything</button>
+        </div>
+      )}
       {dropHint && <div className="drop-overlay" aria-hidden="true"><div>🔗 Drop it on a folder, or anywhere to add it</div></div>}
       {look.sideNav && <SideNav folders={topFolders} active={activeFolder} onJump={jumpToFolder} counts={(f) => f.links.length} />}
       <div className="app">
@@ -2299,7 +2318,7 @@ export default function HomePage() {
             {personal.views.map((v) => (
               <span key={v.id} className="view-chip">
                 <button onClick={() => applyView(v)} title={[v.q, ...v.tags.map((t) => `#${t}`)].filter(Boolean).join(" ")}>{v.name}</button>
-                <button className="view-x" onClick={() => { personal.deleteView(v.id); showToast(`Deleted the view “${v.name}”`, { label: "Undo", run: () => personal.saveView(v) }); }} aria-label={`Delete view ${v.name}`}>×</button>
+                <button className="view-x" onClick={() => { personal.deleteView(v.id); showToast(`Deleted the view “${v.name}”`, { label: "Undo", run: () => personal.saveView(v) }); }} aria-label={`Delete view ${v.name}`} title={`Delete view ${v.name}`}>×</button>
               </span>
             ))}
             {filtering && <button className="pick dashed" onClick={saveCurrentView}><Icon name="plus" /> Save this view</button>}
@@ -2978,6 +2997,7 @@ export default function HomePage() {
       )}
       <ChatPanel
         siteLinks={chatLinks}
+        hidden={look.focus}
         open={chatOpen}
         setOpen={setChatOpen}
         chatEnabled={data?.settings?.chatEnabled !== false}

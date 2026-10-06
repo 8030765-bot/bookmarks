@@ -96,7 +96,7 @@ function DeckEditor({ deck, save, remove }: { deck: Deck; save: (d: Deck) => voi
           <li key={c.id}>
             <span><strong>{c.front}</strong> — {c.back}</span>
             <span className="muted-inline">{"●".repeat(Math.min(c.box, 4)) || "new"}</span>
-            <button className="btn-icon sm" aria-label="Delete card" onClick={() => save({ ...deck, cards: deck.cards.filter((x) => x.id !== c.id) })}>×</button>
+            <button className="btn-icon sm" aria-label="Delete card" title="Delete card" onClick={() => save({ ...deck, cards: deck.cards.filter((x) => x.id !== c.id) })}>×</button>
           </li>
         ))}
       </ul>
@@ -187,7 +187,7 @@ export function Habits() {
                   return <td key={ds}><button className={`habit-cell ${on ? "on" : ""}`} aria-pressed={on} aria-label={`${h.name} on ${d.toDateString()}`} onClick={() => toggle(h, ds)}>{on ? "✓" : ""}</button></td>;
                 })}
                 <td><strong>{streak(h.days)}</strong></td>
-                <td><button className="btn-icon sm" aria-label={`Delete ${h.name}`} onClick={() => { if (confirm(`Stop tracking “${h.name}”?`)) set(value.filter((x) => x.id !== h.id)); }}>×</button></td>
+                <td><button className="btn-icon sm" aria-label={`Delete ${h.name}`} title={`Delete ${h.name}`} onClick={() => { if (confirm(`Stop tracking “${h.name}”?`)) set(value.filter((x) => x.id !== h.id)); }}>×</button></td>
               </tr>
             ))}
           </tbody>

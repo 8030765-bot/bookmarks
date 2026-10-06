@@ -100,6 +100,13 @@ export interface Look {
   emojiFont: "device" | "noto";
   // when to go dark
   autoDark: "off" | "time" | "system";
+  /** "At night": dark from this hour until darkTo (0–23) */
+  darkFrom: number;
+  darkTo: number;
+  /** folder names stay at the top while you scroll through a long folder */
+  stickyHeaders: boolean;
+  /** just the websites: hides chat, the leaderboard, Today, polls and other extras */
+  focus: boolean;
   // accessibility
   highContrast: boolean;
   colorblind: boolean;
@@ -121,7 +128,7 @@ export const DEFAULT_LOOK: Look = {
   hide: [], order: DEFAULT_ORDER,
   bg: "none", animatedBg: false, gradientTitle: false, glow: false, sparkles: false, seasonal: true, snow: true, greeting: true, minimal: false,
   iconStyle: "line", emojiFont: "device",
-  autoDark: "off",
+  autoDark: "off", darkFrom: 19, darkTo: 7, stickyHeaders: false, focus: false,
   highContrast: false, colorblind: false, underline: false, bigButtons: false, haptics: true, leaveWarn: false, lang: "auto",
 };
 
@@ -138,7 +145,9 @@ export function cleanLook(raw: Partial<Look> | null | undefined): Look {
   pick("density", oneOf(["comfy", "compact", "large"]));
   for (const k of ["motion", "newTab", "descriptions", "iconTint", "specialFolders", "hideEmpty", "iconGrid", "folderBorders", "smallHeader", "sideNav",
     "animatedBg", "gradientTitle", "glow", "sparkles", "seasonal", "snow", "greeting", "minimal", "highContrast", "colorblind", "underline",
-    "bigButtons", "haptics", "leaveWarn"] as const) pick(k, bool);
+    "bigButtons", "haptics", "leaveWarn", "stickyHeaders", "focus"] as const) pick(k, bool);
+  pick("darkFrom", (v) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 23);
+  pick("darkTo", (v) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 23);
   pick("lang", oneOf(["auto", "en", "es"]));
   pick("font", oneOf(FONTS.map((f) => f.id)));
   pick("fontScale", num(0.8, 1.4));
@@ -224,7 +233,14 @@ export function greetingFor(d = new Date()) {
 export function effectivePalette(look: Look, prefersDark: boolean, now = new Date()): Palette {
   const dark = isLightPalette(look.palette) ? "black" : look.palette;
   const light = isLightPalette(look.palette) ? look.palette : "light";
-  if (look.autoDark === "time") { const h = now.getHours(); return h >= 7 && h < 19 ? light : dark; }
+  if (look.autoDark === "time") {
+    const h = now.getHours();
+    const from = look.darkFrom ?? 19;
+    const to = look.darkTo ?? 7;
+    // 19→7 wraps past midnight; 13→15 doesn't
+    const isDark = from === to ? false : from > to ? h >= from || h < to : h >= from && h < to;
+    return isDark ? dark : light;
+  }
   if (look.autoDark === "system") return prefersDark ? dark : light;
   return look.palette;
 }
@@ -273,7 +289,10 @@ export function applyLook(look: Look, ctx: LookContext = { prefersDark: true, re
   set("underline", look.underline);
   set("season", season || "none");
   set("sidenav", look.sideNav);
-  set("hide", look.hide.join(" ") || "none");
+  // focus mode hides every extra
+  set("hide", (look.focus ? HIDEABLE.map((h) => h.id) : look.hide).join(" ") || "none");
+  set("focus", look.focus);
+  set("stickyfh", look.stickyHeaders);
   set("bigtap", look.bigButtons);
   // language: "auto" follows the device
   set("lang", look.lang === "auto" ? (navigator.language?.toLowerCase().startsWith("es") ? "es" : "en") : look.lang);

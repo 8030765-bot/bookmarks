@@ -66,6 +66,7 @@ export default function ChatPanel({
   target,
   fullPage = false,
   siteLinks = [],
+  hidden = false,
 }: {
   open: boolean;
   setOpen: (fn: (open: boolean) => boolean) => void;
@@ -95,6 +96,8 @@ export default function ChatPanel({
   fullPage?: boolean;
   /** the site's websites, for the @link picker */
   siteLinks?: KnownLink[];
+  /** focus mode: nothing shows */
+  hidden?: boolean;
 }) {
   const [s, setS] = useState<ChatState>({ channel: "general", messages: [], hasMore: false, roles: {}, pins: [], channels: [], keywords: [], shortcodes: {}, maxLen: 500, notifyLevels: {}, images: true });
   const channel = s.channel;
@@ -124,6 +127,25 @@ export default function ChatPanel({
   const [linkQ, setLinkQ] = useState<string | null>(null);
   const [emojiQ, setEmojiQ] = useState<string | null>(null);
   const [dividerSeen, setDividerSeen] = useState(false);
+  const [width, setWidth] = useState<number | null>(null);
+  const [loadedOnce, setLoadedOnce] = useState(false);
+  useEffect(() => { const w = readLocal<number | null>("chatWidth", null); if (w) setWidth(w); }, []);
+  /** Drag (or arrow keys on) the left edge to make the panel wider or narrower. */
+  function startResize(e: React.PointerEvent) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const panel = (e.currentTarget as HTMLElement).parentElement!;
+    const startW = panel.getBoundingClientRect().width;
+    const move = (ev: PointerEvent) => setWidth(clampWidth(startW + (startX - ev.clientX)));
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      writeLocal("chatWidth", clampWidth(startW + (startX - ev.clientX)));
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+  const clampWidth = (w: number) => Math.round(Math.min(Math.max(300, w), Math.min(900, window.innerWidth - 40)));
   const [typing, setTyping] = useState<string[]>([]);
   const [people, setPeople] = useState<string[]>([]);
   const [mentionQ, setMentionQ] = useState<string | null>(null);
@@ -169,6 +191,7 @@ export default function ChatPanel({
         if (ch !== "general") { channelRef.current = "general"; load("general"); }
         return;
       }
+      setLoadedOnce(true);
       setS((prev) => ({
         channel: json.channel || prev.channel,
         messages: Array.isArray(json.messages) ? json.messages : prev.messages,
@@ -600,7 +623,27 @@ export default function ChatPanel({
   }
 
   const panel = (
-    <aside className={`chat-panel style-${chatStyle} ${dock === "side" && !full ? "docked" : ""} ${full ? "full" : ""}`} aria-label="Chat">
+    <aside className={`chat-panel style-${chatStyle} ${dock === "side" && !full ? "docked" : ""} ${full ? "full" : ""}`} aria-label="Chat" style={width && !full && !fullPage ? { width } : undefined}>
+      {!full && !fullPage && (
+        <div
+          className="chat-resize"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Chat width — drag, or use the arrow keys"
+          title="Drag to resize (double-click to reset)"
+          tabIndex={0}
+          onPointerDown={startResize}
+          onDoubleClick={() => { setWidth(null); writeLocal("chatWidth", null); }}
+          onKeyDown={(e) => {
+            if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+            e.preventDefault();
+            const cur = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect().width;
+            const next = clampWidth(cur + (e.key === "ArrowLeft" ? 30 : -30));
+            setWidth(next);
+            writeLocal("chatWidth", next);
+          }}
+        />
+      )}
       <div className="chat-header">
         <div className="chat-title">
           <select className="chat-channel-select" value={channel} onChange={(e) => switchChannel(e.target.value)} aria-label="Channel">
@@ -669,7 +712,7 @@ export default function ChatPanel({
             <form className="chat-kw" onSubmit={(e) => { e.preventDefault(); const w = kwDraft.trim(); if (!w) return; act({ action: "keywords", words: [...s.keywords, w] }, `You'll be told when someone says “${w}”`); setKwDraft(""); load(); }}>
               <span className="muted">Tell me when someone says:</span>
               <div className="chip-grid">
-                {s.keywords.map((k) => <span key={k} className="pick">{k}<button type="button" className="ss-x" onClick={() => { act({ action: "keywords", words: s.keywords.filter((x) => x !== k) }); load(); }}>×</button></span>)}
+                {s.keywords.map((k) => <span key={k} className="pick">{k}<button type="button" className="ss-x" title={`Stop watching for “${k}”`} aria-label={`Stop watching for ${k}`} onClick={() => { act({ action: "keywords", words: s.keywords.filter((x) => x !== k) }); load(); }}>×</button></span>)}
                 <input value={kwDraft} onChange={(e) => setKwDraft(e.target.value)} placeholder="a word…" maxLength={30} />
               </div>
             </form>
@@ -758,7 +801,8 @@ export default function ChatPanel({
             <button className="link-btn" onClick={() => { setWelcomed(true); writeLocal("chatWelcomed", true); }}>Got it</button>
           </div>
         )}
-        {shown.length === 0 && <div className="chat-empty">No messages here yet. Say hi! 👋</div>}
+        {!loadedOnce && <div className="chat-loading" aria-label="Loading messages">{[0, 1, 2, 3, 4].map((i) => <div key={i} className="skeleton" />)}</div>}
+        {loadedOnce && shown.length === 0 && <div className="chat-empty">No messages here yet. Say hi! 👋</div>}
         {hiddenCount > 0 && <div className="chat-hidden-note">{hiddenCount} message{hiddenCount === 1 ? "" : "s"} from people you blocked are hidden</div>}
         {shown.map((m, i) => renderMessage(m, i, shown))}
       </div>
@@ -792,7 +836,7 @@ export default function ChatPanel({
             <div className="reply-bar">
               <Icon name={editing ? "edit" : "reply"} /> {editing ? "Editing your message" : <>Replying to <strong>{replyTo!.user}</strong></>}
               <span className="reply-snippet">{(editing || replyTo)!.text}</span>
-              <button type="button" onClick={() => { setReplyTo(null); if (editing) { setEditing(null); setText(""); } }} aria-label="Cancel"><Icon name="x" /></button>
+              <button type="button" onClick={() => { setReplyTo(null); if (editing) { setEditing(null); setText(""); } }} aria-label="Cancel" title="Cancel"><Icon name="x" /></button>
             </div>
           )}
           {linkOptions.length > 0 && (
@@ -816,7 +860,7 @@ export default function ChatPanel({
             <div className="chat-attach">
               <img src={image} alt="Picture to send" />
               <span className="muted">{canModerate ? "Picture ready" : "Picture ready — a moderator checks it before others see it"}</span>
-              <button type="button" className="ss-x" onClick={() => setImage(null)} aria-label="Remove picture">×</button>
+              <button type="button" className="ss-x" onClick={() => setImage(null)} aria-label="Remove picture" title="Remove picture">×</button>
             </div>
           )}
           {mentionOptions.length > 0 && (
@@ -887,6 +931,7 @@ export default function ChatPanel({
   );
 
   if (fullPage) return panel;
+  if (hidden) return null;
   return (
     <>
       <button className={`chat-fab ${mentioned ? "ping" : ""}`} onClick={() => setOpen((o) => !o)} aria-label="Toggle chat">

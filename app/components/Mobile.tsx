@@ -21,7 +21,7 @@ export function BottomNav({ onHome, onSearch, onAdd, onChat, onMore, chatOpen, u
     <nav className="bottom-nav" aria-label="Main">
       <button onClick={tap(onHome)} aria-label="Home"><Icon name="home" /><span>Home</span></button>
       <button onClick={tap(onSearch)} aria-label="Search"><Icon name="search" /><span>Search</span></button>
-      <button className="bn-add" onClick={tap(onAdd)} aria-label="Add a website"><Icon name="plus" /></button>
+      <button className="bn-add" onClick={tap(onAdd)} aria-label="Add a website" title="Add a website"><Icon name="plus" /></button>
       <button className={chatOpen ? "on" : ""} onClick={tap(onChat)} aria-label="Chat"><Icon name="chat" /><span>Chat</span></button>
       <button onClick={tap(onMore)} aria-label="More">
         <Icon name="more" /><span>More</span>

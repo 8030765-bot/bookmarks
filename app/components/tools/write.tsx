@@ -83,7 +83,7 @@ export function Todos() {
               <span>{t.text}</span>
             </label>
             {t.due && <span className="muted-inline">{t.due === today ? "today" : new Date(`${t.due}T12:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</span>}
-            <button className="btn-icon sm" aria-label={`Delete ${t.text}`} onClick={() => set(value.filter((x) => x.id !== t.id))}>×</button>
+            <button className="btn-icon sm" aria-label={`Delete ${t.text}`} title={`Delete ${t.text}`} onClick={() => set(value.filter((x) => x.id !== t.id))}>×</button>
           </li>
         ))}
       </ul>

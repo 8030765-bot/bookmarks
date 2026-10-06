@@ -1866,3 +1866,21 @@ main:focus{outline:none}
 .notif-snoozed summary{cursor:pointer;color:var(--text-muted);padding:.3rem 0}
 .quiet-row{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin-bottom:.6rem}
 .quiet-row input[type=time]{width:auto}
+
+/* ---------- QoL batch F: layout & comfort ---------- */
+:root[data-stickyfh=on] .folder-card{overflow:clip}
+:root[data-stickyfh=on] .folder-card>.fh{position:sticky;top:calc(var(--topbar-h,57px) + var(--nav-h,0px));z-index:6;background:var(--surface);border-top-left-radius:inherit;border-top-right-radius:inherit}
+:root[data-focus=on] .greeting,:root[data-focus=on] .chat-panel,:root[data-focus=on] .scroll-map,:root[data-focus=on] .empty-tip,:root[data-focus=on] .start-banner{display:none!important}
+.focus-pill{position:fixed;left:50%;bottom:1rem;transform:translateX(-50%);z-index:90;display:flex;align-items:center;gap:.5rem;padding:.4rem .5rem .4rem .9rem;border-radius:999px;background:var(--surface);border:1px solid var(--border-light);box-shadow:var(--shadow);font-size:.8rem}
+.dark-hours{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.dark-hours label{margin:0}.dark-hours select{width:auto}
+.offline-bar .offline-more{opacity:.85}
+.offline-bar .link-btn{color:inherit;text-decoration:underline}
+.chat-resize{position:absolute;left:-4px;top:12px;bottom:12px;width:8px;cursor:ew-resize;z-index:3;border-radius:4px}
+.chat-resize:hover,.chat-resize:focus-visible{background:color-mix(in srgb,var(--accent) 45%,transparent);outline:none}
+.chat-panel.docked .chat-resize{top:0;bottom:0;left:-4px}
+@media (max-width:600px){.chat-resize{display:none}}
+.chat-loading{display:flex;flex-direction:column;gap:.6rem;padding:.5rem 0}
+.chat-loading .skeleton{height:34px;border-radius:12px}
+.chat-loading .skeleton:nth-child(2n){width:70%;align-self:flex-end}
+.chat-loading .skeleton:nth-child(2n+1){width:60%}

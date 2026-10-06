@@ -386,7 +386,7 @@ export default function LinkModal({
               {tags.map((t) => (
                 <span key={t} className="tag-chip">
                   {t}
-                  <button type="button" aria-label={`Remove ${t}`} onClick={() => setTags(tags.filter((x) => x !== t))}>×</button>
+                  <button type="button" aria-label={`Remove ${t}`} title={`Remove ${t}`} onClick={() => setTags(tags.filter((x) => x !== t))}>×</button>
                 </span>
               ))}
               <input

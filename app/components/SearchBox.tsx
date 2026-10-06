@@ -172,7 +172,7 @@ export default function SearchBox({
         </button>
       )}
       {value ? (
-        <button type="button" className="clear" onClick={() => { onChange(""); inputRef.current?.focus(); }} aria-label="Clear search"><Icon name="x" /></button>
+        <button type="button" className="clear" onClick={() => { onChange(""); inputRef.current?.focus(); }} aria-label="Clear search" title="Clear search"><Icon name="x" /></button>
       ) : (
         <span className="kbd">/</span>
       )}
@@ -194,7 +194,7 @@ export default function SearchBox({
               onMouseDown={(e) => { e.preventDefault(); pick(s); }}
             >
               {s.kind === "recent" && (<><Icon name="clock" /> <span className="ss-main">{s.text}</span>
-                <button className="ss-x" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); forget(s.text); }} aria-label="Forget">×</button></>)}
+                <button className="ss-x" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); forget(s.text); }} aria-label="Forget" title="Forget">×</button></>)}
               {s.kind === "op" && (<><Icon name="search" /> <span className="ss-main"><code>{s.text}</code></span><span className="ss-hint">{s.help}</span></>)}
               {s.kind === "tag" && (<><Icon name="tag" /> <span className="ss-main">#{s.tag}</span><span className="ss-hint">{s.count}</span></>)}
               {s.kind === "folder" && (<><span className="ss-emoji">{s.folder.emoji}</span> <span className="ss-main">{s.folder.name}</span><span className="ss-hint">folder</span></>)}

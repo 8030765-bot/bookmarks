@@ -37,6 +37,8 @@ function Seg<T extends string>({ value, options, onChange, label }: { value: T; 
   );
 }
 
+const hourLabel = (h: number) => new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: "numeric" });
+
 /** A small live sample of the site, drawn with the same CSS as the real thing. */
 function Preview() {
   return (
@@ -132,7 +134,19 @@ export function ThemeEditor({ look, onChange, onClose, startView, onStartView, f
               </div>
             </div>
             <Seg label="Go dark automatically" value={look.autoDark} onChange={(v) => set({ autoDark: v })}
-              options={[["off", "No"], ["time", "At night (7pm–7am)"], ["system", "Follow my device"]]} />
+              options={[["off", "No"], ["time", "On a schedule"], ["system", "Follow my device"]]} />
+            {look.autoDark === "time" && (
+              <div className="form-group dark-hours">
+                <label>Dark from</label>
+                <select value={look.darkFrom} onChange={(e) => set({ darkFrom: Number(e.target.value) })} aria-label="Dark from">
+                  {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{hourLabel(h)}</option>)}
+                </select>
+                <label>until</label>
+                <select value={look.darkTo} onChange={(e) => set({ darkTo: Number(e.target.value) })} aria-label="Dark until">
+                  {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{hourLabel(h)}</option>)}
+                </select>
+              </div>
+            )}
             <Seg label="Background" value={look.bg} onChange={(v) => set({ bg: v })}
               options={[["none", "Plain"], ["dots", "Dots"], ["grid", "Grid"], ["stripes", "Stripes"], ["gradient", "Gradient"], ["aurora", "Aurora"]]} />
           </>
@@ -178,6 +192,8 @@ export function ThemeEditor({ look, onChange, onClose, startView, onStartView, f
             <Toggle label="Card borders in the folder's colour" checked={look.folderBorders} onChange={(v) => set({ folderBorders: v })} />
             <Toggle label="Folder list down the left" hint="On wide screens." checked={look.sideNav} onChange={(v) => set({ sideNav: v })} />
             <Toggle label="Smaller header" checked={look.smallHeader} onChange={(v) => set({ smallHeader: v })} />
+            <Toggle label="Sticky folder names" hint="A folder's name stays at the top while you scroll through it." checked={look.stickyHeaders} onChange={(v) => set({ stickyHeaders: v })} />
+            <Toggle label="Focus mode" hint="Just the websites — hides chat, the leaderboard, Today, polls and other extras." checked={look.focus} onChange={(v) => set({ focus: v })} />
             <Toggle label="Show descriptions" hint="A line about each site under its name." checked={look.descriptions} onChange={(v) => set({ descriptions: v })} />
             <Toggle label="Extra folders" hint="“Recently added”, “Most popular” and “Top rated”." checked={look.specialFolders} onChange={(v) => set({ specialFolders: v })} />
             <Toggle label="Hide empty folders" checked={look.hideEmpty} onChange={(v) => set({ hideEmpty: v })} />

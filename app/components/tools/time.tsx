@@ -142,7 +142,7 @@ export function WorldClock() {
               <span>{hour >= 6 && hour < 19 ? "☀️" : "🌙"} {name}</span>
               <strong>{now.toLocaleTimeString([], { timeZone: tz, hour: "2-digit", minute: "2-digit" })}</strong>
               <span className="muted-inline">{offsetH(tz)}</span>
-              <button className="btn-icon sm" aria-label={`Remove ${name}`} onClick={() => setPicked(picked.filter((x) => x !== tz))}>×</button>
+              <button className="btn-icon sm" aria-label={`Remove ${name}`} title={`Remove ${name}`} onClick={() => setPicked(picked.filter((x) => x !== tz))}>×</button>
             </li>
           );
         })}
@@ -202,7 +202,7 @@ export function Countdowns() {
             <li key={c.id} className={ms <= 0 ? "past" : ""}>
               <span>{c.emoji} {c.title}</span>
               <strong>{ms <= 0 ? "🎉 it's here" : untilLabel(ms)}</strong>
-              <button className="btn-icon sm" aria-label={`Remove ${c.title}`} onClick={() => set(value.filter((x) => x.id !== c.id))}>×</button>
+              <button className="btn-icon sm" aria-label={`Remove ${c.title}`} title={`Remove ${c.title}`} onClick={() => set(value.filter((x) => x.id !== c.id))}>×</button>
             </li>
           );
         })}
