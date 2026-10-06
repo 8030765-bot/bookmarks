@@ -33,6 +33,8 @@ function droppedUrl(e: React.DragEvent): string {
 }
 const carriesUrl = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes("text/uri-list");
 
+const SHOW_FIRST = 30;
+
 export default function FolderSection({
   folder,
   links,
@@ -116,6 +118,13 @@ export default function FolderSection({
   const isFolderDrop = dropTarget === `folder:${folder.id}`;
   const isEndDrop = dropTarget === `end:${folder.id}`;
   const count = links.length + shortcuts.length;
+  // big folders show the first few dozen, with "Show all" (searching always shows everything)
+  const [showAll, setShowAll] = useState(() => {
+    if (typeof location === "undefined" || !location.hash.startsWith("#link-")) return false;
+    return links.findIndex((l) => l.id === location.hash.slice(6)) >= SHOW_FIRST; // a link to a website further down
+  });
+  const capped = !showAll && !f && !query.trim() && links.length > SHOW_FIRST + 6;
+  const shownLinks = capped ? links.slice(0, SHOW_FIRST) : links;
 
   return (
     <section
@@ -255,6 +264,7 @@ export default function FolderSection({
                 <button
                   key={ch}
                   onClick={(e) => {
+                    setShowAll(true);
                     const section = (e.currentTarget as HTMLElement).closest(".folder-card");
                     const card = Array.from(section?.querySelectorAll<HTMLElement>(".card[data-link-id]") || [])
                       .find((c) => ((c.querySelector(".card-title")?.textContent || "").trim()[0] || "#").toUpperCase().replace(/[^A-Z]/, "#") === ch);
@@ -267,7 +277,7 @@ export default function FolderSection({
             </div>
           )}
           <div className={`cards ${view === "list" ? "list" : ""}`}>
-            {links.map((link) => (
+            {shownLinks.map((link) => (
               <LinkCard
                 key={link.id}
                 folder={folder}
@@ -305,6 +315,14 @@ export default function FolderSection({
               />
             ))}
           </div>
+          {capped && (
+            <button className="show-more" onClick={() => setShowAll(true)}>
+              Show all {links.length} websites <span className="muted-inline">({links.length - SHOW_FIRST} more)</span>
+            </button>
+          )}
+          {showAll && links.length > SHOW_FIRST + 6 && !f && !query.trim() && (
+            <button className="show-more" onClick={() => { setShowAll(false); document.getElementById(`folder-${folder.id}`)?.scrollIntoView({ block: "start" }); }}>Show fewer</button>
+          )}
           </>
         )
       )}

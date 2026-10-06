@@ -178,7 +178,12 @@ export default function SearchBox({
       )}
       {showList && (
         <div className="search-suggest" role="listbox">
-          {!q && <div className="ss-head">Recent searches</div>}
+          {!q && (
+            <div className="ss-head">
+              Recent searches
+              <button className="link-btn" onMouseDown={(e) => { e.preventDefault(); setRecent([]); try { localStorage.removeItem(RECENT_KEY); } catch {} }}>Clear all</button>
+            </div>
+          )}
           {items.map((s, i) => (
             <div
               key={i}

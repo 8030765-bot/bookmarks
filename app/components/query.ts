@@ -176,18 +176,22 @@ export interface MatchContext {
   avgRating: (linkId: string) => number;
   since: number;
   me: string | null;
+  /** also look in descriptions, tips and notes (default yes) */
+  deep?: boolean;
 }
 
 /** Everything about a link that plain words can match. */
-export function haystackOf(link: Link, folder: Folder, pref?: LinkPref) {
-  return [link.name, link.url, link.notes || "", link.tip || "", folder.name, link.addedBy || "", link.keyword || "", pref?.note || "", pref?.rename || "", ...(link.tags || [])]
-    .join(" ").toLowerCase();
+export function haystackOf(link: Link, folder: Folder, pref?: LinkPref, deep = true) {
+  const words = deep
+    ? [link.name, link.url, link.notes || "", link.tip || "", folder.name, link.addedBy || "", link.keyword || "", pref?.note || "", pref?.rename || "", ...(link.tags || [])]
+    : [link.name, link.url, folder.name, link.keyword || "", pref?.rename || "", ...(link.tags || [])];
+  return words.join(" ").toLowerCase();
 }
 
 export function matchLink(q: ParsedQuery, link: Link, folder: Folder, ctx: MatchContext, wordMatch?: (hay: string, word: string) => boolean): boolean {
   if (!q.active) return true;
   const pref = ctx.prefs[link.id];
-  const hay = haystackOf(link, folder, pref);
+  const hay = haystackOf(link, folder, pref, ctx.deep !== false);
   const has = wordMatch || ((h: string, w: string) => h.includes(w));
   if (!q.words.every((w) => has(hay, w))) return false;
   if (!q.phrases.every((p) => hay.includes(p))) return false;

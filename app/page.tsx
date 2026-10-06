@@ -43,6 +43,7 @@ import {
 } from "./components/Fun";
 import SideNav from "./components/SideNav";
 import { recordUndo, redoLast, undoLast } from "./components/undo";
+import { TOOL_LIST } from "./components/tools/list";
 import { AddAnywhereModal, WeekChanges, downloadBookmarksHtml, downloadFolderCsv, embedCode } from "./components/DataViews";
 import { BottomNav, InstallModal, PullIndicator, buzz, usePullToRefresh } from "./components/Mobile";
 import { FeedbackModal, Tour, WhatsNewPopup, useFirstVisit, useLeaveWarning, useWhatsNewAfterUpdate } from "./components/Help";
@@ -109,9 +110,10 @@ function diffLook(base: Look, next: Look): Partial<Look> {
   return Object.fromEntries(Object.entries(next).filter(([k, v]) => base[k as keyof Look] !== v)) as Partial<Look>;
 }
 
-type QuickTab = "recent" | "later" | "starred" | "following" | "top" | "visited" | "new";
+type QuickTab = "recent" | "week" | "later" | "starred" | "following" | "top" | "visited" | "new";
 const QUICK_TABS: { id: QuickTab; label: string; icon: string }[] = [
   { id: "recent", label: "Recent", icon: "clock" },
+  { id: "week", label: "My week", icon: "chart" },
   { id: "later", label: "Read later", icon: "note" },
   { id: "starred", label: "Starred", icon: "star" },
   { id: "following", label: "Following", icon: "users" },
@@ -121,9 +123,11 @@ const QUICK_TABS: { id: QuickTab; label: string; icon: string }[] = [
 ];
 
 /** One compact row of shortcuts with tabs, instead of four stacked rows. */
-function QuickTabs({ lists, tab, setTab, onOpen, newTab }: {
+function QuickTabs({ lists, tab, setTab, onOpen, newTab, weekCounts }: {
   lists: Record<QuickTab, LinkRef[]>; tab: QuickTab; setTab: (t: QuickTab) => void;
   onOpen: (f: Folder, l: Link) => void; newTab: boolean;
+  /** how often you opened each link this week */
+  weekCounts: Map<string, number>;
 }) {
   const available = QUICK_TABS.filter((t) => lists[t.id].length > 0);
   if (!available.length) {
@@ -150,8 +154,9 @@ function QuickTabs({ lists, tab, setTab, onOpen, newTab }: {
             rel="noopener noreferrer"
             onClick={() => onOpen(folder, link)}
           >
-            <Favicon url={link.url} name={link.name} size={16} />
+            <Favicon url={link.url} name={link.name} size={16} custom={link.iconImg} />
             {link.name}
+            {active === "week" && <span className="quick-num" title="Times you opened it this week">{weekCounts.get(link.id)}×</span>}
             {active === "visited" && <span className="quick-num">{link.clicks}</span>}
             {active === "top" && <span className="quick-num">♥ {link.likes?.length}</span>}
           </a>
@@ -162,6 +167,9 @@ function QuickTabs({ lists, tab, setTab, onOpen, newTab }: {
 }
 
 type HistoryItem = { folderId: string; linkId: string; at: number };
+/** Every time you open a link (this device, last 300): for "My week". */
+type OpenLog = { id: string; at: number }[];
+const OPENS_KEY = "opens";
 
 export default function HomePage() {
   const [data, setData] = useState<BookmarksData | null>(null);
@@ -232,6 +240,9 @@ export default function HomePage() {
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [quickTab, setQuickTab] = useState<QuickTab>("recent");
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [opens, setOpens] = useState<OpenLog>([]);
+  /** search descriptions, tips and notes too (on by default) */
+  const [searchNotes, setSearchNotes] = useState(true);
   const [showTags, setShowTags] = useState(false);
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
@@ -273,6 +284,8 @@ export default function HomePage() {
     setCollapsed(readLocal("collapsed", {}));
     setQuickTab(readLocal("quickTab", "recent"));
     setHistory(readLocal("history", []));
+    setOpens(readLocal<OpenLog>(OPENS_KEY, []));
+    setSearchNotes(readLocal("searchNotes", true));
     setShowTags(readLocal("showTags", false));
     setDismissed(readLocal<string | null>("dismissedAnnouncement", null));
     setFolderViewPrefs(readLocal("folderViews", {}));
@@ -893,6 +906,18 @@ export default function HomePage() {
     const byId = new Map(allRefs.map((r) => [r.link.id, r]));
     return history.map((h) => byId.get(h.linkId)).filter((r): r is LinkRef => !!r).slice(0, 10);
   }, [history, allRefs]);
+  const weekCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    const week = Date.now() - 7 * 86400_000;
+    opens.forEach((o) => { if (o.at > week) m.set(o.id, (m.get(o.id) || 0) + 1); });
+    return m;
+  }, [opens]);
+  const myWeek: LinkRef[] = useMemo(() => {
+    const byId = new Map(allRefs.map((r) => [r.link.id, r]));
+    // only worth a tab once something was opened more than once
+    if (!Array.from(weekCounts.values()).some((n) => n > 1)) return [];
+    return Array.from(weekCounts).sort((a, b) => b[1] - a[1]).map(([id]) => byId.get(id)).filter((r): r is LinkRef => !!r).slice(0, 8);
+  }, [weekCounts, allRefs]);
   const readLater = allRefs.filter((r) => personal.links[r.link.id]?.later);
   // newest links from people you follow
   const followingAdds = personal.following.length
@@ -914,7 +939,7 @@ export default function HomePage() {
   const parsed = useMemo(() => parseQuery(search), [search]);
   const q = search.trim().toLowerCase();
   const filtering = parsed.active || tagFilters.length > 0;
-  const matchCtx: MatchContext = { prefs: personal.links, favorites: favoriteSet, since, me: user, avgRating: (id) => aggRatings[id]?.avg || 0 };
+  const matchCtx: MatchContext = { prefs: personal.links, favorites: favoriteSet, since, me: user, avgRating: (id) => aggRatings[id]?.avg || 0, deep: searchNotes };
   const folderPrefs = personal.folders;
   const spaces = useMemo(
     () => Array.from(new Set((data?.folders || []).map((f) => f.space).filter((x): x is string => !!x))).sort(),
@@ -1161,6 +1186,12 @@ export default function HomePage() {
 
   // ---------- actions ----------
   function remember(folder: Folder, link: Link) {
+    const week = Date.now() - 7 * 86400_000;
+    setOpens((o) => {
+      const next = [{ id: link.id, at: Date.now() }, ...o.filter((x) => x.at > week)].slice(0, 300);
+      writeLocal(OPENS_KEY, next);
+      return next;
+    });
     setHistory((h) => {
       const next = [{ folderId: folder.id, linkId: link.id, at: Date.now() }, ...h.filter((x) => x.linkId !== link.id)].slice(0, 20);
       writeLocal("history", next);
@@ -1734,6 +1765,34 @@ export default function HomePage() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  // coming back to the page (reload, or Back after opening a site in this tab) puts you where you were
+  const scrollRestored = useRef(false);
+  useEffect(() => {
+    if (!data || scrollRestored.current) return;
+    scrollRestored.current = true;
+    if (location.hash) return; // a link to one folder or website wins
+    let y = 0;
+    try { y = Number(sessionStorage.getItem("scrollY") || 0); } catch {}
+    if (y < 200) return;
+    // wait until the page is tall enough (folders and pictures are still arriving), for up to 3 seconds
+    let tries = 0;
+    const attempt = () => {
+      if (window.scrollY > 50) return; // they've started scrolling themselves
+      if (document.documentElement.scrollHeight >= y + window.innerHeight * 0.5 || tries > 30) { window.scrollTo({ top: y }); return; }
+      tries++;
+      setTimeout(attempt, 100);
+    };
+    setTimeout(attempt, 50);
+  }, [data]);
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const save = () => { try { sessionStorage.setItem("scrollY", String(Math.round(window.scrollY))); } catch {} };
+    const onScroll = () => { clearTimeout(t); t = setTimeout(save, 250); };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("pagehide", save);
+    return () => { clearTimeout(t); window.removeEventListener("scroll", onScroll); window.removeEventListener("pagehide", save); };
+  }, []);
+
   // drag a link in from another tab and drop it anywhere (folders handle their own drops)
   const [dropHint, setDropHint] = useState(false);
   const onDropUrls = useRef<(urls: string[]) => void>();
@@ -1827,6 +1886,12 @@ export default function HomePage() {
       ...(filtering ? [cmd("saveview", "Save this search as a view", "plus", saveCurrentView), cmd("copysearch", "Copy a link to this search", "share", copySearchLink)] : []),
       ...(adminUnlocked ? [cmd("smart", "New smart folder", "bulb", () => openNewFolder(true)), cmd("managetags", "Manage tags", "tag", () => setModal({ type: "tags" })), cmd("undo", "Undo the last change", "undo", undo)] : []),
       cmd("status", "Site status", "chart", () => { location.href = "/status"; }),
+      ...([["people", "People", "users"], ["community", "Community page", "trophy"], ["wiki", "Wiki", "note"], ["tools", "Tools page", "grid"], ["help", "Help & questions", "info"],
+        ["rules", "Site rules", "info"], ["privacy", "Privacy", "lock"], ["changelog", "What's changed (changelog)", "bell"], ["chat", "Chat on its own page", "chat"]] as const)
+        .map(([path, label, icon]) => cmd(`page-${path}`, `Go to: ${label}`, icon, () => { location.href = `/${path}`; })),
+      cmd("drawer", "Tools drawer", "grid", () => openTools(), "O"),
+      ...TOOL_LIST.map((t) => cmd(`tool-${t.id}`, `${t.emoji} ${t.name}`, "grid", () => openTools(t.id), t.group)),
+      ...(user ? [cmd("account", "Account & security (password, logins, privacy)", "lock", () => setModal({ type: "account" }))] : []),
       user
         ? cmd("profile", "Edit my profile", "user", () => setModal({ type: "profileEdit" }))
         : cmd("signup", "Create an account", "user", () => openLogin("signup")),
@@ -1945,7 +2010,8 @@ export default function HomePage() {
   );
   const quickBlock = (
             <QuickTabs
-              lists={{ recent: recentOpened, later: readLater, starred: favorites, following: followingAdds, top: topRated, visited: mostVisited, new: recent }}
+              lists={{ recent: recentOpened.slice(0, 8), week: myWeek, later: readLater, starred: favorites, following: followingAdds, top: topRated, visited: mostVisited, new: recent }}
+              weekCounts={weekCounts}
               tab={quickTab}
               setTab={(t) => { setQuickTab(t); writeLocal("quickTab", t); }}
               onOpen={trackAndOpen}
@@ -2276,6 +2342,11 @@ export default function HomePage() {
                 <option value="rating">Top rated</option>
                 <option value="folder">Folder order</option>
               </select>
+              {q && (
+                <label className="check-inline" title="Also look inside descriptions, tips and your private notes">
+                  <input type="checkbox" checked={searchNotes} onChange={(e) => { setSearchNotes(e.target.checked); writeLocal("searchNotes", e.target.checked); }} /> Descriptions &amp; notes
+                </label>
+              )}
               <button className="btn-icon" title="Copy a link to this search" onClick={copySearchLink}><Icon name="share" /></button>
               <button className="btn btn-secondary btn-sm" onClick={() => { setSearch(""); setTagFilters([]); }}>Clear</button>
             </span>

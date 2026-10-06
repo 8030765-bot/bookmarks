@@ -1836,3 +1836,10 @@ main:focus{outline:none}
 .check-inline{white-space:nowrap;display:inline-flex;align-items:center;gap:.35rem;font-size:.82rem;margin-right:auto;cursor:pointer}
 .icon-preview{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;background:var(--surface-hover)}
 .fav-custom{border-radius:5px;object-fit:cover}
+
+/* ---------- QoL batch C: finding ---------- */
+.show-more{display:block;width:100%;margin-top:.6rem;padding:.55rem;border:1px dashed var(--border-light);border-radius:10px;background:none;color:var(--text);font-size:.84rem;font-weight:550}
+.show-more:hover{background:var(--surface-hover)}
+.ss-head{display:flex;justify-content:space-between;align-items:center}
+.ss-head .link-btn{font-size:.72rem}
+.results-tools .check-inline{margin-right:0;font-size:.78rem;color:var(--text-muted)}
