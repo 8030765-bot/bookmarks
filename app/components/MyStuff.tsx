@@ -17,6 +17,9 @@ export default function MyStuff({
   onToggle,
   act,
   toast,
+  user,
+  publicLists = [],
+  onPublish,
 }: {
   items: PrivateLink[];
   collapsed: boolean;
@@ -24,6 +27,10 @@ export default function MyStuff({
   onToggle: () => void;
   act: (body: Record<string, unknown>) => Promise<any>;
   toast: (msg: string, action?: { label: string; run: () => void }) => void;
+  user?: string | null;
+  /** your folders shared with logged-in members */
+  publicLists?: string[];
+  onPublish?: (list: string, on: boolean) => void;
 }) {
   const folders = useMemo(() => Array.from(new Set(items.map((i) => i.folder || ""))).filter(Boolean).sort(), [items]);
   const [current, setCurrent] = useState<string>("");
@@ -60,7 +67,7 @@ export default function MyStuff({
           <span className="fh-emoji">🔒</span>
           <span className="fh-name">My Stuff</span>
           <span className="fh-count">{items.length}</span>
-          <span className="fh-when">only you can see these</span>
+          <span className="fh-when">{publicLists.length ? `${publicLists.length} folder${publicLists.length === 1 ? "" : "s"} shared` : "only you can see these"}</span>
         </button>
         <div className="fh-actions">
           <button className="btn-icon" title="Import your browser's bookmarks file (.html)" onClick={() => fileRef.current?.click()}><Icon name="upload" /></button>
@@ -76,9 +83,26 @@ export default function MyStuff({
                 <button key={f} className={`pick ${current === f ? "on" : ""}`} onClick={() => setCurrent(f)}
                   onDoubleClick={async () => { const to = prompt(`Rename the folder “${f}” to:`, f); if (to !== null && to.trim() !== f) { await act({ action: "renameMyStuffFolder", from: f, to }); setCurrent(to.trim()); } }}
                   title="Double-click to rename">
-                  📁 {f} <em>{items.filter((i) => i.folder === f).length}</em>
+                  {publicLists.includes(f) ? "🌐" : "📁"} {f} <em>{items.filter((i) => i.folder === f).length}</em>
                 </button>
               ))}
+            </div>
+          )}
+          {current && onPublish && user && (
+            <div className="ms-share">
+              {publicLists.includes(current) ? (
+                <>
+                  <span>🌐 <strong>{current}</strong> is shared with everyone who&apos;s logged in.</span>
+                  <a className="link-btn" href={`/u/${encodeURIComponent(user)}/list/${encodeURIComponent(current)}`} target="_blank" rel="noopener">Open</a>
+                  <button className="link-btn" onClick={() => navigator.clipboard.writeText(`${location.origin}/u/${encodeURIComponent(user)}/list/${encodeURIComponent(current)}`).then(() => toast("Link copied")).catch(() => {})}>Copy link</button>
+                  <button className="link-btn" onClick={() => onPublish(current, false)}>Stop sharing</button>
+                </>
+              ) : (
+                <>
+                  <span className="muted-inline">Only you can see 📁 {current}.</span>
+                  <button className="link-btn" onClick={() => { if (confirm(`Share “${current}” with everyone who's logged in? They'll see its links at its own address, on your profile too.`)) onPublish(current, true); }}>🌐 Share this folder</button>
+                </>
+              )}
             </div>
           )}
           <form className="ms-add" onSubmit={add}>

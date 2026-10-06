@@ -7,7 +7,7 @@ import { suggestionSummary } from "./SuggestModal";
 import Favicon from "./components/Favicon";
 import { parseBookmarksHtml, pollCounts } from "./components/Community";
 import {
-  AdminLinkNote, AuditTools, Backups, ControlsTab, CsvImport, DEFAULT_REASONS, Dashboard, DangerButton, DataHealth, DataTools, Extras, FolderPermsEditor, ModPermsEditor, PeopleTab, ReportsTab,
+  AdminLinkNote, AuditTools, Backups, ControlsTab, CopyName, CsvImport, DEFAULT_REASONS, Dashboard, DangerButton, DataHealth, DataTools, Extras, FolderPermsEditor, ModPermsEditor, PeopleTab, ReportsTab,
 } from "./AdminExtras";
 
 type Role = "owner" | "admin" | "mod" | null;
@@ -222,7 +222,7 @@ function RolesTab({ admin, info, refreshInfo, showToast }: { admin: (a: string, 
             <div key={u.username} className="admin-row">
               <Avatar name={u.username} size={28} />
               <div className="row-main">
-                <div className="row-title">{u.username}{isMe && <em> (you)</em>}{r && <span className={`pill role-${r}`}>{ROLE_LABELS[r]}</span>}</div>
+                <div className="row-title">{u.username}<CopyName name={u.username} toast={showToast} />{isMe && <em> (you)</em>}{r && <span className={`pill role-${r}`}>{ROLE_LABELS[r]}</span>}</div>
                 <div className="row-sub">joined {timeAgo(u.createdAt)}</div>
               </div>
               {r === "owner" ? (
@@ -346,17 +346,17 @@ function SuggestionsTab({
   const approve = (x: Suggestion) => act(x.kind === "other" ? "approveSuggestion" : "approveSuggestion", x, x.kind === "other" ? {} : { overrides: edits[x.id] || {} });
   const decline = (x: Suggestion, reason: string) => act("rejectSuggestion", x, { reason });
 
-  // keyboard: J/K move, A approve, D decline with the first ready-made reason, X pick
+  // keyboard: J/K (or ↓/↑, → to skip) move, A approve, D or R decline with the first ready-made reason, X pick
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (filter !== "pending" || t.closest?.("input, textarea, select") || e.metaKey || e.ctrlKey || e.altKey) return;
       const k = e.key.toLowerCase();
       const cur = pendingList[focus];
-      if (k === "j") { e.preventDefault(); setFocus((f) => Math.min(pendingList.length - 1, f + 1)); }
+      if (k === "j" || e.key === "ArrowRight") { e.preventDefault(); setFocus((f) => Math.min(pendingList.length - 1, f + 1)); }
       else if (k === "k") { e.preventDefault(); setFocus((f) => Math.max(0, f - 1)); }
       else if (k === "a" && cur) { e.preventDefault(); approve(cur).then((ok) => ok && showToast(`Approved — ${suggestionSummary(cur)}`)); }
-      else if (k === "d" && cur) { e.preventDefault(); decline(cur, reasons[0]).then((ok) => ok && showToast("Declined")); }
+      else if ((k === "d" || k === "r") && cur) { e.preventDefault(); decline(cur, reasons[0]).then((ok) => ok && showToast("Declined")); }
       else if (k === "x" && cur) { e.preventDefault(); setPicked((p) => { const n = new Set(p); if (n.has(cur.id)) n.delete(cur.id); else n.add(cur.id); return n; }); }
     };
     window.addEventListener("keydown", onKey);
@@ -1188,11 +1188,13 @@ function ActivityTab({ data, audit, admin, refresh, toast }: { data: BookmarksDa
 }
 function ActivityInner({ data }: { data: BookmarksData }) {
   const [type, setType] = useState("all");
-  const items = data.activity || [];
-  const types = Array.from(new Set(items.map((a) => a.action)));
+  const [q, setQ] = useState("");
+  const items = (data.activity || []).filter((a) => !q.trim() || `${a.by || ""} ${a.detail}`.toLowerCase().includes(q.trim().toLowerCase()));
+  const types = Array.from(new Set((data.activity || []).map((a) => a.action)));
   return (
     <>
       <div className="admin-toolbar">
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by person or what happened…" aria-label="Search activity" />
         <select value={type} onChange={(e) => setType(e.target.value)}>
           <option value="all">All activity ({items.length})</option>
           {types.map((t) => <option key={t} value={t}>{t}</option>)}

@@ -36,6 +36,8 @@ export interface LinkCardActions {
   toast: (msg: string) => void;
   /** drop the link into a chat message */
   shareToChat?: (link: Link) => void;
+  /** send it to someone you follow (a nudge, not a message) */
+  sendToFriend?: (l: Link) => void;
   /** say thanks to whoever added it */
   thank?: (link: Link) => void;
   /** suggest a short public note for a moderator to approve */

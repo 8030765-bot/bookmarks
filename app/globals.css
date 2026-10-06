@@ -1884,3 +1884,23 @@ main:focus{outline:none}
 .chat-loading .skeleton{height:34px;border-radius:12px}
 .chat-loading .skeleton:nth-child(2n){width:70%;align-self:flex-end}
 .chat-loading .skeleton:nth-child(2n+1){width:60%}
+
+/* ---------- QoL batch G: sharing ---------- */
+.ms-share{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;font-size:.8rem;padding:.45rem .6rem;margin-bottom:.6rem;border-radius:8px;background:var(--surface-hover)}
+.send-list{display:flex;flex-direction:column;gap:.3rem;max-height:320px;overflow:auto;margin-top:.5rem}
+.send-row{display:flex;align-items:center;gap:.6rem;padding:.45rem .6rem;border-radius:10px;border:1px solid var(--border);background:var(--surface);text-align:left}
+.send-row:hover{background:var(--surface-hover)}
+.send-row .muted-inline{margin-left:auto}
+.shared-folder{padding-top:2rem}
+.list-page .cards{margin-top:1rem}
+@media print{
+  :root[data-print-folder] .hero,:root[data-print-folder] .my-stuff,:root[data-print-folder] main.folders>.folder-card:not(.print-me),:root[data-print-folder] .results-bar,:root[data-print-folder] .show-more,:root[data-print-folder] .focus-pill{display:none!important}
+  :root[data-print-folder] .folder-card.print-me{border:none}
+}
+.list-head{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;margin-top:1rem}.list-head h1{font-size:1.4rem;margin:0}.list-head .pp-actions{margin-left:auto}
+
+/* ---------- QoL batch G: admin ---------- */
+.copy-name{cursor:pointer;font-size:.72rem;opacity:.45;margin:0 .25rem;user-select:none}
+.copy-name:hover,.copy-name:focus-visible{opacity:1;outline:none}
+.canned{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.35rem}
+.canned .pick{font-size:.72rem;display:inline-flex;gap:.3rem;align-items:center}

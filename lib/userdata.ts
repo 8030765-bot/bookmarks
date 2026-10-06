@@ -59,7 +59,7 @@ export interface PrivateLink {
 }
 export interface Notification {
   id: string;
-  kind: "mention" | "reply" | "suggestion" | "like" | "comment" | "dm" | "role" | "system" | "follow";
+  kind: "mention" | "reply" | "suggestion" | "like" | "comment" | "dm" | "role" | "system" | "follow" | "share";
   text: string;
   at: string;
   read?: boolean;
@@ -122,6 +122,8 @@ export interface UserData {
   rulesAcceptedAt?: string;
   /** every day, no pop-ups, sounds or phone alerts between these times */
   quietHours?: QuietHours;
+  /** My Stuff folders anyone logged in can see at /u/name/list/folder */
+  publicLists?: string[];
 }
 export interface SavedMessage { id: string; channel: string; user: string; text: string; at: string; savedAt: string }
 
@@ -489,7 +491,7 @@ export async function clearNotifications(username: string, id?: string): Promise
 export async function restoreNotifications(username: string, list: unknown) {
   const data = await getUserData(username);
   const have = new Set(data.notifications.map((n) => n.id));
-  const kinds = new Set<string>(["mention", "reply", "suggestion", "like", "comment", "dm", "role", "system", "follow"]);
+  const kinds = new Set<string>(["mention", "reply", "suggestion", "like", "comment", "dm", "role", "system", "follow", "share"]);
   const back: Notification[] = [];
   for (const raw of (Array.isArray(list) ? list : []).slice(0, MAX_NOTIFS) as Record<string, unknown>[]) {
     const id = String(raw?.id || "");
@@ -503,12 +505,31 @@ export async function restoreNotifications(username: string, list: unknown) {
   await save(username, data);
   return data.notifications;
 }
-const KINDS: NotifyKind[] = ["mention", "reply", "suggestion", "like", "comment", "dm", "role", "system", "follow"];
+const KINDS: NotifyKind[] = ["mention", "reply", "suggestion", "like", "comment", "dm", "role", "system", "follow", "share"];
 export async function setNotifyPrefs(username: string, patch: Record<string, unknown>) {
   const data = await getUserData(username);
   for (const k of KINDS) if (typeof patch[k] === "boolean") data.notifyPrefs[k] = patch[k] as boolean;
   await save(username, data);
   return data.notifyPrefs;
+}
+/** Share one of your My Stuff folders with everyone who's logged in (or stop sharing it). */
+export async function setPublicList(username: string, name: unknown, on: boolean) {
+  const data = await getUserData(username);
+  const list = String(name || "").trim().slice(0, 40);
+  if (!list) throw new Error("Put the links in a named folder first, then share that folder");
+  if (on && !data.myStuff.some((l) => (l.folder || "") === list)) throw new Error("That folder is empty");
+  const set = new Set(data.publicLists || []);
+  if (on) set.add(list); else set.delete(list);
+  data.publicLists = Array.from(set).slice(0, 10);
+  if (!data.publicLists.length) delete data.publicLists;
+  await save(username, data);
+  return data.publicLists || [];
+}
+/** A shared My Stuff folder, or null if it isn't shared. */
+export async function getPublicList(username: string, name: string) {
+  const data = await getUserData(username);
+  if (!data.publicLists?.includes(name)) return null;
+  return data.myStuff.filter((l) => (l.folder || "") === name).map((l) => ({ id: l.id, name: l.name, url: l.url }));
 }
 export async function setQuietHours(username: string, q: unknown) {
   const data = await getUserData(username);
@@ -536,7 +557,7 @@ export async function setDnd(username: string, until: string | null) {
 
 const PUSH_TITLES: Partial<Record<NotifyKind, string>> = {
   mention: "You were mentioned", reply: "New reply", like: "Someone liked your link", follow: "New in something you follow",
-  suggestion: "Your suggestion", role: "Your role changed", system: "Theo's Bookmarks",
+  suggestion: "Your suggestion", role: "Your role changed", system: "Theo's Bookmarks", share: "A website for you",
 };
 /** Add a notification to someone's inbox (unless they turned that kind off) and push it to their devices. */
 export async function notify(toUsername: string, n: Omit<Notification, "id" | "at" | "read">) {

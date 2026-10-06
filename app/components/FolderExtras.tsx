@@ -41,6 +41,8 @@ export function FolderMenu({
     openAll: () => void;
     copyLink: () => void;
     copyMarkdown: () => void;
+    copyPlain: () => void;
+    print: () => void;
     csv: () => void;
     embed: () => void;
     info: () => void;
@@ -90,7 +92,9 @@ export function FolderMenu({
         {linkCount > 0 && <button onClick={run(actions.random)}><Icon name="shuffle" /> Random website from here</button>}
         {linkCount > 0 && <button onClick={run(actions.openAll)}><Icon name="external" /> Open all</button>}
         <button onClick={run(actions.copyLink)}><Icon name="share" /> Copy link to this folder</button>
+        {linkCount > 0 && <button onClick={run(actions.copyPlain)}><Icon name="copy" /> Copy as a plain list</button>}
         {linkCount > 0 && <button onClick={run(actions.copyMarkdown)}><Icon name="link" /> Copy as a Markdown list</button>}
+        {linkCount > 0 && <button onClick={run(actions.print)}><Icon name="note" /> Print this folder</button>}
         {linkCount > 0 && <button onClick={run(actions.csv)}><Icon name="download" /> Download as a spreadsheet</button>}
         <button onClick={run(actions.embed)}><Icon name="share" /> Copy embed code</button>
         <div className="menu-sep" />

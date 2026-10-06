@@ -226,6 +226,50 @@ export function NameCheck({ name, current }: { name: string; current?: string })
   return <div className={`name-check ${res.available ? "ok" : "bad"}`} aria-live="polite">{res.available ? `✓ “${n}” is free` : `✗ ${res.reason}`}</div>;
 }
 
+/** "Send to a friend": pick someone you follow; they get a notification about the website. */
+export function SendToFriend({ link, following, onSend, onClose }: {
+  link: { name: string };
+  /** lowercase usernames you follow */
+  following: string[];
+  onSend: (to: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const list = following.filter((u) => u.includes(q.trim().toLowerCase())).slice(0, 30);
+  return (
+    <div className="modal-overlay" onClick={() => !busy && onClose()}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2>Send “{link.name}” to…</h2>
+        <p className="modal-text">They get a notification saying you think they&apos;d like it. You can send websites to people you follow.</p>
+        {following.length === 0 ? (
+          <div className="admin-empty">You don&apos;t follow anyone yet — follow people from their profile first.</div>
+        ) : (
+          <>
+            {following.length > 6 && <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find someone…" autoFocus />}
+            <div className="send-list">
+              {list.map((u) => (
+                <button key={u} className="send-row" disabled={!!busy} onClick={async () => {
+                  setBusy(u);
+                  setError("");
+                  try { await onSend(u); } catch (e: any) { setError(e.message); } finally { setBusy(""); }
+                }}>
+                  <Avatar name={u} size={28} /> <span>{u}</span>
+                  <span className="muted-inline">{busy === u ? "Sending…" : "Send"}</span>
+                </button>
+              ))}
+              {list.length === 0 && <div className="admin-empty">Nobody matches “{q}”.</div>}
+            </div>
+          </>
+        )}
+        {error && <div className="field-warn">{error}</div>}
+        <div className="modal-actions"><button className="btn btn-secondary" onClick={onClose}>Close</button></div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- QR code ---------- */
 export function QrCode({ text, size = 180 }: { text: string; size?: number }) {
   const grid = useMemo(() => { try { return makeQr(text); } catch { return null; } }, [text]);

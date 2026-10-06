@@ -30,6 +30,8 @@ interface FullProfile {
   hidden?: boolean;
   membersOnly?: boolean;
   badges?: string[];
+  /** their shared My Stuff folders */
+  lists?: string[];
 }
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const birthdayLabel = (b: string) => { const [m, d] = b.split("-").map(Number); return `${d} ${MONTHS[m - 1] || ""}`; };
@@ -141,6 +143,12 @@ export default function ProfilePage() {
             </section>
           ) : null}
           {pr.bio && <section className="pp-section"><Markdown text={pr.bio} /></section>}
+          {p.lists?.length ? (
+            <section className="pp-section">
+              <div className="admin-h">Lists {p.self ? "you've shared" : `${p.username} shared`}</div>
+              <div className="chip-grid">{p.lists.map((l) => <Link key={l} className="pick" href={`/u/${encodeURIComponent(p.username)}/list/${encodeURIComponent(l)}`}>🌐 {l}</Link>)}</div>
+            </section>
+          ) : null}
           {pr.into?.length ? (
             <section className="pp-section">
               <div className="admin-h">Into</div>

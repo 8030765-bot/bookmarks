@@ -1,5 +1,5 @@
 "use client";
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { Folder, Link } from "@/lib/types";
 import { Icon } from "./Icon";
 import LinkCard, { Highlight } from "./LinkCard";
@@ -123,6 +123,12 @@ export default function FolderSection({
     if (typeof location === "undefined" || !location.hash.startsWith("#link-")) return false;
     return links.findIndex((l) => l.id === location.hash.slice(6)) >= SHOW_FIRST; // a link to a website further down
   });
+  // printing a folder shows all of it
+  useEffect(() => {
+    const onShowAll = (e: Event) => { if ((e as CustomEvent).detail === folder.id) setShowAll(true); };
+    window.addEventListener("show-all-folder", onShowAll);
+    return () => window.removeEventListener("show-all-folder", onShowAll);
+  }, [folder.id]);
   const capped = !showAll && !f && !query.trim() && links.length > SHOW_FIRST + 6;
   const shownLinks = capped ? links.slice(0, SHOW_FIRST) : links;
 

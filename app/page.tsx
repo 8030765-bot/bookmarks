@@ -11,7 +11,7 @@ import { FolderInfo, FolderMenu, FolderMenuState, PickModal, TagManager, folderM
 import { MatchContext, closestWord, exactMatch, forgivingMatch, matchLink, parseQuery, relevance } from "./components/query";
 import SearchBox from "./components/SearchBox";
 import MyStuff from "./components/MyStuff";
-import { Avatar, MiniProfile, NameCheck, PasswordStrength, todayMD, useFacesSync } from "./components/People";
+import { Avatar, MiniProfile, NameCheck, PasswordStrength, SendToFriend, todayMD, useFacesSync } from "./components/People";
 const AccountModal = dynamic(() => import("./components/Account"), { ssr: false });
 const ClubsModal = dynamic(() => import("./components/Clubs"), { ssr: false });
 import ScrollMap from "./components/ScrollMap";
@@ -168,6 +168,11 @@ function QuickTabs({ lists, tab, setTab, onOpen, newTab, weekCounts }: {
 }
 
 type HistoryItem = { folderId: string; linkId: string; at: number };
+/** "3 suggestions · 2 pictures · 1 report" */
+function queueSummary(q: Record<string, number>) {
+  const names: [string, string, string][] = [["suggestions", "suggestion", "suggestions"], ["pictures", "picture", "pictures"], ["reports", "report", "reports"], ["messages", "message", "messages"], ["notes", "note", "notes"]];
+  return names.filter(([k]) => q[k]).map(([k, one, many]) => `${q[k]} ${q[k] === 1 ? one : many}`).join(" · ");
+}
 /** Every time you open a link (this device, last 300): for "My week". */
 type OpenLog = { id: string; at: number }[];
 const OPENS_KEY = "opens";
@@ -217,11 +222,14 @@ export default function HomePage() {
   const [authExtras, setAuthExtras] = useState<{ beta: boolean; betaFlags: string[]; signups: string }>({ beta: false, betaFlags: [], signups: "open" });
   const [fInvite, setFInvite] = useState("");
   // admins can look at the site the way members see it
-  const [asMember, setAsMember] = useState(false);
-  const asMemberRef = useRef(false);
+  // admins previewing the site as a member, or as someone who isn't logged in
+  const [asMember, setAsMember] = useState<"" | "member" | "guest">("");
+  const asMemberRef = useRef<"" | "member" | "guest">("");
   const queuedRef = useRef<string | null>(null);
   const lastErrorRef = useRef("");
   const [staffCount, setStaffCount] = useState(0);
+  // what's waiting, by kind (for the admin button's tooltip and which tab it opens)
+  const [staffQueue, setStaffQueue] = useState<Record<string, number>>({});
   const [role, setRole] = useState<"owner" | "admin" | "mod" | null>(null);
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileView, setProfileView] = useState<string | null>(null);
@@ -413,7 +421,7 @@ export default function HomePage() {
     }
     try {
       setError(null);
-      const res = await fetch(asMemberRef.current ? "/api/bookmarks?asMember=1" : "/api/bookmarks", { cache: "no-store" });
+      const res = await fetch(asMemberRef.current ? `/api/bookmarks?as=${asMemberRef.current}` : "/api/bookmarks", { cache: "no-store" });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (json.quota) reportStatus("quota");
@@ -450,13 +458,14 @@ export default function HomePage() {
   const serverRev = useRev("bookmarks");
   useEffect(() => {
     if (serverRev < 0 || serverRev <= revRef.current) return;
-    fetch(asMemberRef.current ? "/api/bookmarks?asMember=1" : "/api/bookmarks", { cache: "no-store" }).then((r) => r.json()).then(applyIfNewer).catch(() => {});
+    fetch(asMemberRef.current ? `/api/bookmarks?as=${asMemberRef.current}` : "/api/bookmarks", { cache: "no-store" }).then((r) => r.json()).then(applyIfNewer).catch(() => {});
   }, [serverRev, applyIfNewer]);
 
   const presence = usePresence(user);
   const community = useCommunityInfo(user);
   // tools drawer (O), and the focus timer that rings even when it's closed
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [sendLink, setSendLink] = useState<Link | null>(null);
   const [toolsTool, setToolsTool] = useState<string | null>(null);
   const openTools = (tool: string | null = null) => { setToolsTool(tool); setToolsOpen(true); };
   useTimerAlarm(useCallback((m: string) => showToast(m, undefined, 6000), [showToast]));
@@ -592,15 +601,18 @@ export default function HomePage() {
   // things waiting for staff, for the badge on the Admin button
   const loadStaffCount = useCallback(() => {
     if (!role) { setStaffCount(0); return; }
-    fetch("/api/admin", { cache: "no-store" }).then((r) => r.json()).then((j) => setStaffCount(Number(j.count) || 0)).catch(() => {});
+    fetch("/api/admin", { cache: "no-store" }).then((r) => r.json()).then((j) => {
+      setStaffCount(Number(j.count) || 0);
+      setStaffQueue({ suggestions: j.suggestions || 0, pictures: j.pictures || 0, reports: j.reports || 0, messages: j.messages || 0, notes: j.notes || 0 });
+    }).catch(() => {});
   }, [role]);
   useEffect(() => { loadStaffCount(); }, [loadStaffCount]);
   useOnRevChange("suggestions", loadStaffCount);
-  const toggleAsMember = () => {
-    const next = !asMember;
+  const toggleAsMember = (mode: "member" | "guest" = "member") => {
+    const next = asMember ? "" : mode;
     asMemberRef.current = next;
     setAsMember(next);
-    if (next) { setAdminOpen(false); setAdminUnlocked(false); showToast("Viewing the site as a member — use the ⋯ menu to go back"); }
+    if (next) { setAdminOpen(false); setAdminUnlocked(false); showToast(`Viewing the site as ${next === "guest" ? "someone who isn't logged in" : "a member"} — use the ⋯ menu to go back`); }
     else { setAdminUnlocked(!!role); showToast("Back to admin view"); }
     load();
   };
@@ -669,6 +681,16 @@ export default function HomePage() {
     openAdd(undefined, url);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
+
+  // ?login=1 (from pages that need an account) opens the login box
+  useEffect(() => {
+    if (loading) return;
+    const params = new URLSearchParams(location.search);
+    if (params.get("login") !== "1") return;
+    params.delete("login");
+    window.history.replaceState(null, "", `${location.pathname}${params.toString() ? `?${params}` : ""}${location.hash}`);
+    if (!user) openLogin();
+  }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ?edit=profile (from your profile page) opens the profile editor
   useEffect(() => {
@@ -1474,6 +1496,7 @@ export default function HomePage() {
         },
       });
     },
+    sendToFriend: user ? (l) => setSendLink(l) : undefined,
     shareToChat: (l) => {
       if (!user) { showToast("Log in to chat"); openLogin(); return; }
       setChatTarget({ text: `${l.name} ${l.url}` });
@@ -1571,8 +1594,22 @@ export default function HomePage() {
     if (latestActivity) { setSeenActivity(latestActivity); writeLocal("seenActivity", latestActivity); }
   }
   function shareFolder(f: Folder) {
-    const url = `${location.origin}${location.pathname}#folder-${f.id}`;
-    navigator.clipboard.writeText(url).then(() => showToast(`Link to ${f.name} copied`)).catch(() => showToast(url));
+    // /f/… shows a preview card (name, how many websites) when pasted into chat apps, then opens the folder
+    const url = `${location.origin}/f/${f.id}`;
+    navigator.clipboard.writeText(url).then(() => showToast(`Link to ${f.name} copied — it shows a preview when you paste it`)).catch(() => showToast(url));
+  }
+  /** Print just one folder (all of it, even if it's long). */
+  function printFolder(f: Folder) {
+    toggleCollapsed(f.id, false);
+    window.dispatchEvent(new CustomEvent("show-all-folder", { detail: f.id }));
+    const root = document.documentElement;
+    setTimeout(() => {
+      root.setAttribute("data-print-folder", f.id);
+      document.getElementById(`folder-${f.id}`)?.classList.add("print-me");
+      const done = () => { root.removeAttribute("data-print-folder"); document.getElementById(`folder-${f.id}`)?.classList.remove("print-me"); window.removeEventListener("afterprint", done); };
+      window.addEventListener("afterprint", done);
+      window.print();
+    }, 150);
   }
 
   // ---------- admin + auth ----------
@@ -2079,7 +2116,7 @@ export default function HomePage() {
       )}
       {asMember && (
         <div className="offline-bar member-bar" role="status">
-          👀 You&apos;re seeing the site as a member does. <button className="link-btn" onClick={toggleAsMember}>Back to admin view</button>
+          👀 You&apos;re seeing the site as {asMember === "guest" ? "someone who isn't logged in" : "a member"} does. <button className="link-btn" onClick={() => toggleAsMember()}>Back to admin view</button>
         </div>
       )}
       <div className="topbar" ref={topbarRef}>
@@ -2130,7 +2167,10 @@ export default function HomePage() {
                     {communityOn && <button onClick={() => { setMoreMenu(false); location.href = "/community"; }}><Icon name="users" /> Community page</button>}
                     {data?.settings?.suggestionsEnabled !== false && <button onClick={() => { setMoreMenu(false); setSuggest({}); }}><Icon name="bulb" /> Suggest a change</button>}
                     {(role === "owner" || role === "admin") && (
-                      <button onClick={() => { setMoreMenu(false); toggleAsMember(); }}><Icon name="eye" /> {asMember ? "Back to admin view" : "View as a member"}</button>
+                      <>
+                        <button onClick={() => { setMoreMenu(false); toggleAsMember("member"); }}><Icon name="eye" /> {asMember ? "Back to admin view" : "View as a member"}</button>
+                        {!asMember && <button onClick={() => { setMoreMenu(false); toggleAsMember("guest"); }}><Icon name="eye" /> View as a guest (not logged in)</button>}
+                      </>
                     )}
                     {user && <button onClick={() => { setMoreMenu(false); setModal({ type: "profileEdit" }); }}><Icon name="user" /> Edit profile</button>}
                     <button onClick={() => { setMoreMenu(false); openWhatsNew(); }}><Icon name="chart" /> What&apos;s new {hasNews && <span className="dot-inline" />}<span className="kbd">W</span></button>
@@ -2158,7 +2198,14 @@ export default function HomePage() {
                 </>
               )}
             </div>
-            <button className={`icon-btn ${showAdmin ? "on" : ""} ${adminUnlocked ? "unlocked" : ""}`} title={adminUnlocked ? `Admin panel${staffCount ? ` — ${staffCount} waiting for review` : ""}` : "Admin login"} onClick={toggleAdmin}>
+            <button className={`icon-btn ${showAdmin ? "on" : ""} ${adminUnlocked ? "unlocked" : ""}`} title={adminUnlocked ? `Admin panel${staffCount ? ` — waiting: ${queueSummary(staffQueue)}` : ""}` : "Admin login"} onClick={() => {
+              // open on whatever needs looking at
+              if (adminUnlocked && !showAdmin && staffCount) {
+                const tab = staffQueue.suggestions >= (staffQueue.pictures + staffQueue.reports + staffQueue.messages) ? "suggestions" : staffQueue.notes && !staffQueue.pictures && !staffQueue.reports && !staffQueue.messages ? "community" : "reports";
+                try { sessionStorage.setItem("adminTab", tab); } catch {}
+              }
+              toggleAdmin();
+            }}>
               <Icon name="lock" />
               {adminUnlocked && staffCount > 0 && <span className="icon-badge">{staffCount > 99 ? "99+" : staffCount}</span>}
             </button>
@@ -2423,6 +2470,17 @@ export default function HomePage() {
               onToggle={() => toggleCollapsed("__mystuff")}
               act={personal.myStuffAction}
               toast={showToast}
+              user={user}
+              publicLists={personal.publicLists}
+              onPublish={async (list, on) => {
+                const j = await personal.myStuffAction({ action: "publishList", list, on });
+                if (j.error) { showToast(j.error); return; }
+                personal.reload();
+                if (on) {
+                  const url = `${location.origin}/u/${encodeURIComponent(user!)}/list/${encodeURIComponent(list)}`;
+                  navigator.clipboard.writeText(url).then(() => showToast(`“${list}” is shared with everyone who's logged in — link copied`)).catch(() => showToast(url));
+                } else showToast(`“${list}” is private again`);
+              }}
             />
           )}
           <CardContext.Provider value={cardEnv}>
@@ -2609,6 +2667,8 @@ export default function HomePage() {
               openAll: () => openAllIn([...fm.links.filter(shown), ...shortcutsFor(fm).map((r) => r.link)]),
               copyLink: () => shareFolder(fm),
               copyMarkdown: () => navigator.clipboard.writeText(folderMarkdown(fm)).then(() => showToast("Copied as a Markdown list")).catch(() => showToast("Couldn't copy")),
+              copyPlain: () => navigator.clipboard.writeText([`${fm.emoji} ${fm.name}`, ...fm.links.map((l) => `${l.name} — ${l.url}`)].join("\n")).then(() => showToast(`Copied ${fm.links.length} websites as a list`)).catch(() => showToast("Couldn't copy")),
+              print: () => printFolder(fm),
               csv: () => { downloadFolderCsv(fm); showToast("Downloaded as a spreadsheet"); },
               embed: () => navigator.clipboard.writeText(embedCode(fm)).then(() => showToast("Embed code copied — paste it into another website")).catch(() => showToast("Couldn't copy")),
               info: () => setFolderInfoId(fm.id),
@@ -2958,6 +3018,20 @@ export default function HomePage() {
       )}
       {digestOpen && data && (
         <WeeklyDigest data={data} ratings={aggRatings} onOpenLink={(f, l) => { const r = allRefs.find((x) => x.link.id === l); if (r) trackAndOpen(r.folder, r.link); }} onClose={() => setDigestOpen(false)} />
+      )}
+      {sendLink && (
+        <SendToFriend
+          link={sendLink}
+          following={personal.following}
+          onSend={async (to) => {
+            const res = await fetch("/api/me", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "sendLink", to, linkId: sendLink.id }) });
+            const j = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(j.error || "Couldn't send that");
+            showToast(`Sent “${sendLink.name}” to ${j.to} 👀`);
+            setSendLink(null);
+          }}
+          onClose={() => setSendLink(null)}
+        />
       )}
       {modal?.type === "profileEdit" && (
         <ProfileModal

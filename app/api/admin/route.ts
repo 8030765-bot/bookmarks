@@ -24,6 +24,7 @@ import { allResults, checkBatch } from "@/lib/linkcheck";
 import { deleteFeedback, listFeedback, pageRatings, replyFeedback } from "@/lib/feedback";
 import { listPending } from "@/lib/images";
 import { removePicture, reviewPicture } from "@/lib/pictures";
+import { setPublicList } from "@/lib/userdata";
 
 export const dynamic = "force-dynamic";
 
@@ -321,6 +322,16 @@ export async function POST(req: NextRequest) {
         await logMod(username, { action: `removed ${kind === "banner" ? "banner" : "picture"}`, by: me, reason: typeof body.reason === "string" ? body.reason : undefined });
         await notify(username, { kind: "system", from: me, text: `A moderator removed your profile ${kind === "banner" ? "banner" : "picture"}${body.reason ? `: ${String(body.reason).slice(0, 200)}` : ""}.` });
         await log(`${username}'s ${kind}`);
+        return NextResponse.json({ ok: true });
+      }
+      case "unpublishList": {
+        await checkModPerm("reports");
+        if (!username) throw new Error("Missing username");
+        const list = String(body.list || "");
+        await setPublicList(username, list, false);
+        await logMod(username, { action: `took down the list “${list}”`, by: me, reason: typeof body.reason === "string" ? body.reason : undefined });
+        await notify(username, { kind: "system", from: me, text: `A moderator stopped sharing your list “${list}”${body.reason ? `: ${String(body.reason).slice(0, 200)}` : ""}. It's still in your My Stuff.` });
+        await log(`${username}'s list ${list}`);
         return NextResponse.json({ ok: true });
       }
       /* ---------- bug reports and messages ---------- */

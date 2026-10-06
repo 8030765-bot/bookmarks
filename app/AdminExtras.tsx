@@ -224,6 +224,7 @@ export function PeopleTab({ info, admin, refresh, toast, isAdmin }: { info: Extr
               <button className="row-main row-btn" onClick={() => setOpen(open === u.username ? null : u.username)}>
                 <div className="row-title">
                   {u.username}
+                  <CopyName name={u.username} toast={toast} />
                   {role && <span className={`pill role-${role}`}>{role}</span>}
                   {banned.has(n) && <span className="pill bad">muted</span>}
                   {t && <span className="pill warn" title={t.reason}>timed out</span>}
@@ -364,6 +365,10 @@ export function ReportsTab({ info, admin, run, data, refresh, toast, isAdmin }: 
                   const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", ch: r.extra?.split(":")[0] || "general", id: r.targetId }) });
                   if (res.ok) resolve(r.id, "message deleted"); else toast((await res.json().catch(() => ({}))).error || "Couldn't delete");
                 }}>Delete message</button>}
+                {r.kind === "user" && r.extra?.startsWith("list:") && <button className="btn btn-danger btn-sm" onClick={async () => {
+                  try { await admin("unpublishList", { username: r.targetId, list: r.extra!.slice(5), reason: r.reason }); resolve(r.id, "list taken down"); } catch (e: any) { toast(e.message); }
+                }}>Stop sharing the list</button>}
+                {r.kind === "user" && r.extra?.startsWith("list:") && <a className="btn btn-secondary btn-sm" href={`/u/${encodeURIComponent(r.targetId)}/list/${encodeURIComponent(r.extra.slice(5))}`} target="_blank" rel="noopener">See the list</a>}
                 {r.kind === "picture" && <button className="btn btn-danger btn-sm" onClick={async () => {
                   try { await admin("removePicture", { username: r.targetId, reason: r.reason }); resolve(r.id, "picture removed"); } catch (e: any) { toast(e.message); }
                 }}>Remove picture</button>}
@@ -434,9 +439,32 @@ function PicturesQueue({ info, admin, refresh, toast }: { info: Extras; admin: A
   );
 }
 
+/** A tiny 📋 next to a username that copies it. */
+export function CopyName({ name, toast }: { name: string; toast: Toast }) {
+  const copy = (e: React.SyntheticEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    navigator.clipboard.writeText(name).then(() => toast(`Copied “${name}”`)).catch(() => toast("Couldn't copy"));
+  };
+  return (
+    <span className="copy-name" role="button" tabIndex={0} title={`Copy “${name}”`} aria-label={`Copy ${name}`}
+      onClick={copy} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") copy(e); }}>📋</span>
+  );
+}
+
+/** Ready-made answers for bug reports and messages (plus your own, kept on this device). */
+const CANNED = [
+  "Thanks — that's fixed now! 🎉",
+  "Thanks for telling us — we'll look into it.",
+  "Could you tell us a bit more? Which page were you on, and what did you click?",
+  "That's how it's meant to work at the moment — thanks for the idea though!",
+];
+
 /** Bug reports and "message an admin", with replies; and how pages are rated. */
 function FeedbackList({ info, admin, refresh, toast }: { info: Extras; admin: AdminFn; refresh: () => void; toast: Toast }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [mine, setMine] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem("cannedReplies") || "[]"); } catch { return []; } });
+  const saveMine = (next: string[]) => { setMine(next); try { localStorage.setItem("cannedReplies", JSON.stringify(next)); } catch {} };
   const items = info.feedback || [];
   const ratings = Object.entries(info.pageRatings || {}).sort((a, b) => (b[1].good + b[1].ok + b[1].bad) - (a[1].good + a[1].ok + a[1].bad));
   return (
@@ -453,6 +481,19 @@ function FeedbackList({ info, admin, refresh, toast }: { info: Extras; admin: Ad
               <div className="status-row">
                 <input value={drafts[f.id] || ""} onChange={(e) => setDrafts({ ...drafts, [f.id]: e.target.value })} placeholder="Reply (they get a notification)" maxLength={1000} />
                 <button className="btn btn-primary btn-sm" disabled={!drafts[f.id]?.trim()} onClick={async () => { try { await admin("replyFeedback", { id: f.id, text: drafts[f.id] }); toast("Reply sent"); refresh(); } catch (e: any) { toast(e.message); } }}>Reply</button>
+              </div>
+            )}
+            {!f.reply && f.user && (
+              <div className="canned">
+                {[...CANNED, ...mine].map((c) => (
+                  <button key={c} className="pick" title={c} onClick={() => setDrafts({ ...drafts, [f.id]: c })}>
+                    {c.length > 34 ? `${c.slice(0, 34)}…` : c}
+                    {mine.includes(c) && <span className="ss-x" role="button" title="Forget this reply" onClick={(e) => { e.stopPropagation(); saveMine(mine.filter((x) => x !== c)); }}>×</span>}
+                  </button>
+                ))}
+                {drafts[f.id]?.trim() && ![...CANNED, ...mine].includes(drafts[f.id].trim()) && (
+                  <button className="link-btn" onClick={() => { saveMine([...mine, drafts[f.id].trim()].slice(-10)); toast("Saved as a ready-made reply"); }}>Save this reply for next time</button>
+                )}
               </div>
             )}
             <div className="sugg-actions"><button className="btn btn-secondary btn-sm" onClick={async () => { await admin("deleteFeedback", { id: f.id }); refresh(); }}>{f.reply ? "Remove" : "Done"}</button></div>

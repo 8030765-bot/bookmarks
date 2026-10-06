@@ -68,6 +68,8 @@ export async function GET(req: NextRequest) {
       username: match.username,
       profile: self ? profile : { ...shown, picGif: viewer ? shown.picGif : undefined, badges: pinned.length ? pinned : undefined },
       badges,
+      // shared My Stuff folders are for people who are logged in
+      lists: viewer ? ud.publicLists || [] : undefined,
       role,
       joined: match.createdAt,
       added,

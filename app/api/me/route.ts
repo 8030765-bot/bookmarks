@@ -8,11 +8,13 @@ import { normalizeUrl } from "@/lib/url";
 import { errorResponse } from "@/lib/http";
 import { rateLimit } from "@/lib/ratelimit";
 import { follow, getFollowing, giveKudos, setHideOnline, setSeenFriends } from "@/lib/social";
+import { getBookmarks } from "@/lib/store";
+import { notify } from "@/lib/userdata";
 import { removePicture, uploadPicture } from "@/lib/pictures";
 import { saveImage } from "@/lib/images";
 import { addPushSub, hasPush, pushConfigured, pushPublicKey, removePushSub } from "@/lib/push";
 import {
-  clearNotifications, restoreNotifications, setDnd, setNotifyPrefs, setQuietHours, snoozeNotification,
+  clearNotifications, restoreNotifications, setDnd, setNotifyPrefs, setPublicList, setQuietHours, snoozeNotification,
   addMyStuff, getUserData, importMyStuff, markNotificationsRead, moveMyStuff, recordAggregateRating, removeMyStuff, renameMyStuffFolder,
   deleteView, importPersonal, saveMessage, saveSettings, saveView, setBlocked, setFolderOrder, setFolderPref, setLinkPref, setProfile, setRating, toggleFavorite,
 } from "@/lib/userdata";
@@ -102,8 +104,14 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ myStuff: await removeMyStuff(user, String(body.id || "")) });
       case "moveMyStuff":
         return NextResponse.json({ myStuff: await moveMyStuff(user, String(body.id || ""), String(body.folder || "")) });
-      case "renameMyStuffFolder":
-        return NextResponse.json({ myStuff: await renameMyStuffFolder(user, String(body.from || ""), String(body.to || "")) });
+      case "renameMyStuffFolder": {
+        const from = String(body.from || "");
+        const to = String(body.to || "");
+        const before = (await getUserData(user)).publicLists || [];
+        const myStuff = await renameMyStuffFolder(user, from, to);
+        if (before.includes(from)) { await setPublicList(user, from, false); if (to.trim()) await setPublicList(user, to, true).catch(() => {}); }
+        return NextResponse.json({ myStuff });
+      }
       case "importPersonal": {
         // a "Download my data" file from this site
         await rateLimit(`import:${user.toLowerCase()}`, 5, 60);
@@ -147,6 +155,8 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ links: await setLinkPref(user, String(body.linkId || ""), (body.patch || {}) as Record<string, unknown>) });
       case "readNotifications":
         return NextResponse.json({ ok: true, notifications: await markNotificationsRead(user, typeof body.id === "string" ? body.id : undefined) });
+      case "publishList":
+        return NextResponse.json({ publicLists: await setPublicList(user, body.list, body.on !== false) });
       case "quietHours":
         return NextResponse.json({ quietHours: await setQuietHours(user, body.quietHours) });
       case "snoozeNotification":
@@ -178,6 +188,23 @@ export async function POST(req: NextRequest) {
         const target = String(body.username || "");
         if (!(await listUsers()).some((u) => u.username.toLowerCase() === target.toLowerCase())) throw new Error("No such account");
         return NextResponse.json(await giveKudos(user, target));
+      }
+      case "sendLink": {
+        // "you'd like this" — one of the site's websites, to someone you follow. No text, so it's not a message.
+        await rateLimit(`sendlink:${user.toLowerCase()}`, 20, 60 * 60);
+        const to = String(body.to || "").toLowerCase();
+        const target = (await listUsers()).find((u) => u.username.toLowerCase() === to);
+        if (!target) throw new Error("No such account");
+        if (to === user.toLowerCase()) throw new Error("That's you!");
+        if (!(await getFollowing(user)).includes(to)) throw new Error("You can send websites to people you follow");
+        const link = (await getBookmarks()).folders.flatMap((f) => f.links).find((l) => l.id === String(body.linkId || ""));
+        if (!link) throw new Error("That website is gone");
+        // someone who blocked you never hears from you (and you aren't told)
+        const theirs = await getUserData(target.username);
+        if (!theirs.blocked.includes(user.toLowerCase())) {
+          await notify(target.username, { kind: "share", from: user, text: `${user} thinks you'd like “${link.name}” 👀`, link: `/#link-${link.id}` });
+        }
+        return NextResponse.json({ ok: true, to: target.username });
       }
       case "saveMessage":
         return NextResponse.json({ savedMessages: await saveMessage(user, (body.message || {}) as Record<string, unknown>, body.on !== false) });

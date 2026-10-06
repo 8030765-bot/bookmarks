@@ -43,6 +43,8 @@ export interface Personal {
   notifyPrefs: Record<string, boolean>;
   dndUntil: string | null;
   quietHours: { from: string; to: string; tz: string } | null;
+  /** My Stuff folders shared with logged-in members */
+  publicLists: string[];
   savedMessages: { id: string; channel: string; user: string; text: string; at: string; savedAt: string }[];
   /** this account has push turned on somewhere */
   push: boolean;
@@ -53,7 +55,7 @@ export interface Personal {
 }
 const EMPTY: Personal = {
   user: null, favorites: [], ratings: {}, notifications: [], profile: {}, links: {}, folders: {}, folderOrder: [], views: [],
-  following: [], blocked: [], settings: {}, myStuff: [], notifyPrefs: {}, dndUntil: null, quietHours: null, savedMessages: [], push: false, pushKey: null, loaded: false,
+  following: [], blocked: [], settings: {}, myStuff: [], notifyPrefs: {}, dndUntil: null, quietHours: null, publicLists: [], savedMessages: [], push: false, pushKey: null, loaded: false,
 };
 const GUEST_KEY = "guestLinkPrefs";
 const GUEST_FOLDERS = "guestFolderPrefs";
@@ -95,7 +97,7 @@ export function usePersonal(user: string | null) {
           user: json.user, favorites: json.favorites || [], ratings: json.ratings || {}, notifications: json.notifications || [],
           profile: json.profile || {}, links: json.links || {}, folders: json.folders || {}, folderOrder: json.folderOrder || [],
           views: json.views || [], following: json.following || [], blocked: json.blocked || [], settings: json.settings || {},
-          myStuff: json.myStuff || [], notifyPrefs: json.notifyPrefs || {}, dndUntil: json.dndUntil || null, quietHours: json.quietHours || null, savedMessages: json.savedMessages || [],
+          myStuff: json.myStuff || [], notifyPrefs: json.notifyPrefs || {}, dndUntil: json.dndUntil || null, quietHours: json.quietHours || null, publicLists: json.publicLists || [], savedMessages: json.savedMessages || [],
           push: !!json.push, pushKey: json.pushKey || null, loaded: true,
         });
       }

@@ -6,17 +6,18 @@ import Favicon from "./Favicon";
 import type { Notification } from "./Personal";
 import { readLocal, safeHref, timeAgo, writeLocal } from "./ui";
 
-const KIND_ICON: Record<string, string> = { like: "heart", mention: "chat", reply: "reply", suggestion: "bulb", comment: "chat", dm: "chat", role: "lock", system: "bell", follow: "users" };
+const KIND_ICON: Record<string, string> = { share: "share", like: "heart", mention: "chat", reply: "reply", suggestion: "bulb", comment: "chat", dm: "chat", role: "lock", system: "bell", follow: "users" };
 const FILTERS: { id: string; label: string; kinds: string[] }[] = [
   { id: "all", label: "All", kinds: [] },
   { id: "chat", label: "Mentions", kinds: ["mention", "reply", "comment", "dm"] },
   { id: "likes", label: "Likes", kinds: ["like"] },
+  { id: "share", label: "Sent to you", kinds: ["share"] },
   { id: "follow", label: "Following", kinds: ["follow"] },
   { id: "suggestion", label: "Suggestions", kinds: ["suggestion"] },
   { id: "system", label: "Account", kinds: ["system", "role"] },
 ];
 export const NOTIFY_KINDS: [string, string][] = [
-  ["mention", "@mentions"], ["reply", "Replies to you"], ["like", "Likes and kudos"], ["follow", "New links from people and folders you follow"],
+  ["mention", "@mentions"], ["reply", "Replies to you"], ["share", "Websites friends send you"], ["like", "Likes and kudos"], ["follow", "New links from people and folders you follow"],
   ["suggestion", "Your suggestions"], ["comment", "Comments"], ["role", "Role changes"], ["system", "Account and security"],
 ];
 

@@ -21,10 +21,11 @@ const SOCIAL = new Set(["toggleLike", "votePoll"]);
 
 const isAdminCtx = (ctx: AuthContext) => ctx.role === "owner" || ctx.role === "admin";
 /** The list as this person may see it (the shared admin password counts as admin until an owner exists). */
-async function shown(data: BookmarksData, ctx: AuthContext, asMember = false, password?: unknown) {
+async function shown(data: BookmarksData, ctx: AuthContext, as: "" | "member" | "guest" | boolean = "", password?: unknown) {
   let admin = isAdminCtx(ctx);
   if (!admin && typeof password === "string" && password) { try { checkAdmin(ctx, password); admin = true; } catch { /* not an admin */ } }
-  return withClicks(viewFor(data, { admin: admin && !asMember, member: !!ctx.user || admin }));
+  const mode = as === true ? "member" : as || "";
+  return withClicks(viewFor(data, { admin: admin && !mode, member: mode === "guest" ? false : !!ctx.user || admin }));
 }
 
 export async function GET(req: NextRequest) {
@@ -35,8 +36,10 @@ export async function GET(req: NextRequest) {
     if (since !== null && Number(since) === (data.rev || 0)) {
       return NextResponse.json({ unchanged: true, rev: data.rev || 0 });
     }
-    // admins can preview the site the way members see it
-    return NextResponse.json(await shown(data, ctx, req.nextUrl.searchParams.get("asMember") === "1"));
+    // preview the site the way members (or people who aren't logged in) see it
+    const as = req.nextUrl.searchParams.get("as");
+    const mode = as === "guest" ? "guest" : as === "member" || req.nextUrl.searchParams.get("asMember") === "1" ? "member" : "";
+    return NextResponse.json(await shown(data, ctx, mode));
   } catch (e: unknown) {
     return errorResponse(e, 500);
   }
