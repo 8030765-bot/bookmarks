@@ -46,7 +46,7 @@ import { recordUndo, redoLast, undoLast } from "./components/undo";
 import { inQuietHours } from "@/lib/quiet";
 import { TOOL_LIST } from "./components/tools/list";
 import { NovaBanner, NovaHome, NovaSection, NovaSidebar } from "./components/Nova";
-import { DockButton, DockSite, JournalFront, JournalMast, JournalSectionHead, OrbitDock, OrbitHome, OrbitWindow, TermHome, TermPrompt, TermTree, ZenHero, termSlug } from "./components/Layouts";
+import { DeskHome, DockButton, DockSite, JournalFront, JournalMast, JournalSectionHead, OrbitDock, OrbitHome, OrbitWindow, TermHome, TermPrompt, TermTree, ZenHero, termSlug } from "./components/Layouts";
 import { AddAnywhereModal, WeekChanges, downloadBookmarksHtml, downloadFolderCsv, embedCode } from "./components/DataViews";
 import { BottomNav, InstallModal, PullIndicator, buzz, usePullToRefresh } from "./components/Mobile";
 import { FeedbackModal, Tour, WhatsNewPopup, useFirstVisit, useLeaveWarning, useWhatsNewAfterUpdate } from "./components/Help";
@@ -2225,7 +2225,7 @@ export default function HomePage() {
             <span className="nova-spark" aria-hidden="true">✨</span>
             <div>
               <strong>New designs are here</strong>
-              <span>Six brand-new layouts: ✨ Nova, 🪐 Orbit, 🗂️ Board, 📰 Journal, 💻 Terminal and 🍃 Zen. Switch back any time in Customize.</span>
+              <span>Seven brand-new layouts: ✨ Nova, 🪐 Orbit, 🗂️ Board, 🖥️ Desk, 📰 Journal, 💻 Terminal and 🍃 Zen. Switch back any time in Customize.</span>
             </div>
             <div className="nova-actions">
               <button className="btn btn-primary btn-sm" onClick={() => { changeLook({ ...look, ui: "nova" }); setNovaInvite(false); writeLocal("novaInvite", "done"); showToast("✨ Welcome to Nova — switch back in Customize → Design", { label: "Undo", run: () => changeLook({ ...look, ui: "classic" }) }, 7000); }}>Try Nova</button>
@@ -2661,6 +2661,47 @@ export default function HomePage() {
     </div>
   );
 
+  /* 🖥️ Desk: Orbit's clock, apps and dock + Board's columns, in Board's colours */
+  const deskLayout = () => (
+    <div className="bd-layout dk-layout">
+      <div className="bd-wrap">
+        {bannersEl}
+        <DeskHome
+          greeting={greetingText}
+          stats={statsEl}
+          folders={novaSideFolders}
+          unread={unreadOf}
+          onJump={(f) => { if (filtering) { setSearch(""); setTagFilters([]); } setTimeout(() => jumpToFolder(f.id), 30); }}
+          onNewFolder={!addingLocked ? () => openNewFolder() : undefined}
+        />
+        {startEl}
+        {filtering && resultsEl}
+      </div>
+      <div className="bd-board">
+        {renderMain()}
+        {!addingLocked && !filtering && (
+          <button className="bd-newcol" onClick={() => openNewFolder()}><Icon name="plus" /> New folder</button>
+        )}
+      </div>
+      <div className="bd-wrap">
+        {todayBlock}{pollsBlock}
+        {footerEl}
+      </div>
+      <OrbitDock>
+        <DockButton label="Home" on={!filtering} onClick={() => { setSearch(""); setTagFilters([]); window.scrollTo({ top: 0, behavior: look.motion ? "smooth" : "auto" }); document.querySelector(".bd-board")?.scrollTo({ left: 0, behavior: look.motion ? "smooth" : "auto" }); }}><Icon name="home" /></DockButton>
+        <DockButton label="Starred" on={search.trim() === "is:fav"} onClick={() => setSearch(search.trim() === "is:fav" ? "" : "is:fav")}><Icon name="star" /></DockButton>
+        <DockButton label="Read later" on={search.trim() === "is:later"} onClick={() => setSearch(search.trim() === "is:later" ? "" : "is:later")}><Icon name="clock" /></DockButton>
+        <DockButton label="Fold or unfold every column (X)" onClick={toggleAll}><Icon name="list" /></DockButton>
+        {favorites.length > 0 && <span className="ob-dock-sep" aria-hidden="true" />}
+        {favorites.slice(0, 6).map((r) => <DockSite key={r.link.id} refItem={r} newTab={look.newTab} onOpen={trackAndOpen} />)}
+        <span className="ob-dock-sep" aria-hidden="true" />
+        <DockButton label={addLabel} onClick={() => openAdd()}><Icon name="plus" /></DockButton>
+        <DockButton label="Chat (C)" on={chatOpen} onClick={() => setChatOpen((o) => !o)}><Icon name="chat" /></DockButton>
+        <DockButton label="Customize (P)" onClick={() => setModal({ type: "customize" })}><Icon name="palette" /></DockButton>
+      </OrbitDock>
+    </div>
+  );
+
   /* 📰 Journal: a newspaper */
   const journalLayout = () => (
     <div className="jr-layout">
@@ -2797,10 +2838,10 @@ export default function HomePage() {
     </div>
   );
 
-  const LAYOUTS: Partial<Record<Design, () => React.ReactNode>> = { nova: novaLayout, orbit: orbitLayout, board: boardLayout, journal: journalLayout, terminal: terminalLayout, zen: zenLayout };
+  const LAYOUTS: Partial<Record<Design, () => React.ReactNode>> = { nova: novaLayout, orbit: orbitLayout, board: boardLayout, desk: deskLayout, journal: journalLayout, terminal: terminalLayout, zen: zenLayout };
   const designEl = LAYOUTS[look.ui]?.();
   /** these place the top bar themselves */
-  const ownTopbar = look.ui !== "classic" && look.ui !== "board";
+  const ownTopbar = look.ui !== "classic" && look.ui !== "board" && look.ui !== "desk";
 
   return (
     <div className={`shell ${showAdmin ? "with-admin" : ""}`}>

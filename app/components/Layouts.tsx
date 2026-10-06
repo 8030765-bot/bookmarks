@@ -122,7 +122,7 @@ export function DockButton({ label, on, onClick, badge, children }: {
   return (
     <button className={`ob-dock-btn ${on ? "on" : ""}`} onClick={onClick} title={label} aria-label={label} aria-current={on ? "page" : undefined}>
       {children}
-      {badge ? <span className="ob-badge">{badge > 9 ? "9+" : badge}</span> : null}
+      {badge ? <span className="ob-badge dk-badge">{badge > 9 ? "9+" : badge}</span> : null}
     </button>
   );
 }
@@ -133,6 +133,51 @@ export function DockSite({ refItem, newTab, onOpen }: { refItem: LinkRef; newTab
       title={link.name} aria-label={link.name} onClick={() => onOpen(folder, link)}>
       <Favicon url={link.url} name={link.name} size={26} custom={link.iconImg} />
     </a>
+  );
+}
+
+/* ============================== 🖥️ Desk ============================== */
+
+/** Desk's top: a clock and greeting, and every folder as an app icon that jumps to its column. */
+export function DeskHome({ greeting, stats, folders, unread, onJump, onNewFolder }: {
+  greeting: string;
+  stats: ReactNode;
+  folders: Folder[];
+  unread: (f: Folder) => number;
+  onJump: (f: Folder) => void;
+  onNewFolder?: () => void;
+}) {
+  const { time, date } = useClock();
+  return (
+    <div className="dk-home">
+      <header className="dk-head">
+        <div className="dk-clock">
+          <time suppressHydrationWarning>{time}</time>
+          <span suppressHydrationWarning><strong>{greeting}</strong> · {date}</span>
+        </div>
+        <div className="dk-stats">{stats}</div>
+      </header>
+      <div className="dk-apps" role="list" aria-label="Jump to a folder">
+        {folders.map((f) => {
+          const n = unread(f);
+          return (
+            <button key={f.id} role="listitem" className="dk-app" style={fc(f.color)} onClick={() => onJump(f)} title={`Jump to ${f.name}`}>
+              <span className="dk-app-icon">
+                <span aria-hidden="true">{f.emoji}</span>
+                {n > 0 && <span className="dk-badge" title={`${n} new`}>{n > 9 ? "9+" : n}</span>}
+              </span>
+              <span className="dk-app-name">{f.name}</span>
+            </button>
+          );
+        })}
+        {onNewFolder && (
+          <button className="dk-app dk-app-add" onClick={onNewFolder} title="New folder">
+            <span className="dk-app-icon"><Icon name="plus" /></span>
+            <span className="dk-app-name">New folder</span>
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
