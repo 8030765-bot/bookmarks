@@ -6,6 +6,7 @@ import { holdFast, useOnRevChange } from "./components/sync";
 import { UserChip, useFaces } from "./components/People";
 import ChatText, { KnownLink, SHORTCODES, applyShortcodes } from "./components/ChatText";
 import { shrinkImage } from "./components/ImageCropper";
+import { humanError } from "./components/ui";
 import EmojiPicker from "./components/EmojiPicker";
 import { readLocal, writeLocal } from "./components/ui";
 
@@ -127,8 +128,16 @@ export default function ChatPanel({
   const [linkQ, setLinkQ] = useState<string | null>(null);
   const [emojiQ, setEmojiQ] = useState<string | null>(null);
   const [dividerSeen, setDividerSeen] = useState(false);
+  // clicking anywhere outside the message box closes the emoji picker
+  useEffect(() => {
+    if (!emojiOpen) return;
+    const onDown = (e: PointerEvent) => { if (!(e.target as Element)?.closest?.(".chat-compose")) setEmojiOpen(false); };
+    window.addEventListener("pointerdown", onDown);
+    return () => window.removeEventListener("pointerdown", onDown);
+  }, [emojiOpen]);
   const [width, setWidth] = useState<number | null>(null);
   const [loadedOnce, setLoadedOnce] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   useEffect(() => { const w = readLocal<number | null>("chatWidth", null); if (w) setWidth(w); }, []);
   /** Drag (or arrow keys on) the left edge to make the panel wider or narrower. */
   function startResize(e: React.PointerEvent) {
@@ -192,6 +201,7 @@ export default function ChatPanel({
         return;
       }
       setLoadedOnce(true);
+      setLoadFailed(false);
       setS((prev) => ({
         channel: json.channel || prev.channel,
         messages: Array.isArray(json.messages) ? json.messages : prev.messages,
@@ -206,7 +216,8 @@ export default function ChatPanel({
         images: json.images !== false,
       }));
     } catch {
-      // network blip — the next change will retry
+      // network blip — say so (with a retry) if nothing has loaded yet
+      setLoadFailed(true);
     }
   }, []);
   const channelRef = useRef("general");
@@ -359,7 +370,7 @@ export default function ChatPanel({
       setEmojiOpen(false);
       setScrolledUp(false);
     } catch (err: any) {
-      showToast(err.message || "Could not send");
+      showToast(humanError(err, "Couldn't send that"));
       if (err.message === "Log in to chat") onNeedLogin();
     } finally {
       setSending(false);
@@ -801,7 +812,8 @@ export default function ChatPanel({
             <button className="link-btn" onClick={() => { setWelcomed(true); writeLocal("chatWelcomed", true); }}>Got it</button>
           </div>
         )}
-        {!loadedOnce && <div className="chat-loading" aria-label="Loading messages">{[0, 1, 2, 3, 4].map((i) => <div key={i} className="skeleton" />)}</div>}
+        {!loadedOnce && loadFailed && <div className="load-error">Couldn&apos;t load the chat — check your internet. <button className="btn btn-secondary btn-sm" onClick={() => load()}>Try again</button></div>}
+        {!loadedOnce && !loadFailed && <div className="chat-loading" aria-label="Loading messages">{[0, 1, 2, 3, 4].map((i) => <div key={i} className="skeleton" />)}</div>}
         {loadedOnce && shown.length === 0 && <div className="chat-empty">No messages here yet. Say hi! 👋</div>}
         {hiddenCount > 0 && <div className="chat-hidden-note">{hiddenCount} message{hiddenCount === 1 ? "" : "s"} from people you blocked are hidden</div>}
         {shown.map((m, i) => renderMessage(m, i, shown))}

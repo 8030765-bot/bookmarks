@@ -1904,3 +1904,9 @@ main:focus{outline:none}
 .copy-name:hover,.copy-name:focus-visible{opacity:1;outline:none}
 .canned{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.35rem}
 .canned .pick{font-size:.72rem;display:inline-flex;gap:.3rem;align-items:center}
+
+/* ---------- QoL batch G: small things ---------- */
+.load-error{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem;justify-content:center;padding:.8rem 1rem;margin:.8rem 0;border:1px dashed var(--border-light);border-radius:12px;font-size:.85rem;color:var(--text-muted)}
+.saved-tick{display:inline-block;margin-left:.5rem;font-size:.75rem;font-weight:600;color:var(--success);animation:savedFade 1.8s ease forwards}
+@keyframes savedFade{0%{opacity:0;transform:translateY(2px)}12%{opacity:1;transform:none}75%{opacity:1}100%{opacity:0}}
+:root[data-motion=off] .saved-tick{animation:none}

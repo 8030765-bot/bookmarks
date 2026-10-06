@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Icon } from "../components/Icon";
 import { Avatar, roleClass } from "../components/People";
-import { timeAgo } from "../components/ui";
+import { timeAgo, useMinuteTick } from "../components/ui";
 
 interface Person {
   username: string;
@@ -29,9 +29,15 @@ export default function PeoplePage() {
   const [following, setFollowing] = useState<string[]>([]);
   const [sort, setSort] = useState<SortBy>("contributions");
   const [q, setQ] = useState("");
+  const [failed, setFailed] = useState(false);
+  useMinuteTick();
+  function loadPeople() {
+    setFailed(false);
+    fetch("/api/people", { cache: "no-store" }).then((r) => { if (!r.ok) throw new Error(); return r.json(); }).then((j) => setPeople(j.people || [])).catch(() => setFailed(true));
+  }
   useEffect(() => {
     document.title = "People · Theo's Bookmarks";
-    fetch("/api/people", { cache: "no-store" }).then((r) => r.json()).then((j) => setPeople(j.people || [])).catch(() => setPeople([]));
+    loadPeople();
     fetch("/api/me", { cache: "no-store" }).then((r) => r.json()).then((j) => { setMe(j.user || null); setFollowing(j.following || []); }).catch(() => {});
   }, []);
   const online = (p: Person) => !!p.lastSeen && Date.now() - p.lastSeen < 90_000;
@@ -66,8 +72,9 @@ export default function PeoplePage() {
       </div>
       <header className="hero">
         <h1>People</h1>
-        <p>{people ? `${people.length} members` : "Loading…"}{people ? ` · ${people.filter(online).length} online now` : ""}</p>
+        <p>{people ? `${people.length} members` : failed ? "" : "Loading…"}{people ? ` · ${people.filter(online).length} online now` : ""}</p>
       </header>
+      {failed && !people && <div className="load-error">Couldn&apos;t load the people list — check your internet. <button className="btn btn-secondary btn-sm" onClick={loadPeople}>Try again</button></div>}
       {suggested.length > 0 && (
         <section className="pp-section">
           <div className="admin-h">People to follow</div>

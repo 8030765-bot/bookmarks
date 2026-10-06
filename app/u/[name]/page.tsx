@@ -9,7 +9,7 @@ import { Icon } from "../../components/Icon";
 import { Avatar, roleClass } from "../../components/People";
 import { ReportPictureButton, type Profile } from "../../components/Personal";
 import { BADGES } from "@/lib/badges";
-import { ageLabel, safeHref, timeAgo } from "../../components/ui";
+import { ageLabel, safeHref, timeAgo, useMinuteTick } from "../../components/ui";
 import { PALETTES, decodeTheme } from "../../components/look";
 
 interface LinkLite { id: string; name: string; url: string; folder: string; emoji: string }
@@ -50,11 +50,14 @@ export default function ProfilePage() {
   const [missing, setMissing] = useState(false);
   const [me, setMe] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
+  const [failed, setFailed] = useState(false);
+  useMinuteTick();
   const load = useCallback(() => {
+    setFailed(false);
     fetch(`/api/profile?user=${encodeURIComponent(name)}`, { cache: "no-store" })
-      .then((r) => r.json())
+      .then((r) => { if (r.status >= 500) throw new Error(); return r.json(); })
       .then((j) => (j.username ? setP(j) : setMissing(true)))
-      .catch(() => setMissing(true));
+      .catch(() => setFailed(true));
   }, [name]);
   useEffect(() => {
     load();
@@ -74,7 +77,8 @@ export default function ProfilePage() {
         <Link className="btn btn-secondary btn-sm" href="/"><Icon name="up" /> Bookmarks</Link>
         <Link className="btn btn-secondary btn-sm" href="/people"><Icon name="users" /> People</Link>
       </div>
-      {!p && !missing && <div className="skeleton skel-row" style={{ height: 160 }} />}
+      {!p && !missing && !failed && <div className="skeleton skel-row" style={{ height: 160 }} />}
+      {failed && !p && <div className="load-error">Couldn&apos;t load this profile — check your internet. <button className="btn btn-secondary btn-sm" onClick={load}>Try again</button></div>}
       {missing && <div className="empty-state"><h3>No one called “{name}”</h3><p>Maybe they changed their name?</p></div>}
       {p && (p.hidden || p.membersOnly) && (
         <div className="empty-state">

@@ -9,7 +9,7 @@ import { Board, BoardKind, useBoard } from "../components/Boards";
 import { UserChip, setFlairMap } from "../components/People";
 import { CommunityInfo } from "../components/Today";
 import { useOnRevChange, useSyncLoop } from "../components/sync";
-import { hostOf, safeHref, timeAgo } from "../components/ui";
+import { hostOf, safeHref, timeAgo, useMinuteTick } from "../components/ui";
 import { EasterEgg } from "../components/Fun";
 
 type Tab = BoardKind | "roadmap" | "events" | "fame" | "recap";
@@ -52,8 +52,13 @@ function Community() {
     setToastMsg(m);
     setTimeout(() => setToastMsg((x) => (x === m ? "" : x)), 3000);
   }, []);
+  const [failed, setFailed] = useState(false);
+  useMinuteTick();
   const loadInfo = useCallback(() => {
-    fetch("/api/community", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (j.goals) { setInfo(j); setFlairMap(j.flair || {}); } }).catch(() => {});
+    fetch("/api/community", { cache: "no-store" })
+      .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
+      .then((j) => { setFailed(false); if (j.goals) { setInfo(j); setFlairMap(j.flair || {}); } })
+      .catch(() => setFailed(true));
   }, []);
   const loadData = useCallback(() => {
     fetch("/api/bookmarks", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (j.folders) setData(j); }).catch(() => {});
@@ -83,6 +88,7 @@ function Community() {
       <header className="hero">
         <h1>Community <EasterEgg id="community" /></h1>
         <p>Ask for links, answer questions, share tips and vote on what comes next.</p>
+        {failed && !info && <div className="load-error">Couldn&apos;t load the community page — check your internet. <button className="btn btn-secondary btn-sm" onClick={loadInfo}>Try again</button></div>}
         {info && (
           <div className="goal-row">
             {(["links", "members"] as const).map((k) => (

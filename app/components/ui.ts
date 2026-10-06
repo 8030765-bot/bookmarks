@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Folder, Link, Suggestion } from "@/lib/types";
 
 /** One-line description of a suggestion, for lists and toasts. */
@@ -161,4 +162,25 @@ export function writeLocal(key: string, value: unknown) {
   } catch {
     // private mode / storage blocked — preferences just won't persist
   }
+}
+
+/**
+ * Turn technical failures into something you can act on: no connection,
+ * the site sent back nonsense, or a bug on our side. Our own messages
+ * ("Give the folder a name") pass straight through.
+ */
+export function humanError(e: unknown, fallback = "Something went wrong — try again"): string {
+  const m = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+  if (!m) return fallback;
+  if (/failed to fetch|networkerror|load failed|network request failed|fetch failed/i.test(m)) return "Couldn't reach the site — check your internet connection and try again.";
+  if (/unexpected token|json|is not valid/i.test(m)) return "The site sent back something unexpected — wait a moment and try again.";
+  if (/ECONN|ETIMEDOUT|socket|Upstash|internal server/i.test(m)) return "Something went wrong on our side — try again in a moment. If it keeps happening, report a bug from the Help page.";
+  return m;
+}
+
+/** Re-render every minute so "5 min ago" keeps up. */
+export function useMinuteTick() {
+  const [t, setT] = useState(0);
+  useEffect(() => { const id = setInterval(() => setT((x) => x + 1), 60_000); return () => clearInterval(id); }, []);
+  return t;
 }

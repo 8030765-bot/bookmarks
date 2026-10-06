@@ -4,7 +4,8 @@ import { Icon } from "./Icon";
 import { NameCheck, PasswordStrength, QrCode } from "./People";
 import { makeZip, type ZipEntry } from "./zip";
 import type { Profile } from "./Personal";
-import { readLocal, timeAgo, writeLocal } from "./ui";
+import { humanError, readLocal, timeAgo, writeLocal } from "./ui";
+import { useSavedTick } from "./guard";
 
 interface AccountState {
   username: string;
@@ -55,6 +56,8 @@ export default function AccountModal({
   onClose: () => void;
 }) {
   // opens on the tab you used last
+  const { saved, tick } = useSavedTick();
+  const saveProfile = (p: Profile) => { onProfile(p); saved(); };
   const [tab, setTabState] = useState<Tab>(() => { const t = readLocal<string>("accountTab", "security"); return (["security", "privacy", "account"].includes(t) ? t : "security") as Tab; });
   const setTab = (t: Tab) => { setTabState(t); writeLocal("accountTab", t); };
   const [info, setInfo] = useState<AccountState | null>(null);
@@ -68,7 +71,7 @@ export default function AccountModal({
   async function run(fn: () => Promise<void>) {
     setBusy(true);
     setError("");
-    try { await fn(); } catch (e: any) { setError(e.message || "Something went wrong"); } finally { setBusy(false); }
+    try { await fn(); } catch (e: any) { setError(humanError(e)); } finally { setBusy(false); }
   }
 
   // password
@@ -88,7 +91,7 @@ export default function AccountModal({
   return (
     <div className="modal-overlay" onClick={() => !busy && onClose()}>
       <div className="modal wide account-modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Account & security</h2>
+        <h2>Account & security{tick > 0 && <span key={tick} className="saved-tick" role="status">✓ Saved</span>}</h2>
         <div className="seg">
           <button className={tab === "security" ? "on" : ""} onClick={() => { setTab("security"); setError(""); }}>Security</button>
           <button className={tab === "privacy" ? "on" : ""} onClick={() => { setTab("privacy"); setError(""); }}>Privacy</button>
@@ -189,7 +192,7 @@ export default function AccountModal({
             <div className="admin-h">Who can see your profile</div>
             <div className="seg">
               {(["everyone", "members", "private"] as const).map((v) => (
-                <button key={v} className={(profile.visibility || "everyone") === v ? "on" : ""} onClick={() => onProfile({ visibility: v })}>
+                <button key={v} className={(profile.visibility || "everyone") === v ? "on" : ""} onClick={() => saveProfile({ visibility: v })}>
                   {v === "everyone" ? "Everyone" : v === "members" ? "Logged-in members" : "Only me"}
                 </button>
               ))}
@@ -199,14 +202,14 @@ export default function AccountModal({
               {([["everyone", "Everyone"], ["friends", "People I follow"], ["nobody", "Nobody"]] as const).map(([v, label]) => {
                 const cur = profile.hideOnline ? "nobody" : profile.lastSeenTo === "friends" ? "friends" : "everyone";
                 return (
-                  <button key={v} className={cur === v ? "on" : ""} onClick={() => onProfile({ hideOnline: v === "nobody", lastSeenTo: v === "friends" ? "friends" : ("" as any) })}>{label}</button>
+                  <button key={v} className={cur === v ? "on" : ""} onClick={() => saveProfile({ hideOnline: v === "nobody", lastSeenTo: v === "friends" ? "friends" : ("" as any) })}>{label}</button>
                 );
               })}
             </div>
             <p className="hint">This covers the online list, the green dot and &quot;active 5 min ago&quot;.</p>
             <label className="toggle-row compact">
               <div><strong>Sync my settings</strong><span>Your theme, layout and sort follow you to other devices.</span></div>
-              <input type="checkbox" role="switch" checked={syncOn} onChange={(e) => onSyncChange(e.target.checked)} />
+              <input type="checkbox" role="switch" checked={syncOn} onChange={(e) => { onSyncChange(e.target.checked); saved(); }} />
               <span className="switch" aria-hidden="true" />
             </label>
             <div className="admin-h">Blocked</div>

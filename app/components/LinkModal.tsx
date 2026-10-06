@@ -5,6 +5,7 @@ import { Icon } from "./Icon";
 import Favicon from "./Favicon";
 import { COLORS, hostOf, nameFromUrl, normUrl, readLocal, urlsIn, writeLocal } from "./ui";
 import { ImageCropper } from "./ImageCropper";
+import { confirmDiscard, useUnsavedGuard } from "./guard";
 
 export interface LinkValues {
   name: string;
@@ -290,9 +291,12 @@ export default function LinkModal({
   const urlRef = useRef<HTMLInputElement>(null);
 
   const bulkLinks = bulk !== null ? parseBulk(bulk) : [];
+  // editing: ask before throwing changes away (adding keeps a draft instead)
+  useUnsavedGuard(!!editing && (name !== editing.name || url !== editing.url || notes !== (editing.notes || "") || tip !== (editing.tip || "")
+    || JSON.stringify(tags) !== JSON.stringify(editing.tags || []) || emoji !== (editing.emoji || "")));
 
   return (
-    <div className="modal-overlay" onClick={() => !submitting && onClose()}>
+    <div className="modal-overlay" onClick={() => !submitting && confirmDiscard() && onClose()}>
       <div className="modal wide link-modal" onClick={(e) => e.stopPropagation()}>
         <h2>{editing ? "Edit website" : bulk !== null ? "Add several websites" : "Add a website"}</h2>
         {draftNote && bulk === null && (

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Folder } from "@/lib/types";
 import { Icon } from "./Icon";
 import { COLORS, readLocal } from "./ui";
+import { useSavedTick } from "./guard";
 import {
   DEFAULT_LOOK, DEFAULT_ORDER, FONTS, HIDEABLE, Look, PALETTES, SECTIONS, Section, decodeTheme, encodeTheme,
 } from "./look";
@@ -75,7 +76,8 @@ export function ThemeEditor({ look, onChange, onClose, startView, onStartView, f
   const [tab, setTab] = useState<Tab>(() => readLocal("themeTab", "colours") as Tab);
   const [paste, setPaste] = useState("");
   const [msg, setMsg] = useState("");
-  const set = (patch: Partial<Look>) => onChange({ ...look, ...patch });
+  const { saved, tick } = useSavedTick();
+  const set = (patch: Partial<Look>) => { onChange({ ...look, ...patch }); saved(); };
   const code = encodeTheme(look);
   const say = (m: string) => { setMsg(m); setTimeout(() => setMsg(""), 2500); };
   const moveSection = (s: Section, dir: -1 | 1) => {
@@ -90,7 +92,7 @@ export function ThemeEditor({ look, onChange, onClose, startView, onStartView, f
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal wide theme-editor" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Customize the look">
-        <h2>🎨 Customize</h2>
+        <h2>🎨 Customize{tick > 0 && <span key={tick} className="saved-tick" role="status">✓ Saved</span>}</h2>
         <p className="modal-text">Only changes how the site looks for you. Changes show straight away.</p>
         <Preview />
         <div className="seg te-tabs" role="tablist">

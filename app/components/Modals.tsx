@@ -1,4 +1,5 @@
 "use client";
+import { confirmDiscard, useUnsavedGuard } from "./guard";
 import { useState } from "react";
 import { Folder } from "@/lib/types";
 import { Icon } from "./Icon";
@@ -59,9 +60,10 @@ export function FolderModal({
   const hasChildren = !!folder && folders.some((f) => f.parentId === folder.id);
   const parents = folders.filter((f) => !f.parentId && f.id !== folder?.id && !f.rule);
   const canMove = admin || !folder;
+  useUnsavedGuard(folder ? name !== folder.name || description !== (folder.description || "") || guide !== (folder.guide || "") || emoji !== folder.emoji : !!name.trim());
 
   return (
-    <div className="modal-overlay" onClick={() => !submitting && onClose()}>
+    <div className="modal-overlay" onClick={() => !submitting && confirmDiscard() && onClose()}>
       <div className="modal wide" onClick={(e) => e.stopPropagation()}>
         <h2>{folder ? "Edit folder" : isSmart ? "New smart folder" : "New folder"}</h2>
         <form

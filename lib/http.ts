@@ -25,7 +25,12 @@ export function errorResponse(e: unknown, fallbackStatus = 400) {
           : message.startsWith("Read-only")
             ? 503
             : fallbackStatus;
-  // real server faults go to the admins' "recent errors" list
-  if (status >= 500 && status !== 503) logError(message);
+  // real server faults go to the admins' "recent errors" list; people get told what to do
+  if (status >= 500 && status !== 503) {
+    logError(message);
+    if (/fetch failed|ECONN|ETIMEDOUT|socket|Unexpected token|Upstash|Cannot read|undefined/i.test(message) || !message) {
+      return NextResponse.json({ error: "Something went wrong on our side — try again in a moment. If it keeps happening, report a bug from the Help page." }, { status });
+    }
+  }
   return NextResponse.json({ error: message }, { status });
 }

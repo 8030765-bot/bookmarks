@@ -1,4 +1,5 @@
 "use client";
+import { confirmDiscard, useUnsavedGuard } from "./components/guard";
 import { useCallback, useEffect, useState } from "react";
 import { BookmarksData, Suggestion, SuggestionKind } from "@/lib/types";
 import { suggestionSummary } from "./components/ui";
@@ -115,9 +116,10 @@ export default function SuggestModal({
   }
 
   const pendingMine = mine.filter((s) => s.status === "pending").length;
+  useUnsavedGuard(view === "form" && (!!note.trim() || (kind === "addLink" && !!(url.trim() || name.trim())) || (kind === "newFolder" && !!name.trim())));
 
   return (
-    <div className="modal-overlay" onClick={() => !sending && onClose()}>
+    <div className="modal-overlay" onClick={() => !sending && confirmDiscard() && onClose()}>
       <div className="modal wide" onClick={(e) => e.stopPropagation()}>
         <h2>💡 Suggest a change</h2>
         <div className="auth-tabs">

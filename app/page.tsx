@@ -1742,6 +1742,8 @@ export default function HomePage() {
   keys.current = (e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setShowCmd((s) => !s); return; }
     if (e.key === "Escape") {
+      // a pop-up, drawer or menu on top was already closed (just that one) by EscapeClose
+      if (e.defaultPrevented) return;
       if (document.activeElement === searchRef.current && search) { setSearch(""); return; }
       if (cardMenu) { setCardMenu(null); return; }
       if (!modal && !showCmd && !suggest && (selected.size || focusedId || expandedId)) {

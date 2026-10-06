@@ -5,6 +5,7 @@ import { Icon } from "./Icon";
 import Favicon from "./Favicon";
 import type { Notification } from "./Personal";
 import { readLocal, safeHref, timeAgo, writeLocal } from "./ui";
+import { useSavedTick } from "./guard";
 
 const KIND_ICON: Record<string, string> = { share: "share", like: "heart", mention: "chat", reply: "reply", suggestion: "bulb", comment: "chat", dm: "chat", role: "lock", system: "bell", follow: "users" };
 const FILTERS: { id: string; label: string; kinds: string[] }[] = [
@@ -103,6 +104,13 @@ export function NotificationPanel({
   onQuietHours: (q: { from: string; to: string } | null) => void;
 }) {
   const [snoozing, setSnoozing] = useState<string | null>(null);
+  // settings changes save straight away; say so
+  const { saved, tick } = useSavedTick();
+  const withTick = <A extends unknown[]>(fn: (...a: A) => void) => (...a: A) => { fn(...a); saved(); };
+  onPrefs = withTick(onPrefs);
+  onDnd = withTick(onDnd);
+  onSound = withTick(onSound);
+  onQuietHours = withTick(onQuietHours);
   const now = Date.now();
   const snoozed = notifications.filter((n) => n.snoozeUntil && Date.parse(n.snoozeUntil) > now);
   notifications = notifications.filter((n) => !n.snoozeUntil || Date.parse(n.snoozeUntil) <= now);
@@ -230,6 +238,7 @@ export function NotificationPanel({
 
           {tab === "settings" && (
             <div className="notif-settings">
+              {tick > 0 && <span key={tick} className="saved-tick" role="status">✓ Saved</span>}
               <div className="admin-h">Do not disturb</div>
               <p className="modal-text">{dnd ? `Quiet until ${new Date(settings.dndUntil!).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}. Notifications still arrive, without pop-ups, sounds or phone alerts.` : "Pause pop-ups, sounds and phone alerts for a while."}</p>
               <div className="chip-grid">

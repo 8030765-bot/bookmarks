@@ -162,7 +162,7 @@ export function ImageCropper({ aspect = 1, outW = 192, round = true, allowGif = 
   };
 
   return (
-    <div className="modal-overlay" onClick={() => !busy && onCancel()}>
+    <div className="modal-overlay" onClick={(e) => { e.stopPropagation(); if (!busy) onCancel(); }}>
       <div className="modal cropper" onClick={(e) => e.stopPropagation()}>
         <h2>{title}</h2>
         <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={(e) => { pick(e.target.files?.[0]); e.target.value = ""; }} />

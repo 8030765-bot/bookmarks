@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import LookBoot from "./components/LookBoot";
+import EscapeClose from "./components/EscapeClose";
 import { PageFeedback } from "./components/Help";
 
 // served from our own domain at build time: no extra request to Google, no flash of the wrong font
@@ -31,6 +32,7 @@ export default function RootLayout({
         {children}
         <PageFeedback />
         <LookBoot />
+        <EscapeClose />
       </body>
     </html>
   );
