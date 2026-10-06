@@ -83,6 +83,7 @@ function inline(text: string, ctx: { me: string | null; known: (url: string) => 
 }
 
 const LONG = 320;
+const MAX_LINES = 8;
 
 export default function ChatText({ text, me, known, previews = true }: {
   text: string;
@@ -93,8 +94,12 @@ export default function ChatText({ text, me, known, previews = true }: {
   previews?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const long = text.length > LONG && !text.includes("```");
-  const body = long && !expanded ? `${text.slice(0, LONG).trimEnd()}…` : text;
+  const lineCount = text.split("\n").length;
+  // long messages fold up (by length, or by lines for lists and poems)
+  const long = (text.length > LONG || lineCount > MAX_LINES) && !text.includes("```");
+  const body = !long || expanded ? text
+    : lineCount > MAX_LINES ? `${text.split("\n").slice(0, MAX_LINES).join("\n").slice(0, LONG).trimEnd()}…`
+    : `${text.slice(0, LONG).trimEnd()}…`;
   const cards: KnownLink[] = [];
   const ctx = { me, known, previews, cards };
   const blocks: ReactNode[] = [];

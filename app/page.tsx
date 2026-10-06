@@ -934,6 +934,7 @@ export default function HomePage() {
     return m;
   }, [allRefs]);
   const knownLink = useCallback((url: string) => knownByUrl.get(normUrl(url)), [knownByUrl]);
+  const chatLinks = useMemo(() => Array.from(knownByUrl.values()), [knownByUrl]);
   const savedMsgIds = useMemo(() => new Set(personal.savedMessages.map((m) => m.id)), [personal.savedMessages]);
   const totalClicks = allRefs.reduce((n, r) => n + (r.link.clicks || 0), 0);
   const parsed = useMemo(() => parseQuery(search), [search]);
@@ -2966,6 +2967,7 @@ export default function HomePage() {
         />
       )}
       <ChatPanel
+        siteLinks={chatLinks}
         open={chatOpen}
         setOpen={setChatOpen}
         chatEnabled={data?.settings?.chatEnabled !== false}

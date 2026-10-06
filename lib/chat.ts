@@ -15,6 +15,8 @@ const REACTIONS_KEY = "chat:reactions"; // hash: message id -> { emoji: [users] 
 const POLL_KEY = "chat:pollvotes"; // hash: message id -> { optionIndex: [users] }
 const CHANNELS_KEY = "chat:channels"; // hash: channel id -> ChatChannel
 const KEYWORDS_KEY = "chat:keywords"; // hash: username -> words to be alerted about
+const NOTIFY_KEY = "chat:notify"; // hash: username -> { channel: "all" | "mentions" | "none" }
+export type NotifyLevel = "all" | "mentions" | "none";
 const pinsKey = (ch: string) => `chat:pins:${ch}`;
 const typingKey = (ch: string) => `chat:typing:${ch}`;
 // "general" keeps the original key so the existing history carries over
@@ -116,6 +118,9 @@ export interface SendOptions {
   maxLen?: number;
   /** if set, links may only point at these websites */
   linkAllow?: string[];
+  /** a picture already saved with lib/images */
+  img?: string;
+  imgPending?: boolean;
 }
 
 function rollDice(spec: string): string | null {
@@ -130,7 +135,7 @@ function rollDice(spec: string): string | null {
 export async function postMessage(username: string, text: string, opts: SendOptions = {}): Promise<ChatMessage> {
   const ch = cleanChannelId(opts.channel);
   let trimmed = text.trim();
-  if (!trimmed) throw new Error("Message is empty");
+  if (!trimmed && !opts.img) throw new Error("Message is empty");
   const max = Math.min(MAX_MESSAGE_LENGTH, opts.maxLen || MAX_MESSAGE_LENGTH);
   if (trimmed.length > max) throw new Error(`Messages can be at most ${max} characters here`);
   const redis = getRedis();
@@ -141,8 +146,9 @@ export async function postMessage(username: string, text: string, opts: SendOpti
   if (!channel) throw new Error("That channel doesn't exist");
   const who = username.toLowerCase();
   const msg: ChatMessage = { id: uuid(), user: username, text: trimmed, at: new Date().toISOString(), channel: ch };
+  if (opts.img) { msg.img = opts.img; if (opts.imgPending) msg.imgPending = true; }
   // slash commands
-  const cmd = /^\/(\w+)\s*([\s\S]*)$/.exec(trimmed);
+  const cmd = opts.img ? null : /^\/(\w+)\s*([\s\S]*)$/.exec(trimmed);
   if (cmd) {
     const [, name, rest] = cmd;
     const c = name.toLowerCase();
@@ -184,7 +190,7 @@ export async function postMessage(username: string, text: string, opts: SendOpti
   // the same message again and again is spam
   const lastKey = `chat:last:${who}`;
   const last = await redis.get<string>(lastKey);
-  if (last && String(last) === trimmed.toLowerCase()) throw new Error("You just sent that — try saying something new");
+  if (trimmed && last && String(last) === trimmed.toLowerCase()) throw new Error("You just sent that — try saying something new");
   await redis.set(lastKey, trimmed.toLowerCase(), { ex: 30 });
   if (opts.linkAllow?.length) {
     for (const m of trimmed.matchAll(/https?:\/\/([^/\s]+)/gi)) {
@@ -205,9 +211,12 @@ export async function postMessage(username: string, text: string, opts: SendOpti
   // notify @mentions, the person being replied to, and anyone watching for a keyword (never yourself)
   const link = `/?chat=open&ch=${ch}&msg=${msg.id}`;
   const told = new Set<string>([who]);
+  // people who set this channel to "Nothing" don't get told
+  const levels = (await redis.hgetall<Record<string, Record<string, NotifyLevel>>>(NOTIFY_KEY).catch(() => null)) || {};
   const tell = (t: string, kind: "reply" | "mention", text: string) => {
     if (told.has(t)) return;
     told.add(t);
+    if (levels[t]?.[ch] === "none") return;
     notify(t, { kind, from: username, text, link }).catch(() => {});
   };
   if (msg.replyTo) tell(msg.replyTo.user.toLowerCase(), "reply", `${username} replied to you in #${channel.name}: ${trimmed.slice(0, 60)}`);
@@ -223,6 +232,36 @@ export async function postMessage(username: string, text: string, opts: SendOpti
     // keyword alerts are a nice-to-have
   }
   return msg;
+}
+
+/** Your notification level for each channel (missing = "all"). */
+export async function getNotifyLevels(username: string): Promise<Record<string, NotifyLevel>> {
+  return (await getRedis().hget<Record<string, NotifyLevel>>(NOTIFY_KEY, username.toLowerCase())) || {};
+}
+export async function setNotifyLevel(username: string, ch: string, level: unknown): Promise<Record<string, NotifyLevel>> {
+  const next = { ...(await getNotifyLevels(username)) };
+  if (level === "mentions" || level === "none") next[cleanChannelId(ch)] = level;
+  else delete next[cleanChannelId(ch)];
+  await getRedis().hset(NOTIFY_KEY, { [username.toLowerCase()]: next });
+  return next;
+}
+
+/** A message as stored (for its owner and picture). */
+export async function getRawMessage(ch: string, id: string): Promise<ChatMessage | null> {
+  return (await rawMessages(ch)).find((m) => m.id === id) || null;
+}
+
+/** A moderator's answer to a chat picture: show it to everyone, or take it out of the message. */
+export async function settleChatImage(ch: string, imgId: string, ok: boolean) {
+  const list = await rawMessages(cleanChannelId(ch));
+  const m = list.find((x) => x.img === imgId);
+  if (!m) return;
+  await updateMessage(cleanChannelId(ch), m.id, (x) => {
+    const { imgPending: _p, ...rest } = x;
+    if (ok) return rest;
+    const { img: _i, ...noImg } = rest;
+    return { ...noImg, text: x.text || "🖼️ (picture removed by a moderator)" };
+  });
 }
 
 /** Find a message in a channel and change it in place. */

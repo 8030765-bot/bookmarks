@@ -120,6 +120,10 @@ export interface ChatMessage {
   answered?: boolean;
   /** how many replies point at this message (merged in when listing) */
   replies?: number;
+  /** a picture (image id from lib/images) */
+  img?: string;
+  /** the picture is waiting for a moderator (only its sender and staff can see it) */
+  imgPending?: boolean;
 }
 
 export interface ChatChannel {
@@ -186,6 +190,8 @@ export interface SiteSettings {
   lockAdding?: boolean;
   /** defaults to true */
   chatEnabled?: boolean;
+  /** members may send pictures in chat (each is checked by a moderator) — default on */
+  chatImages?: boolean;
   theme?: "dark" | "light" | "auto";
   viewMode?: "grid" | "list";
   sortBy?: "name" | "newest" | "clicks" | "manual";

@@ -777,7 +777,7 @@ export async function handleAction(
       for (const key of ["announcement", "title", "subtitle"] as const) {
         if (typeof patch[key] === "string") s[key] = (patch[key] as string).slice(0, 300);
       }
-      for (const key of ["lockAdding", "chatEnabled"] as const) {
+      for (const key of ["lockAdding", "chatEnabled", "chatImages"] as const) {
         if (typeof patch[key] === "boolean") s[key] = patch[key] as boolean;
       }
       if (typeof patch.startFolderId === "string") {

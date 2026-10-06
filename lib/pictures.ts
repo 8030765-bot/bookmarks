@@ -1,5 +1,6 @@
 import { deleteImage, getImageMeta, parseDataUrl, saveImage, setImageStatus } from "./images";
 import { getProfile, notify, setPictureFields } from "./userdata";
+import { settleChatImage } from "./chat";
 
 /**
  * Profile pictures and banners: upload (waits for a moderator unless staff
@@ -53,7 +54,8 @@ async function applyApproved(user: string, id: string) {
 export async function reviewPicture(id: string, ok: boolean, by: string, reason?: string) {
   const meta = await getImageMeta(id);
   if (!meta || meta.status !== "pending") throw new Error("That picture has already been dealt with");
-  const what = meta.kind === "banner" ? "profile banner" : meta.kind === "avatar" ? "profile picture" : meta.kind === "icon" ? "website icon" : "picture";
+  const what = meta.kind === "banner" ? "profile banner" : meta.kind === "avatar" ? "profile picture" : meta.kind === "icon" ? "website icon" : "chat picture";
+  if (meta.kind === "chat" && meta.ref) await settleChatImage(meta.ref, id, ok).catch(() => {});
   if (ok) {
     await setImageStatus(id, "ok");
     if (meta.kind === "avatar" || meta.kind === "banner") await applyApproved(meta.owner, id);

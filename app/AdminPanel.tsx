@@ -945,6 +945,12 @@ function ChatTab({
         checked={chatOn}
         onChange={(v) => run("setSettings", { settings: { chatEnabled: v } })}
       />
+      <Toggle
+        label="Pictures in chat"
+        hint="Members can paste or upload pictures; each one waits in Reports → Pictures to check before others see it."
+        checked={data.settings?.chatImages !== false}
+        onChange={(v) => run("setSettings", { settings: { chatImages: v } })}
+      />
       <div className="admin-toolbar">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search messages or users…" />
         <DangerButton label="Clear chat" word="CLEAR" warning="Delete ALL chat messages for everyone? This can't be undone — download a copy from the Data tab first if you need one."

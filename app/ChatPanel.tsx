@@ -4,7 +4,8 @@ import { ChatChannel, ChatMessage } from "@/lib/types";
 import { Icon } from "./components/Icon";
 import { holdFast, useOnRevChange } from "./components/sync";
 import { UserChip, useFaces } from "./components/People";
-import ChatText, { KnownLink, applyShortcodes } from "./components/ChatText";
+import ChatText, { KnownLink, SHORTCODES, applyShortcodes } from "./components/ChatText";
+import { shrinkImage } from "./components/ImageCropper";
 import EmojiPicker from "./components/EmojiPicker";
 import { readLocal, writeLocal } from "./components/ui";
 
@@ -36,6 +37,10 @@ interface ChatState {
   channels: ChatChannel[];
   keywords: string[];
   shortcodes: Record<string, string>;
+  /** your notification level per channel (missing = all) */
+  notifyLevels: Record<string, "all" | "mentions" | "none">;
+  /** pictures allowed in chat */
+  images: boolean;
   maxLen: number;
 }
 
@@ -60,6 +65,7 @@ export default function ChatPanel({
   onOpenClubs,
   target,
   fullPage = false,
+  siteLinks = [],
 }: {
   open: boolean;
   setOpen: (fn: (open: boolean) => boolean) => void;
@@ -87,8 +93,10 @@ export default function ChatPanel({
   target?: { channel?: string; msg?: string; reply?: string; text?: string } | null;
   /** the pop-out /chat page */
   fullPage?: boolean;
+  /** the site's websites, for the @link picker */
+  siteLinks?: KnownLink[];
 }) {
-  const [s, setS] = useState<ChatState>({ channel: "general", messages: [], hasMore: false, roles: {}, pins: [], channels: [], keywords: [], shortcodes: {}, maxLen: 500 });
+  const [s, setS] = useState<ChatState>({ channel: "general", messages: [], hasMore: false, roles: {}, pins: [], channels: [], keywords: [], shortcodes: {}, maxLen: 500, notifyLevels: {}, images: true });
   const channel = s.channel;
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -107,7 +115,15 @@ export default function ChatPanel({
   const [chatStyle, setChatStyle] = useState<ChatStyle>("bubbles");
   const [dock, setDock] = useState<Dock>("float");
   const [previews, setPreviews] = useState(true);
-  const [muted, setMuted] = useState<string[]>([]);
+  const [muteUntil, setMuteUntil] = useState<Record<string, number>>({});
+  const muted = Object.keys(muteUntil).filter((c) => muteUntil[c] === 0 || muteUntil[c] > Date.now());
+  const [image, setImage] = useState<string | null>(null);
+  const [imageBusy, setImageBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [sugIdx, setSugIdx] = useState(0);
+  const [linkQ, setLinkQ] = useState<string | null>(null);
+  const [emojiQ, setEmojiQ] = useState<string | null>(null);
+  const [dividerSeen, setDividerSeen] = useState(false);
   const [typing, setTyping] = useState<string[]>([]);
   const [people, setPeople] = useState<string[]>([]);
   const [mentionQ, setMentionQ] = useState<string | null>(null);
@@ -129,7 +145,9 @@ export default function ChatPanel({
     setChatStyle(readLocal("chatStyle", "bubbles"));
     setDock(readLocal("chatDock", "float"));
     setPreviews(readLocal("chatPreviews", true));
-    setMuted(readLocal("chatMuted", []));
+    // older versions kept a plain list of muted channels
+    const old = readLocal<string[]>("chatMuted", []);
+    setMuteUntil({ ...Object.fromEntries(old.map((c) => [c, 0])), ...readLocal<Record<string, number>>("chatMute", {}) });
     setRecentEmoji(readLocal("recentEmoji", []));
     setWelcomed(readLocal("chatWelcomed", false));
   }, []);
@@ -161,6 +179,8 @@ export default function ChatPanel({
         keywords: json.keywords || [],
         shortcodes: json.shortcodes || {},
         maxLen: json.maxLen || 500,
+        notifyLevels: json.notifyLevels || prev.notifyLevels,
+        images: json.images !== false,
       }));
     } catch {
       // network blip — the next change will retry
@@ -210,7 +230,7 @@ export default function ChatPanel({
   // ping when someone @mentions you while chat is closed
   useEffect(() => {
     if (!messages.length) return;
-    if (seenIds.current && user && !open && !muted.includes(channel)) {
+    if (seenIds.current && user && !open && s.notifyLevels[channel] !== "none") {
       const fresh = messages.filter((m) => !seenIds.current!.has(m.id) && m.user !== user && mentions(m.text, user));
       if (fresh.length && !quiet) {
         showToast(`💬 ${fresh[fresh.length - 1].user} mentioned you in #${current?.name || channel}`);
@@ -238,9 +258,25 @@ export default function ChatPanel({
 
   const lastSeenIndex = messages.findIndex((m) => m.id === lastSeenId);
   const unreadList = lastSeenIndex >= 0 ? messages.slice(lastSeenIndex + 1) : [];
-  const unread = !open && !muted.includes(channel) ? unreadList.length : 0;
+  const level = s.notifyLevels[channel] || "all";
+  const unread = open || muted.includes(channel) || level === "none" ? 0
+    : level === "mentions" ? unreadList.filter((m) => mentions(m.text, user)).length : unreadList.length;
   const mentioned = !open && unreadList.some((m) => mentions(m.text, user));
   const unreadMentions = messages.filter((m) => mentions(m.text, user) && m.user !== user && dividerId && messages.findIndex((x) => x.id === dividerId) < messages.indexOf(m));
+
+  const dividerIndex = dividerId ? messages.findIndex((m) => m.id === dividerId) : -1;
+  const newSinceDivider = dividerIndex >= 0 ? messages.slice(dividerIndex + 1).filter((m) => m.user !== user).length : 0;
+  useEffect(() => { setDividerSeen(false); }, [dividerId]);
+  /** Is the "New messages" line on screen? Then there's nothing to jump to. */
+  const checkDivider = useCallback(() => {
+    const list = listRef.current;
+    const line = list?.querySelector(".chat-new-line");
+    if (!list || !line) return;
+    const a = list.getBoundingClientRect();
+    const b = line.getBoundingClientRect();
+    if (b.bottom >= a.top && b.top <= a.bottom) setDividerSeen(true);
+  }, []);
+  useEffect(() => { if (open) { const t = setTimeout(checkDivider, 150); return () => clearTimeout(t); } }, [open, dividerId, newestId, checkDivider]);
 
   async function post(body: Record<string, unknown>) {
     const res = await fetch("/api/chat", {
@@ -283,14 +319,16 @@ export default function ChatPanel({
     e?.preventDefault();
     if (!user) { onNeedLogin(); return; }
     const body = applyShortcodes(text, s.shortcodes).trim();
-    if (!body || sending) return;
+    if ((!body && !image) || sending) return;
     setSending(true);
     try {
       if (editing) {
         await post({ action: "edit", id: editing.id, text: body });
         setEditing(null);
       } else {
-        await post({ text: body, replyTo: replyTo?.id });
+        await post({ text: body, replyTo: replyTo?.id, ...(image ? { image } : {}) });
+        if (image && !canModerate) showToast("Picture sent — others see it once a moderator has checked it");
+        setImage(null);
       }
       setText("");
       writeLocal(`chatDraft:${channel}`, "");
@@ -312,8 +350,14 @@ export default function ChatPanel({
 
   function onType(v: string) {
     setText(v);
+    // "@link maths" picks one of the site's websites; ":smi" finds an emoji; "@na" a person
+    const lk = siteLinks.length ? /(^|\s)@link(?:\s+([^\n@]{0,40}))?$/i.exec(v) : null;
+    setLinkQ(lk ? (lk[2] || "").trim().toLowerCase() : null);
+    const em = !lk ? /(^|\s):([a-z0-9_+-]{2,20})$/i.exec(v) : null;
+    setEmojiQ(em ? em[2].toLowerCase() : null);
+    setSugIdx(0);
     // @mention autocomplete
-    const m = /(^|\s)@([A-Za-z0-9_]{0,20})$/.exec(v);
+    const m = !lk ? /(^|\s)@([A-Za-z0-9_]{0,20})$/.exec(v) : null;
     setMentionQ(m ? m[2].toLowerCase() : null);
     setMentionIdx(0);
     if (m && !people.length) {
@@ -330,6 +374,38 @@ export default function ChatPanel({
     const pool = Array.from(new Set([...online, ...s.messages.map((m) => m.user), ...people])).filter((u) => u.toLowerCase() !== me);
     return pool.filter((u) => u.toLowerCase().startsWith(mentionQ)).slice(0, 6);
   }, [mentionQ, online, s.messages, people, me]);
+  const linkOptions = useMemo(() => {
+    if (linkQ === null) return [];
+    const words = linkQ.split(/\s+/).filter(Boolean);
+    return siteLinks.filter((l) => words.every((w) => `${l.name} ${l.url} ${l.folder}`.toLowerCase().includes(w))).slice(0, 6);
+  }, [linkQ, siteLinks]);
+  const emojiOptions = useMemo(() => {
+    if (emojiQ === null) return [];
+    const all = { ...SHORTCODES, ...s.shortcodes };
+    return Object.entries(all).filter(([k]) => k.startsWith(emojiQ)).slice(0, 6);
+  }, [emojiQ, s.shortcodes]);
+  function pickLink(l: KnownLink) {
+    setText((t) => t.replace(/@link(?:\s+[^\n@]{0,40})?$/i, `${l.url} `));
+    setLinkQ(null);
+    inputRef.current?.focus();
+  }
+  function pickEmoji(em: string) {
+    setText((t) => t.replace(/:([a-z0-9_+-]{2,20})$/i, em));
+    setEmojiQ(null);
+    const next = [em, ...recentEmoji.filter((x) => x !== em)].slice(0, 24);
+    setRecentEmoji(next);
+    writeLocal("recentEmoji", next);
+    inputRef.current?.focus();
+  }
+  async function attach(file: File | undefined | null) {
+    if (!file) return;
+    if (!s.images && !canModerate) { showToast("Pictures are turned off in chat"); return; }
+    setImageBusy(true);
+    try { setImage(await shrinkImage(file, 1280)); inputRef.current?.focus(); }
+    catch (e: any) { showToast(e.message || "Couldn't use that picture"); }
+    finally { setImageBusy(false); }
+  }
+
   function pickMention(name: string) {
     setText((t) => t.replace(/@([A-Za-z0-9_]{0,20})$/, `@${name} `));
     setMentionQ(null);
@@ -369,11 +445,22 @@ export default function ChatPanel({
   const setStyle = savePref<ChatStyle>("chatStyle", setChatStyle);
   const setDockPref = savePref<Dock>("chatDock", setDock);
   const setPrev = savePref<boolean>("chatPreviews", setPreviews);
-  const toggleMute = () => {
-    const next = muted.includes(channel) ? muted.filter((c) => c !== channel) : [...muted, channel];
-    setMuted(next);
-    writeLocal("chatMuted", next);
-    showToast(next.includes(channel) ? `Muted #${current?.name || channel}` : `Unmuted #${current?.name || channel}`);
+  /** Mute this channel for a while (0 = until you unmute; null = unmute). */
+  const muteFor = (until: number | null) => {
+    const next = { ...muteUntil };
+    if (until === null) delete next[channel]; else next[channel] = until;
+    // forget mutes that have run out
+    for (const [c, t] of Object.entries(next)) if (t && t < Date.now()) delete next[c];
+    setMuteUntil(next);
+    writeLocal("chatMute", next);
+    writeLocal("chatMuted", []);
+    const name = `#${current?.name || channel}`;
+    showToast(until === null ? `Unmuted ${name}` : until === 0 ? `Muted ${name}` : `Muted ${name} until ${new Date(until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}${new Date(until).getDate() !== new Date().getDate() ? " tomorrow" : ""}`);
+  };
+  const tomorrowMorning = () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(7, 0, 0, 0); return d.getTime(); };
+  const setLevel = async (lvl: "all" | "mentions" | "none") => {
+    setS((prev) => ({ ...prev, notifyLevels: { ...prev.notifyLevels, [channel]: lvl } }));
+    try { await post({ action: "notifyLevel", level: lvl }); } catch (e: any) { showToast(e.message); }
   };
 
   const faceMap = useFaces();
@@ -438,7 +525,15 @@ export default function ChatPanel({
                     })}
                     <span className="muted">{totalVotes} vote{totalVotes === 1 ? "" : "s"} · tap again to take yours back</span>
                   </div>
-                ) : <ChatText text={m.text} me={user} known={known} previews={previews} />}
+                ) : m.text ? <ChatText text={m.text} me={user} known={known} previews={previews} /> : null}
+              {m.img && (m.imgPending && !mine && !canModerate ? (
+                <span className="chat-img-wait">🖼️ A picture — waiting for a moderator</span>
+              ) : (
+                <a className="chat-img-link" href={`/api/img/${m.img}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+                  <img className="chat-img" src={`/api/img/${m.img}`} alt={`Picture from ${m.user}`} loading="lazy" onLoad={() => { const el = listRef.current; if (el && !scrolledUp) el.scrollTop = el.scrollHeight; }} />
+                  {m.imgPending && <span className="chat-img-note">Waiting for a moderator — only you{mine ? "" : " (and staff)"} can see it</span>}
+                </a>
+              ))}
             </div>
             <div className="msg-tools">
               <button title="React" onClick={(e) => { e.stopPropagation(); setPicker(picker === m.id ? null : m.id); setMenuFor(null); }}>😊</button>
@@ -464,7 +559,7 @@ export default function ChatPanel({
                 // your own: no "are you sure", just an Undo (which sends it again)
                 try {
                   await post({ action: "delete", id: m.id });
-                  if (!m.kind) showToast("Message deleted", { label: "Undo", run: () => { post({ text: m.text, replyTo: m.replyTo?.id }).catch((err: any) => showToast(err.message)); } });
+                  if (!m.kind && m.text && !m.img) showToast("Message deleted", { label: "Undo", run: () => { post({ text: m.text, replyTo: m.replyTo?.id }).catch((err: any) => showToast(err.message)); } });
                   else showToast("Message deleted");
                 } catch (err: any) { showToast(err.message); }
               }}><Icon name="trash" /> Delete</button>}
@@ -542,7 +637,34 @@ export default function ChatPanel({
             </div>
           )}
           <label className="check remember"><input type="checkbox" checked={previews} onChange={(e) => setPrev(e.target.checked)} /> Show link previews</label>
-          <label className="check remember"><input type="checkbox" checked={muted.includes(channel)} onChange={toggleMute} /> Mute #{current?.name || channel}</label>
+          {user && (
+            <div className="chat-notify">
+              <span className="muted">Notify me about #{current?.name || channel}:</span>
+              <div className="seg mini">
+                {([["all", "Everything"], ["mentions", "@mentions"], ["none", "Nothing"]] as const).map(([v, l]) => (
+                  <button key={v} className={level === v ? "on" : ""} onClick={() => setLevel(v)}>{l}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="chat-notify">
+            {muted.includes(channel) ? (
+              <>
+                <span className="muted">🔕 Muted{muteUntil[channel] ? ` until ${new Date(muteUntil[channel]).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}` : ""}</span>
+                <button className="link-btn" onClick={() => muteFor(null)}>Unmute</button>
+              </>
+            ) : (
+              <>
+                <span className="muted">Mute:</span>
+                <div className="seg mini">
+                  <button onClick={() => muteFor(Date.now() + 3600_000)}>1 hour</button>
+                  <button onClick={() => muteFor(Date.now() + 8 * 3600_000)}>8 hours</button>
+                  <button onClick={() => muteFor(tomorrowMorning())}>Until tomorrow</button>
+                  <button onClick={() => muteFor(0)}>Until I unmute</button>
+                </div>
+              </>
+            )}
+          </div>
           {user && (
             <form className="chat-kw" onSubmit={(e) => { e.preventDefault(); const w = kwDraft.trim(); if (!w) return; act({ action: "keywords", words: [...s.keywords, w] }, `You'll be told when someone says “${w}”`); setKwDraft(""); load(); }}>
               <span className="muted">Tell me when someone says:</span>
@@ -626,7 +748,7 @@ export default function ChatPanel({
         className="chat-list"
         ref={listRef}
         onClick={() => { setPicker(null); setMenuFor(null); }}
-        onScroll={(e) => { const el = e.currentTarget; setScrolledUp(el.scrollHeight - el.scrollTop - el.clientHeight > 120); }}
+        onScroll={(e) => { const el = e.currentTarget; setScrolledUp(el.scrollHeight - el.scrollTop - el.clientHeight > 120); if (!dividerSeen) checkDivider(); }}
       >
         {!threadOf && s.hasMore && <button className="btn btn-secondary btn-sm load-older" onClick={loadOlder}>Load older messages</button>}
         {!welcomed && user && (
@@ -640,8 +762,13 @@ export default function ChatPanel({
         {hiddenCount > 0 && <div className="chat-hidden-note">{hiddenCount} message{hiddenCount === 1 ? "" : "s"} from people you blocked are hidden</div>}
         {shown.map((m, i) => renderMessage(m, i, shown))}
       </div>
-      {(scrolledUp || unreadMentions.length > 0) && open && (
+      {(scrolledUp || unreadMentions.length > 0 || (newSinceDivider > 0 && !dividerSeen && !threadOf)) && open && (
         <div className="chat-jumps">
+          {newSinceDivider > 0 && !dividerSeen && !threadOf && (
+            <button className="btn btn-secondary btn-sm" onClick={() => { listRef.current?.querySelector(".chat-new-line")?.scrollIntoView({ block: "start", behavior: "smooth" }); setDividerSeen(true); }}>
+              ↑ {newSinceDivider} new message{newSinceDivider === 1 ? "" : "s"}
+            </button>
+          )}
           {unreadMentions.length > 0 && (
             <button className="btn btn-secondary btn-sm" onClick={() => { const m = unreadMentions[0]; document.querySelector(`[data-msg-id="${m.id}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" }); setHighlight(m.id); setTimeout(() => setHighlight(null), 1500); setDividerId(m.id); }}>
               @ {unreadMentions.length} mention{unreadMentions.length === 1 ? "" : "s"}
@@ -655,12 +782,41 @@ export default function ChatPanel({
       {!chatEnabled ? (
         <div className="chat-form chat-off">Chat has been turned off by an admin.</div>
       ) : user ? (
-        <form className="chat-compose" onSubmit={send}>
+        <form
+          className="chat-compose"
+          onSubmit={send}
+          onDragOver={(e) => { if (s.images && Array.from(e.dataTransfer.types).includes("Files")) e.preventDefault(); }}
+          onDrop={(e) => { const file = Array.from(e.dataTransfer.files || []).find((f) => f.type.startsWith("image/")); if (file) { e.preventDefault(); attach(file); } }}
+        >
           {(replyTo || editing) && (
             <div className="reply-bar">
               <Icon name={editing ? "edit" : "reply"} /> {editing ? "Editing your message" : <>Replying to <strong>{replyTo!.user}</strong></>}
               <span className="reply-snippet">{(editing || replyTo)!.text}</span>
               <button type="button" onClick={() => { setReplyTo(null); if (editing) { setEditing(null); setText(""); } }} aria-label="Cancel"><Icon name="x" /></button>
+            </div>
+          )}
+          {linkOptions.length > 0 && (
+            <div className="mention-menu link-menu">
+              {linkOptions.map((l, i) => (
+                <button type="button" key={l.url} className={i === sugIdx ? "on" : ""} onMouseDown={(e) => { e.preventDefault(); pickLink(l); }}>
+                  {l.emoji} <strong>{l.name}</strong> <span className="muted">{l.folder}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {linkQ !== null && !linkOptions.length && <div className="mention-menu"><span className="muted">No website matches “{linkQ}”</span></div>}
+          {emojiOptions.length > 0 && (
+            <div className="mention-menu">
+              {emojiOptions.map(([k, em], i) => (
+                <button type="button" key={k} className={i === sugIdx ? "on" : ""} onMouseDown={(e) => { e.preventDefault(); pickEmoji(em); }}>{em} :{k}:</button>
+              ))}
+            </div>
+          )}
+          {image && (
+            <div className="chat-attach">
+              <img src={image} alt="Picture to send" />
+              <span className="muted">{canModerate ? "Picture ready" : "Picture ready — a moderator checks it before others see it"}</span>
+              <button type="button" className="ss-x" onClick={() => setImage(null)} aria-label="Remove picture">×</button>
             </div>
           )}
           {mentionOptions.length > 0 && (
@@ -673,15 +829,39 @@ export default function ChatPanel({
           {emojiOpen && <EmojiPicker onPick={addEmoji} recent={recentEmoji} />}
           <div className="chat-form">
             <button type="button" className="emoji-toggle" onClick={() => setEmojiOpen((o) => !o)} title="Emoji">😀</button>
+            {s.images && !editing && (
+              <>
+                <button type="button" className="emoji-toggle" disabled={imageBusy} onClick={() => fileRef.current?.click()} title="Send a picture (or paste one)">{imageBusy ? "…" : "📎"}</button>
+                <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={(e) => { attach(e.target.files?.[0]); e.target.value = ""; }} />
+              </>
+            )}
+            {siteLinks.length > 0 && !editing && (
+              <button type="button" className="emoji-toggle" title="Share one of the site's websites" onClick={() => { setText((t) => `${t}${t && !t.endsWith(" ") ? " " : ""}@link `); setLinkQ(""); inputRef.current?.focus(); }}>🔗</button>
+            )}
             <textarea
               ref={inputRef}
               value={text}
               rows={1}
               onChange={(e) => onType(e.target.value)}
+              onPaste={(e) => {
+                const file = Array.from(e.clipboardData?.files || []).find((f) => f.type.startsWith("image/"));
+                if (file && !editing) { e.preventDefault(); attach(file); }
+              }}
               placeholder={editing ? "Edit your message…" : replyTo ? `Reply to ${replyTo.user}…` : `Message #${current?.name || channel} — @name, /roll, :fire:`}
               maxLength={s.maxLen}
               autoFocus={!fullPage}
               onKeyDown={(e) => {
+                const sug = linkOptions.length || emojiOptions.length;
+                if (sug) {
+                  if (e.key === "ArrowDown") { e.preventDefault(); setSugIdx((i) => (i + 1) % sug); return; }
+                  if (e.key === "ArrowUp") { e.preventDefault(); setSugIdx((i) => (i - 1 + sug) % sug); return; }
+                  if (e.key === "Tab" || e.key === "Enter") {
+                    e.preventDefault();
+                    if (linkOptions.length) pickLink(linkOptions[sugIdx] || linkOptions[0]); else pickEmoji((emojiOptions[sugIdx] || emojiOptions[0])[1]);
+                    return;
+                  }
+                  if (e.key === "Escape") { e.stopPropagation(); setLinkQ(null); setEmojiQ(null); return; }
+                }
                 if (mentionOptions.length) {
                   if (e.key === "ArrowDown") { e.preventDefault(); setMentionIdx((i) => (i + 1) % mentionOptions.length); return; }
                   if (e.key === "ArrowUp") { e.preventDefault(); setMentionIdx((i) => (i - 1 + mentionOptions.length) % mentionOptions.length); return; }
@@ -692,7 +872,7 @@ export default function ChatPanel({
                 if (e.key === "Escape" && (replyTo || editing)) { e.stopPropagation(); setReplyTo(null); if (editing) { setEditing(null); setText(""); } }
               }}
             />
-            <button type="submit" className="btn btn-primary" disabled={sending || !text.trim()}>{editing ? "Save" : "Send"}</button>
+            <button type="submit" className="btn btn-primary" disabled={sending || (!text.trim() && !image)}>{editing ? "Save" : "Send"}</button>
           </div>
           {counter && <div className={`chat-counter ${text.length >= s.maxLen ? "full" : ""}`}>{text.length}/{s.maxLen}</div>}
         </form>

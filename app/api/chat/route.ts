@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   cleanChannelId, deleteMessage, editMessage, getKeywords, getMessages, getPins, getTyping, listChannels, messageOwner,
   postMessage, removeChannel, saveChannel, searchMessages, setAnswered, setKeywords, setPinned, setTyping, toggleReaction, votePoll,
-  getAllMessages,
+  getAllMessages, getNotifyLevels, getRawMessage, setNotifyLevel,
 } from "@/lib/chat";
+import { deleteImage, saveImage } from "@/lib/images";
 import { getBookmarks } from "@/lib/store";
 import { AuthContext, audit, checkAdmin, checkMod, getAuthContext, listRoles } from "@/lib/roles";
 import { errorResponse } from "@/lib/http";
@@ -53,15 +54,17 @@ export async function GET(req: NextRequest) {
     const q = params.get("q");
     if (q) return NextResponse.json({ results: await searchMessages(q, channels.map((c) => c.id)) });
     if (!channels.some((c) => c.id === ch)) throw new Error("That channel doesn't exist or is for club members");
-    const [{ messages, hasMore }, roles, pins, keywords, { settings }] = await Promise.all([
+    const [{ messages, hasMore }, roles, pins, keywords, { settings }, notifyLevels] = await Promise.all([
       getMessages(ch, { before: params.get("before") || undefined }),
       listRoles(),
       getPins(ch),
       ctx.user ? getKeywords(ctx.user) : Promise.resolve([]),
       getBookmarks(),
+      ctx.user ? getNotifyLevels(ctx.user) : Promise.resolve({}),
     ]);
     return NextResponse.json({
-      channel: ch, messages, hasMore, roles, pins, keywords, channels,
+      channel: ch, messages, hasMore, roles, pins, keywords, channels, notifyLevels,
+      images: settings?.chatImages !== false,
       shortcodes: settings?.chatShortcodes || {},
       maxLen: settings?.chatMaxLen || 500,
     });
@@ -96,13 +99,29 @@ export async function POST(req: NextRequest) {
           const why = await restriction(user);
           if (why) throw new Error(why);
         }
-        await postMessage(user, await filterWords(String(body.text || "")), {
-          channel: ch,
-          replyTo: body.replyTo ? String(body.replyTo) : undefined,
-          announce: ctx.role === "owner" || ctx.role === "admin",
-          maxLen: settings?.chatMaxLen,
-          linkAllow: settings?.chatLinkAllow,
-        });
+        {
+          // a picture: shrunk by the page, checked here, and shown to others once a moderator OKs it
+          let img: { id: string; status: string } | null = null;
+          if (body.image) {
+            if (settings?.chatImages === false && !isStaff(ctx)) throw new Error("Pictures are turned off in chat");
+            await rateLimit(`chatimg:${user.toLowerCase()}`, 10, 60 * 60);
+            img = await saveImage(user, "chat", body.image, { approved: isStaff(ctx), ref: ch });
+          }
+          try {
+            await postMessage(user, await filterWords(String(body.text || "")), {
+              channel: ch,
+              replyTo: body.replyTo ? String(body.replyTo) : undefined,
+              announce: ctx.role === "owner" || ctx.role === "admin",
+              maxLen: settings?.chatMaxLen,
+              linkAllow: settings?.chatLinkAllow,
+              img: img?.id,
+              imgPending: img?.status === "pending",
+            });
+          } catch (e) {
+            if (img) await deleteImage(img.id);
+            throw e;
+          }
+        }
         await bumpStat("messages");
         return reply();
       case "react":
@@ -121,9 +140,13 @@ export async function POST(req: NextRequest) {
           if (!(await modCan(ctx.role, "deleteMessages")) && ctx.role === "mod") throw new Error("Admins only — moderators can't delete messages here");
           await audit(ctx, "deleteMessage", `${owner}: ${id}`).catch(() => {});
         }
+        const gone = await getRawMessage(ch, id);
         await deleteMessage(id);
+        if (gone?.img) await deleteImage(gone.img);
         return reply();
       }
+      case "notifyLevel":
+        return NextResponse.json({ notifyLevels: await setNotifyLevel(user, ch, body.level) });
       case "answer":
         await setAnswered(user, ch, id, body.answered !== false, isStaff(ctx));
         return reply();

@@ -1843,3 +1843,16 @@ main:focus{outline:none}
 .ss-head{display:flex;justify-content:space-between;align-items:center}
 .ss-head .link-btn{font-size:.72rem}
 .results-tools .check-inline{margin-right:0;font-size:.78rem;color:var(--text-muted)}
+
+/* ---------- QoL batch D: chat ---------- */
+.chat-notify{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;font-size:.78rem}
+.chat-attach{display:flex;align-items:center;gap:.5rem;padding:.35rem .5rem;margin-bottom:.35rem;border:1px solid var(--border);border-radius:10px;background:var(--surface);font-size:.76rem}
+.chat-attach img{width:44px;height:44px;object-fit:cover;border-radius:6px}
+.chat-attach .ss-x{margin-left:auto}
+.chat-img-link{display:block;margin-top:.3rem;max-width:260px}
+.chat-img{display:block;max-width:100%;max-height:260px;border-radius:10px;border:1px solid var(--border);background:var(--surface-hover)}
+.chat-img-note{display:block;font-size:.7rem;color:var(--warning);margin-top:.2rem}
+.chat-img-wait{display:inline-block;font-size:.8rem;color:var(--text-muted);font-style:italic}
+.link-menu button{display:flex;gap:.35rem;align-items:center;text-align:left}
+.link-menu strong{font-weight:600}
+.emoji-toggle:disabled{opacity:.5}
