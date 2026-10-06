@@ -51,6 +51,13 @@ import { AddAnywhereModal, WeekChanges, downloadBookmarksHtml, downloadFolderCsv
 import { BottomNav, InstallModal, PullIndicator, buzz, usePullToRefresh } from "./components/Mobile";
 import { FeedbackModal, Tour, WhatsNewPopup, useFirstVisit, useLeaveWarning, useWhatsNewAfterUpdate } from "./components/Help";
 import { APP_VERSION } from "./components/changelog-data";
+import { CustomCanvas } from "./components/CustomCanvas";
+import {
+  AnalogWidget, CalendarWidget, ChatPreviewWidget, ClockWidget, CountdownWidget, DateWidget, DayProgressWidget, EventsWidget, NoteWidget, PomodoroWidget,
+  QuoteWidget, ShapeWidget, StopwatchWidget, TodoWidget,
+} from "./components/Widgets";
+import Markdown from "./components/Markdown";
+import { BuiltDesign, DesignPiece, PART_BY_ID, PartDef, PropValue, safeImageUrl } from "@/lib/pieces";
 
 /** Changes that can wait for the connection to come back (each keeps its retry id). */
 const OUTBOX_KEY = "outbox";
@@ -208,6 +215,11 @@ export default function HomePage() {
   const [chatHits, setChatHits] = useState<ChatMessage[]>([]);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [look, setLook] = useState<Look>(DEFAULT_LOOK);
+  // designs from the design builder: the one you use, or (inside the builder) the one being edited
+  const [customDoc, setCustomDoc] = useState<BuiltDesign | null>(null);
+  const [builderPreview, setBuilderPreview] = useState(false);
+  const [previewDesign, setPreviewDesign] = useState<BuiltDesign | null>(null);
+  const [randomSeed, setRandomSeed] = useState(() => Math.floor(Math.random() * 1e6));
   const [seenActivity, setSeenActivity] = useState<string | null>("");
   const lookRef = useRef<Look>(DEFAULT_LOOK);
   const [view, setView] = useState<"grid" | "list">("grid");
@@ -367,7 +379,73 @@ export default function HomePage() {
     });
     setIconStyle(look.iconStyle);
     lookRef.current = look;
-  }, [look, mediaTick]);
+    const custom = builderPreview ? previewDesign : look.ui === "custom" ? customDoc : null;
+    if (builderPreview || look.ui === "custom") {
+      const root = document.documentElement;
+      root.setAttribute("data-ui", "custom");
+      root.removeAttribute("data-glass");
+      if (builderPreview) root.setAttribute("data-builder", "preview");
+      if (custom) {
+        root.setAttribute("data-theme", custom.canvas.tone);
+        root.setAttribute("data-palette", custom.canvas.tone === "light" ? "light" : look.palette === "light" || PALETTES.find((x) => x.id === look.palette)?.light ? "dim" : look.palette);
+        document.body.style.background = custom.canvas.bg;
+      }
+    } else document.body.style.background = "";
+  }, [look, mediaTick, builderPreview, previewDesign, customDoc]);
+
+  // ---------- designs from the design builder ----------
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get("builder") !== "preview") return;
+    // inside the builder's canvas: show whatever design the builder sends
+    setBuilderPreview(true);
+    const onMsg = (e: MessageEvent) => {
+      if (e.origin !== location.origin || !e.data || typeof e.data !== "object") return;
+      if (e.data.type === "design-preview") setPreviewDesign(e.data.design as BuiltDesign);
+      if (e.data.type === "design-section") { setNovaSection(e.data.section || "home"); setSearch(e.data.search || ""); }
+    };
+    window.addEventListener("message", onMsg);
+    window.parent?.postMessage({ type: "preview-ready" }, location.origin);
+    // on phones the page is as tall as its stacked pieces: tell the builder
+    const ro = new ResizeObserver(() => window.parent?.postMessage({ type: "preview-height", h: document.documentElement.scrollHeight }, location.origin));
+    ro.observe(document.body);
+    return () => { window.removeEventListener("message", onMsg); ro.disconnect(); };
+  }, []);
+  useEffect(() => {
+    // the builder (in another tab) can say "use this design" without a reload
+    const onMsg = (e: MessageEvent) => {
+      if (e.origin !== location.origin || e.data?.type !== "use-design" || typeof e.data.id !== "string") return;
+      changeLook({ ...lookRef.current, ui: "custom", customDesign: e.data.id });
+      showToast("🎨 Your design is on — change it any time in Customize → Design");
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (builderPreview || look.ui !== "custom" || !look.customDesign) return;
+    const id = look.customDesign;
+    const cached = readLocal<BuiltDesign | null>(`design:${id}`, null);
+    if (cached?.id === id) setCustomDoc(cached);
+    let alive = true;
+    const load = () => fetch(`/api/designs?id=${id}`).then(async (r) => {
+      if (!alive) return;
+      if (r.status === 404) {
+        setCustomDoc(null);
+        writeLocal(`design:${id}`, null);
+        changeLook({ ...lookRef.current, ui: "classic", customDesign: "" });
+        showToast("That design isn't available any more — back to Classic");
+        return;
+      }
+      const j = await r.json().catch(() => null);
+      if (j?.design) { setCustomDoc(j.design); writeLocal(`design:${id}`, j.design); }
+    }).catch(() => {});
+    load();
+    // pick up changes made in the builder when you come back to this tab
+    const onFocus = () => { if (document.visibilityState === "visible") load(); };
+    document.addEventListener("visibilitychange", onFocus);
+    return () => { alive = false; document.removeEventListener("visibilitychange", onFocus); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [look.ui, look.customDesign, builderPreview]);
 
   // offline support + "update available" (production only — dev reloads constantly)
   useEffect(() => {
@@ -557,15 +635,27 @@ export default function HomePage() {
     showToast("Theme applied 🎨", { label: "Undo", run: () => changeLook(before) }, 8000);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authChecked, user, personal.loaded]);
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const id = params.get("design");
+    if (!id || !/^[a-z0-9]{8}$/.test(id) || !authChecked || (user && syncedFor.current !== user)) return;
+    params.delete("design");
+    window.history.replaceState(null, "", `${location.pathname}${params.toString() ? `?${params}` : ""}${location.hash}`);
+    const before = lookRef.current;
+    changeLook({ ...before, ui: "custom", customDesign: id });
+    showToast("🎨 Design applied", { label: "Undo", run: () => changeLook(before) }, 8000);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authChecked, user, personal.loaded, personal.user]);
   const defaultThemeDone = useRef(false);
   useEffect(() => {
     // new visitors (nothing saved yet) start with the theme the admins picked
     const code = data?.settings?.defaultTheme;
-    if (defaultThemeDone.current || !code || readLocal<unknown>("look", null) !== null) return;
+    const design = data?.settings?.defaultDesign;
+    if (defaultThemeDone.current || (!code && !design) || readLocal<unknown>("look", null) !== null) return;
     defaultThemeDone.current = true;
-    const t = decodeTheme(code);
-    if (t) setLook(cleanLook({ ...DEFAULT_LOOK, ...t }));
-  }, [data?.settings?.defaultTheme]);
+    const t = code ? decodeTheme(code) : null;
+    setLook(cleanLook({ ...DEFAULT_LOOK, ...(t || {}), ...(design ? { ui: "custom" as const, customDesign: design } : {}) }));
+  }, [data?.settings?.defaultTheme, data?.settings?.defaultDesign]);
   useSparkles(look.sparkles);
   useNewYearFireworks();
   const logoClick = useLogoClicks();
@@ -1780,6 +1870,8 @@ export default function HomePage() {
       if (!modal && !showCmd && !suggest && (selected.size || focusedId || expandedId)) {
         clearSelection(); setFocusedId(null); setExpandedId(null); return;
       }
+      // a folder open in a built design closes back to its home
+      if ((look.ui === "custom" || builderPreview) && !modal && !showCmd && !suggest && novaSection !== "home" && !search) { novaGo("home"); return; }
       setShowCmd(false); setModal(null); setSuggest(null); setUserMenu(false); setPrompt(null);
       return;
     }
@@ -2109,14 +2201,115 @@ export default function HomePage() {
 
   /* ---------- pieces shared by the Classic page and the Nova layout ---------- */
   const nova = look.ui === "nova";
+  /* bits of the top bar, also used as pieces in built designs */
+  const brandEl = (
+    <button className="brand" onClick={() => { if (!logoClick()) window.scrollTo({ top: 0, behavior: look.motion ? "smooth" : "auto" }); }} title={look.seasonal ? logo.label : "Back to top"}>
+      <span className="brand-mark">{look.seasonal ? logo.mark : "🔖"}</span>
+      <span className="brand-name">{title}</span>
+    </button>
+  );
+  const moreMenuEl = (
+    <div className="user-menu">
+      <button className={`icon-btn ${moreMenu ? "on" : ""}`} title="More" aria-expanded={moreMenu} onClick={() => setMoreMenu((o) => !o)}>
+        <Icon name="more" />
+      </button>
+      {moreMenu && (
+        <>
+          <div className="menu-backdrop" onClick={() => setMoreMenu(false)} />
+          <div className="menu">
+            <button className="phone-only" onClick={() => { setMoreMenu(false); setModal({ type: "spin" }); }}><Icon name="shuffle" /> Spin the wheel</button>
+            <button className="phone-only" onClick={() => { setMoreMenu(false); setModal({ type: "leaderboard" }); }}><Icon name="trophy" /> Community</button>
+            <button onClick={() => { setMoreMenu(false); setShowCmd(true); }}><Icon name="search" /> Command menu <span className="kbd">Ctrl K</span></button>
+            <button onClick={() => { setMoreMenu(false); openTools(); }}><Icon name="tools" /> Tools <span className="kbd">O</span></button>
+            <button onClick={() => { setMoreMenu(false); setModal({ type: "week" }); }}><Icon name="clock" /> The last 7 days</button>
+            <button onClick={() => { setMoreMenu(false); setModal({ type: "addAnywhere" }); }}><Icon name="plus" /> Add from any website…</button>
+            <button onClick={() => { setMoreMenu(false); if (data) { downloadBookmarksHtml(data); showToast("Downloaded — import it in Chrome or Edge from Bookmarks → Import"); } }}><Icon name="download" /> Download for my browser</button>
+            <button onClick={() => { setMoreMenu(false); setTimeout(() => window.print(), 50); }}><Icon name="list" /> Print the list</button>
+            <button onClick={() => { setMoreMenu(false); setModal({ type: "install" }); }}><Icon name="download" /> Install the app</button>
+            <button onClick={() => { setMoreMenu(false); location.href = "/help"; }}><Icon name="info" /> Help</button>
+            <button onClick={() => { setMoreMenu(false); setModal({ type: "feedback", kind: "bug" }); }}><Icon name="bulb" /> Report a bug</button>
+            <button onClick={() => { setMoreMenu(false); setModal({ type: "feedback", kind: "contact" }); }}><Icon name="chat" /> Message an admin</button>
+            <button onClick={() => { setMoreMenu(false); setHintMode(true); }}><Icon name="info" /> What&apos;s this? (explain buttons)</button>
+            {communityOn && <button onClick={() => { setMoreMenu(false); location.href = "/community"; }}><Icon name="users" /> Community page</button>}
+            {data?.settings?.suggestionsEnabled !== false && <button onClick={() => { setMoreMenu(false); setSuggest({}); }}><Icon name="bulb" /> Suggest a change</button>}
+            {(role === "owner" || role === "admin") && (
+              <>
+                <button onClick={() => { setMoreMenu(false); toggleAsMember("member"); }}><Icon name="eye" /> {asMember ? "Back to admin view" : "View as a member"}</button>
+                {!asMember && <button onClick={() => { setMoreMenu(false); toggleAsMember("guest"); }}><Icon name="eye" /> View as a guest (not logged in)</button>}
+              </>
+            )}
+            {user && <button onClick={() => { setMoreMenu(false); setModal({ type: "profileEdit" }); }}><Icon name="user" /> Edit profile</button>}
+            <button onClick={() => { setMoreMenu(false); openWhatsNew(); }}><Icon name="chart" /> What&apos;s new {hasNews && <span className="dot-inline" />}<span className="kbd">W</span></button>
+            <button onClick={() => { setMoreMenu(false); setModal({ type: "customize" }); }}><Icon name="palette" /> Customize look <span className="kbd">P</span></button>
+            <button onClick={() => { setMoreMenu(false); changeTheme(theme === "dark" ? "light" : "dark"); }}>
+              <Icon name={theme === "dark" ? "sun" : "moon"} /> {theme === "dark" ? "Light mode" : "Dark mode"} <span className="kbd">T</span>
+            </button>
+            <button onClick={() => { setMoreMenu(false); toggleAll(); }}><Icon name="list" /> Collapse / expand all <span className="kbd">X</span></button>
+            {(hiddenCount > 0 || showHidden) && (
+              <button onClick={() => { setMoreMenu(false); setShowHidden((s) => !s); }}>
+                <Icon name={showHidden ? "eyeOff" : "eye"} /> {showHidden ? "Hide my hidden websites" : `Show my hidden websites (${hiddenCount})`}
+              </button>
+            )}
+            {personal.folderOrder.length > 0 && (
+              <button onClick={() => { setMoreMenu(false); personal.setFolderOrder([]); showToast("Back to the normal folder order"); }}><Icon name="reset" /> Reset my folder order</button>
+            )}
+            {Object.values(folderPrefs).some((p) => p.hidden) && !showHidden && (
+              <button onClick={() => { setMoreMenu(false); setShowHidden(true); }}><Icon name="eye" /> Show my hidden folders</button>
+            )}
+            {adminUnlocked && <button onClick={() => { setMoreMenu(false); openNewFolder(true); }}><Icon name="bulb" /> New smart folder</button>}
+            {adminUnlocked && <button onClick={() => { setMoreMenu(false); setModal({ type: "tags" }); }}><Icon name="tag" /> Manage tags</button>}
+            <button onClick={() => { setMoreMenu(false); setModal({ type: "shortcuts" }); }}><Icon name="keyboard" /> Keyboard shortcuts <span className="kbd">?</span></button>
+            {canInstall && <button onClick={installApp}><Icon name="download" /> Install app</button>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+  const adminBtnEl = (
+    <button className={`icon-btn ${showAdmin ? "on" : ""} ${adminUnlocked ? "unlocked" : ""}`} title={adminUnlocked ? `Admin panel${staffCount ? ` — waiting: ${queueSummary(staffQueue)}` : ""}` : "Admin login"} onClick={() => {
+      // open on whatever needs looking at
+      if (adminUnlocked && !showAdmin && staffCount) {
+        const tab = staffQueue.suggestions >= (staffQueue.pictures + staffQueue.reports + staffQueue.messages) ? "suggestions" : staffQueue.notes && !staffQueue.pictures && !staffQueue.reports && !staffQueue.messages ? "community" : "reports";
+        try { sessionStorage.setItem("adminTab", tab); } catch {}
+      }
+      toggleAdmin();
+    }}>
+      <Icon name="lock" />
+      {adminUnlocked && staffCount > 0 && <span className="icon-badge">{staffCount > 99 ? "99+" : staffCount}</span>}
+    </button>
+  );
+  const userMenuEl = user ? (
+    <div className="user-menu">
+      <button className="avatar-btn" onClick={() => setUserMenu((o) => !o)} aria-expanded={userMenu} title={user}>
+        <Avatar name={user} profile={personal.profile as MiniProfile} size={32} />
+      </button>
+      {userMenu && (
+        <>
+          <div className="menu-backdrop" onClick={() => setUserMenu(false)} />
+          <div className="menu">
+            <div className="menu-head">Signed in as<strong>{user}</strong></div>
+            <a href={`/u/${encodeURIComponent(user)}`} className="menu-link"><Icon name="user" /> My profile</a>
+            <button onClick={() => { setUserMenu(false); setModal({ type: "profileEdit" }); }}><Icon name="edit" /> Edit profile</button>
+            <button onClick={() => { setUserMenu(false); setModal({ type: "account" }); }}><Icon name="lock" /> Account &amp; security</button>
+            <button onClick={() => { setUserMenu(false); setMyStuffOpen(true); requestAnimationFrame(() => document.querySelector(".my-stuff")?.scrollIntoView({ behavior: "smooth" })); }}><Icon name="folder" /> My Stuff (private)</button>
+            <a href="/people" className="menu-link"><Icon name="users" /> People</a>
+            <button onClick={() => { setUserMenu(false); setClubsOpen(true); }}><Icon name="tag" /> Clubs</button>
+            <button onClick={() => { setUserMenu(false); setModal({ type: "saved" }); }}><Icon name="star" /> Saved messages</button>
+            <button onClick={() => { setUserMenu(false); setSuggest({}); }}><Icon name="bulb" /> My suggestions</button>
+            <button onClick={() => { setUserMenu(false); openChat(); }}><Icon name="chat" /> Open chat</button>
+            <button onClick={handleLogout}><Icon name="logout" /> Log out</button>
+          </div>
+        </>
+      )}
+    </div>
+  ) : (
+    <button className="btn btn-secondary btn-sm" onClick={() => openLogin()}>Log in</button>
+  );
   const topbarEl = (
       <div className="topbar" ref={topbarRef}>
         <div className="topbar-inner">
           {nova && <button className="icon-btn nv-burger" onClick={() => setNovaNav(true)} title="Folders and menu" aria-label="Open the menu"><Icon name="list" /></button>}
-          <button className="brand" onClick={() => { if (!logoClick()) window.scrollTo({ top: 0, behavior: look.motion ? "smooth" : "auto" }); }} title={look.seasonal ? logo.label : "Back to top"}>
-            <span className="brand-mark">{look.seasonal ? logo.mark : "🔖"}</span>
-            <span className="brand-name">{title}</span>
-          </button>
+          {brandEl}
           <SearchBox
             value={search}
             onChange={setSearch}
@@ -2135,99 +2328,9 @@ export default function HomePage() {
             <button className="icon-btn" title="Spin the wheel (S)" onClick={() => setModal({ type: "spin" })}><Icon name="shuffle" /></button>
             <button className="icon-btn" title="Community (L)" onClick={() => setModal({ type: "leaderboard" })}><Icon name="trophy" /></button>
             {user && <NotificationBell notifications={liveNotifications} open={notifOpen} onOpen={() => setNotifOpen(true)} />}
-            <div className="user-menu">
-              <button className={`icon-btn ${moreMenu ? "on" : ""}`} title="More" aria-expanded={moreMenu} onClick={() => setMoreMenu((o) => !o)}>
-                <Icon name="more" />
-              </button>
-              {moreMenu && (
-                <>
-                  <div className="menu-backdrop" onClick={() => setMoreMenu(false)} />
-                  <div className="menu">
-                    <button className="phone-only" onClick={() => { setMoreMenu(false); setModal({ type: "spin" }); }}><Icon name="shuffle" /> Spin the wheel</button>
-                    <button className="phone-only" onClick={() => { setMoreMenu(false); setModal({ type: "leaderboard" }); }}><Icon name="trophy" /> Community</button>
-                    <button onClick={() => { setMoreMenu(false); setShowCmd(true); }}><Icon name="search" /> Command menu <span className="kbd">Ctrl K</span></button>
-                    <button onClick={() => { setMoreMenu(false); openTools(); }}><Icon name="tools" /> Tools <span className="kbd">O</span></button>
-                    <button onClick={() => { setMoreMenu(false); setModal({ type: "week" }); }}><Icon name="clock" /> The last 7 days</button>
-                    <button onClick={() => { setMoreMenu(false); setModal({ type: "addAnywhere" }); }}><Icon name="plus" /> Add from any website…</button>
-                    <button onClick={() => { setMoreMenu(false); if (data) { downloadBookmarksHtml(data); showToast("Downloaded — import it in Chrome or Edge from Bookmarks → Import"); } }}><Icon name="download" /> Download for my browser</button>
-                    <button onClick={() => { setMoreMenu(false); setTimeout(() => window.print(), 50); }}><Icon name="list" /> Print the list</button>
-                    <button onClick={() => { setMoreMenu(false); setModal({ type: "install" }); }}><Icon name="download" /> Install the app</button>
-                    <button onClick={() => { setMoreMenu(false); location.href = "/help"; }}><Icon name="info" /> Help</button>
-                    <button onClick={() => { setMoreMenu(false); setModal({ type: "feedback", kind: "bug" }); }}><Icon name="bulb" /> Report a bug</button>
-                    <button onClick={() => { setMoreMenu(false); setModal({ type: "feedback", kind: "contact" }); }}><Icon name="chat" /> Message an admin</button>
-                    <button onClick={() => { setMoreMenu(false); setHintMode(true); }}><Icon name="info" /> What&apos;s this? (explain buttons)</button>
-                    {communityOn && <button onClick={() => { setMoreMenu(false); location.href = "/community"; }}><Icon name="users" /> Community page</button>}
-                    {data?.settings?.suggestionsEnabled !== false && <button onClick={() => { setMoreMenu(false); setSuggest({}); }}><Icon name="bulb" /> Suggest a change</button>}
-                    {(role === "owner" || role === "admin") && (
-                      <>
-                        <button onClick={() => { setMoreMenu(false); toggleAsMember("member"); }}><Icon name="eye" /> {asMember ? "Back to admin view" : "View as a member"}</button>
-                        {!asMember && <button onClick={() => { setMoreMenu(false); toggleAsMember("guest"); }}><Icon name="eye" /> View as a guest (not logged in)</button>}
-                      </>
-                    )}
-                    {user && <button onClick={() => { setMoreMenu(false); setModal({ type: "profileEdit" }); }}><Icon name="user" /> Edit profile</button>}
-                    <button onClick={() => { setMoreMenu(false); openWhatsNew(); }}><Icon name="chart" /> What&apos;s new {hasNews && <span className="dot-inline" />}<span className="kbd">W</span></button>
-                    <button onClick={() => { setMoreMenu(false); setModal({ type: "customize" }); }}><Icon name="palette" /> Customize look <span className="kbd">P</span></button>
-                    <button onClick={() => { setMoreMenu(false); changeTheme(theme === "dark" ? "light" : "dark"); }}>
-                      <Icon name={theme === "dark" ? "sun" : "moon"} /> {theme === "dark" ? "Light mode" : "Dark mode"} <span className="kbd">T</span>
-                    </button>
-                    <button onClick={() => { setMoreMenu(false); toggleAll(); }}><Icon name="list" /> Collapse / expand all <span className="kbd">X</span></button>
-                    {(hiddenCount > 0 || showHidden) && (
-                      <button onClick={() => { setMoreMenu(false); setShowHidden((s) => !s); }}>
-                        <Icon name={showHidden ? "eyeOff" : "eye"} /> {showHidden ? "Hide my hidden websites" : `Show my hidden websites (${hiddenCount})`}
-                      </button>
-                    )}
-                    {personal.folderOrder.length > 0 && (
-                      <button onClick={() => { setMoreMenu(false); personal.setFolderOrder([]); showToast("Back to the normal folder order"); }}><Icon name="reset" /> Reset my folder order</button>
-                    )}
-                    {Object.values(folderPrefs).some((p) => p.hidden) && !showHidden && (
-                      <button onClick={() => { setMoreMenu(false); setShowHidden(true); }}><Icon name="eye" /> Show my hidden folders</button>
-                    )}
-                    {adminUnlocked && <button onClick={() => { setMoreMenu(false); openNewFolder(true); }}><Icon name="bulb" /> New smart folder</button>}
-                    {adminUnlocked && <button onClick={() => { setMoreMenu(false); setModal({ type: "tags" }); }}><Icon name="tag" /> Manage tags</button>}
-                    <button onClick={() => { setMoreMenu(false); setModal({ type: "shortcuts" }); }}><Icon name="keyboard" /> Keyboard shortcuts <span className="kbd">?</span></button>
-                    {canInstall && <button onClick={installApp}><Icon name="download" /> Install app</button>}
-                  </div>
-                </>
-              )}
-            </div>
-            <button className={`icon-btn ${showAdmin ? "on" : ""} ${adminUnlocked ? "unlocked" : ""}`} title={adminUnlocked ? `Admin panel${staffCount ? ` — waiting: ${queueSummary(staffQueue)}` : ""}` : "Admin login"} onClick={() => {
-              // open on whatever needs looking at
-              if (adminUnlocked && !showAdmin && staffCount) {
-                const tab = staffQueue.suggestions >= (staffQueue.pictures + staffQueue.reports + staffQueue.messages) ? "suggestions" : staffQueue.notes && !staffQueue.pictures && !staffQueue.reports && !staffQueue.messages ? "community" : "reports";
-                try { sessionStorage.setItem("adminTab", tab); } catch {}
-              }
-              toggleAdmin();
-            }}>
-              <Icon name="lock" />
-              {adminUnlocked && staffCount > 0 && <span className="icon-badge">{staffCount > 99 ? "99+" : staffCount}</span>}
-            </button>
-            {user ? (
-              <div className="user-menu">
-                <button className="avatar-btn" onClick={() => setUserMenu((o) => !o)} aria-expanded={userMenu} title={user}>
-                  <Avatar name={user} profile={personal.profile as MiniProfile} size={32} />
-                </button>
-                {userMenu && (
-                  <>
-                    <div className="menu-backdrop" onClick={() => setUserMenu(false)} />
-                    <div className="menu">
-                      <div className="menu-head">Signed in as<strong>{user}</strong></div>
-                      <a href={`/u/${encodeURIComponent(user)}`} className="menu-link"><Icon name="user" /> My profile</a>
-                      <button onClick={() => { setUserMenu(false); setModal({ type: "profileEdit" }); }}><Icon name="edit" /> Edit profile</button>
-                      <button onClick={() => { setUserMenu(false); setModal({ type: "account" }); }}><Icon name="lock" /> Account &amp; security</button>
-                      <button onClick={() => { setUserMenu(false); setMyStuffOpen(true); requestAnimationFrame(() => document.querySelector(".my-stuff")?.scrollIntoView({ behavior: "smooth" })); }}><Icon name="folder" /> My Stuff (private)</button>
-                      <a href="/people" className="menu-link"><Icon name="users" /> People</a>
-                      <button onClick={() => { setUserMenu(false); setClubsOpen(true); }}><Icon name="tag" /> Clubs</button>
-                      <button onClick={() => { setUserMenu(false); setModal({ type: "saved" }); }}><Icon name="star" /> Saved messages</button>
-                      <button onClick={() => { setUserMenu(false); setSuggest({}); }}><Icon name="bulb" /> My suggestions</button>
-                      <button onClick={() => { setUserMenu(false); openChat(); }}><Icon name="chat" /> Open chat</button>
-                      <button onClick={handleLogout}><Icon name="logout" /> Log out</button>
-                    </div>
-                  </>
-                )}
-              </div>
-            ) : (
-              <button className="btn btn-secondary btn-sm" onClick={() => openLogin()}>Log in</button>
-            )}
+            {moreMenuEl}
+            {adminBtnEl}
+            {userMenuEl}
           </div>
         </div>
       </div>
@@ -2841,10 +2944,495 @@ export default function HomePage() {
     </div>
   );
 
+  /* Classic's pieces (also used in built designs) */
+  const heroEl = (
+    <header className="hero">
+      <h1>{aprilOn ? Array.from(title).reverse().join("") : title}</h1>
+      {look.greeting && <p className="greeting">{greetingFor()}{user ? `, ${user}` : ""} 👋</p>}
+      <p>{data?.settings?.subtitle || DEFAULT_SUBTITLE}</p>
+      <div className="hero-stats">
+        <OnlinePill count={presence.count} users={presence.users} onClick={() => setModal({ type: "leaderboard" })} />
+        <span><strong>{allRefs.length}</strong> websites</span>
+        <span><strong>{data?.folders.length || 0}</strong> folders</span>
+        <span><strong>{totalClicks}</strong> visits</span>
+      </div>
+    </header>
+  );
+  const actionsRowEl = (
+    <div className="actions-row">
+      <div className="actions-left">
+        <button className="btn btn-primary" onClick={() => openAdd()}>
+          <Icon name="plus" /> {addingLocked ? "Suggest a website" : "Add website"}
+        </button>
+        {!addingLocked && (
+          <button className="btn btn-secondary" onClick={() => openNewFolder()}><Icon name="folder" /> New folder</button>
+        )}
+      </div>
+      <div className="actions-right">
+        {allTags.length > 0 && (
+          <button
+            className={`btn btn-secondary btn-sm tags-toggle ${showTags || tagFilters.length ? "active" : ""}`}
+            onClick={() => { const v = !showTags; setShowTags(v); writeLocal("showTags", v); if (!v) setTagFilters([]); }}
+            title="Filter by tag"
+          ># Tags</button>
+        )}
+        <button className="btn btn-secondary btn-sm" onClick={toggleAll} title="Collapse or expand every folder (X)">
+          {sortedFolders.some((f) => !collapsed[f.id]) ? "Collapse all" : "Expand all"}
+        </button>
+        <select value={sort} onChange={(e) => changeSort(e.target.value as Sort)} aria-label="Sort websites">
+          <option value="manual">Manual order</option>
+          <option value="name">Name A–Z</option>
+          <option value="newest">Newest first</option>
+          <option value="clicks">Most visited</option>
+          <option value="likes">Most liked</option>
+          <option value="rating">Top rated</option>
+          {user && <option value="mine">My ratings</option>}
+        </select>
+        <div className="seg-toggle" role="group" aria-label="View">
+          <button className={view === "grid" ? "on" : ""} onClick={() => changeView("grid")} title="Grid view"><Icon name="grid" /></button>
+          <button className={view === "list" ? "on" : ""} onClick={() => changeView("list")} title="List view"><Icon name="list" /></button>
+        </div>
+      </div>
+    </div>
+  );
+  const chipsEl = topFolders.length > 0 && (
+    <nav className="folder-nav sticky" aria-label="Jump to folder">
+      <span className="nav-label">Jump to</span>
+      {topFolders.map((f, i) => {
+        const unread = metaFor(f).unread;
+        return (
+          <button
+            key={f.id}
+            className={`${activeFolder === f.id ? "on" : ""} ${chipDrag && chipDrag !== f.id ? "chip-drop" : ""}`}
+            onClick={() => jumpToFolder(f.id)}
+            style={f.color ? ({ "--folder-accent": f.color } as React.CSSProperties) : undefined}
+            draggable
+            title={`${i < 9 ? `Alt+${i + 1} · ` : ""}drag to rearrange${adminUnlocked && !personal.folderOrder.length ? " for everyone" : " for you"}`}
+            onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", f.id); setChipDrag(f.id); }}
+            onDragEnd={() => setChipDrag(null)}
+            onDragOver={(e) => { if (chipDrag) e.preventDefault(); }}
+            onDrop={(e) => { e.preventDefault(); if (chipDrag) reorderChips(chipDrag, f.id); }}
+          >
+            <span>{f.emoji}</span> {f.name} <em>{f.rule ? "✨" : f.links.length}</em>
+            {unread > 0 && <span className="chip-new" title={`${unread} new since your last visit`}>{unread}</span>}
+          </button>
+        );
+      })}
+    </nav>
+  );
+
+  /* 🎨 Custom: a design made in the design builder, drawn piece by piece */
+  const customDesignNow = builderPreview ? previewDesign : look.ui === "custom" ? customDoc : null;
+  const customHas = (ids: string[]) => !!customDesignNow?.pieces.some((p) => !p.hidden && ids.includes(p.part));
+  const VIEWER_PARTS = ["viewer", "nova-page", "orbit-window", "journal-section", "term-dir"];
+  const LIST_PARTS = ["folders", "classic-folders", "board-columns", "desk-boxes", "zen-lists"];
+  /** a folder opens in the design's folder viewer, or scrolls to it in the folder list */
+  const openFolderCustom = (f: Folder) => {
+    if (customHas(VIEWER_PARTS) || !customHas(LIST_PARTS)) { novaGo(`folder:${f.id}`); return; }
+    if (filtering) { setSearch(""); setTagFilters([]); }
+    setTimeout(() => jumpToFolder(f.id), 30);
+  };
+  function runPieceAction(pr: Record<string, PropValue>) {
+    const v = String(pr.value || "").trim();
+    switch (pr.action) {
+      case "url": {
+        const href = safeHref(/^[\w-]+(\.[\w-]+)+/.test(v) ? `https://${v}` : v);
+        if (!href) { showToast("This button needs a website address (https://…)"); return; }
+        if (pr.newTab === false) location.href = href; else window.open(href, "_blank", "noopener,noreferrer");
+        return;
+      }
+      case "folder": { const f = folderById.get(String(pr.folder)); if (f) openFolderCustom(f); else showToast("Pick a folder for this button in the design builder"); return; }
+      case "search": setSearch(v); requestAnimationFrame(() => searchRef.current?.focus()); return;
+      case "section": novaGo(String(pr.section || "home") as NovaSection); return;
+      case "chat": openChat(); return;
+      case "add": addHere(); return;
+      case "newFolder": openNewFolder(); return;
+      case "customize": setModal({ type: "customize" }); return;
+      case "theme": changeTheme(theme === "dark" ? "light" : "dark"); return;
+      case "tools": openTools(); return;
+      case "spin": setModal({ type: "spin" }); return;
+      case "community": setModal({ type: "leaderboard" }); return;
+      case "palette": setShowCmd(true); return;
+      case "random": { const r = allRefs[Math.floor(Math.random() * allRefs.length)]; if (r) trackAndOpen(r.folder, r.link, true); return; }
+      case "top": window.scrollTo({ top: 0, behavior: look.motion ? "smooth" : "auto" }); return;
+      case "foldAll": toggleAll(); return;
+      case "design": changeLook({ ...look, ui: String(pr.design || "classic") as Design }); return;
+      case "builder": window.open("/builder", "bookmarks-builder"); return;
+      case "profile": if (user) location.href = `/u/${encodeURIComponent(user)}`; else openLogin(); return;
+      case "help": location.href = "/help"; return;
+      case "copy": navigator.clipboard?.writeText(v).then(() => showToast("Copied 📋")).catch(() => {}); return;
+    }
+  }
+  const pieceButton = (pr: Record<string, PropValue>) => {
+    const variant = String(pr.variant || "soft");
+    const label = String(pr.label || "");
+    const iconOnly = variant === "icon" || variant === "dock" || pr.showLabel === false;
+    const on = pr.action === "section" && activeSection === pr.section && !filtering;
+    return (
+      <button className={`cz-btn cz-btn-${variant} ${on ? "on" : ""}`} title={String(pr.tooltip || label)} aria-label={label} onClick={() => runPieceAction(pr)}>
+        {pr.icon ? <span className="cz-btn-emoji" aria-hidden="true">{String(pr.icon)}</span> : null}
+        {!iconOnly && <span className="cz-btn-text">{variant === "terminal" ? `[${label}]` : label}</span>}
+      </button>
+    );
+  };
+  const refList = (refs: LinkRef[], style: string, max: number, empty: string) => refs.length === 0 ? <p className="cz-empty">{empty}</p> : (
+    <div className={`cz-list cz-list-${style}`}>
+      {refs.slice(0, max).map((r) => (
+        <a key={r.link.id} className="cz-li" href={safeHref(r.link.url)} target={look.newTab ? "_blank" : undefined} rel="noopener noreferrer" title={r.link.name}
+          onClick={() => trackAndOpen(r.folder, r.link)}>
+          <Favicon url={r.link.url} name={r.link.name} size={style === "tiles" ? 30 : 20} custom={r.link.iconImg} />
+          {style !== "dock" && <span>{r.link.name}</span>}
+        </a>
+      ))}
+    </div>
+  );
+  const pieceTitle = (emoji: string, text: string) => <div className="cz-title"><span aria-hidden="true">{emoji}</span> {text}</div>;
+  const viewerChrome = (look2: string, inPopup: boolean) => {
+    if (!sectionHead) return null;
+    const body = sectionBody();
+    const close = <button className="cz-close" onClick={closeSection} title="Close (Esc)" aria-label="Close"><Icon name="x" /></button>;
+    if (look2 === "orbit") {
+      return (
+        <OrbitWindow key={filtering ? "search" : novaSection} emoji={sectionHead.emoji} name={sectionHead.name} color={sectionHead.color}
+          sub={filtering ? sectionHead.description : `${sectionHead.count} website${sectionHead.count === 1 ? "" : "s"}`}
+          actions={sectionHead.actions} onClose={closeSection} searching={filtering}>
+          {!filtering && sectionHead.description && <p className="ob-wdesc">{sectionHead.description}</p>}
+          {body}
+        </OrbitWindow>
+      );
+    }
+    if (look2 === "nova") {
+      return (
+        <div className={`nv-content nv-folder-view ${filtering ? "searching" : ""}`}>
+          <NovaBanner emoji={sectionHead.emoji} name={sectionHead.name} description={sectionHead.description} color={sectionHead.color} count={sectionHead.count}>
+            {sectionHead.actions}{close}
+          </NovaBanner>
+          {body}
+        </div>
+      );
+    }
+    if (look2 === "journal") {
+      return (
+        <div className={`nv-folder-view jr-page ${filtering ? "searching" : ""}`}>
+          <JournalSectionHead emoji={sectionHead.emoji} name={sectionHead.name} description={sectionHead.description} color={sectionHead.color} count={sectionHead.count}>
+            {sectionHead.actions}{close}
+          </JournalSectionHead>
+          {body}
+        </div>
+      );
+    }
+    if (look2 === "terminal") {
+      return (
+        <div className={`nv-folder-view tm-dirview ${filtering ? "searching" : ""}`}>
+          <TermPrompt host={termHost} user={user} path={sectionHead.path} cmd={filtering ? `grep -ri "${search.trim()}" ~` : `cd ${sectionHead.path} && ls -la`} />
+          <div className="tm-total">
+            <span>{filtering ? `${sectionHead.count} match${sectionHead.count === 1 ? "" : "es"}` : `total ${sectionHead.count}`}</span>
+            {sectionHead.actions && <span className="tm-actions">{sectionHead.actions}</span>}
+            <button className="tm-up" onClick={closeSection}>{filtering ? "[clear]" : "[cd ..]"}</button>
+          </div>
+          {body}
+        </div>
+      );
+    }
+    return (
+      <div className={`cz-viewer nv-folder-view ${filtering ? "searching" : ""}`} style={sectionHead.color ? ({ "--fc": sectionHead.color } as React.CSSProperties) : undefined}>
+        <header className="cz-viewer-head">
+          <span className="cz-viewer-emoji" aria-hidden="true">{sectionHead.emoji}</span>
+          <span className="cz-viewer-name"><strong>{sectionHead.name}</strong><em>{filtering ? sectionHead.description : `${sectionHead.count} website${sectionHead.count === 1 ? "" : "s"}`}</em></span>
+          <span className="cz-viewer-actions">{sectionHead.actions}{close}</span>
+        </header>
+        {!filtering && sectionHead.description && <p className="cz-viewer-desc">{sectionHead.description}</p>}
+        {body}
+      </div>
+    );
+  };
+  // where an opened folder shows: an "in this box" viewer, else a pop-up (the design's, or a plain one)
+  const inlineViewer = customDesignNow?.pieces.some((p) => !p.hidden && VIEWER_PARTS.includes(p.part) && p.props?.mode === "inline");
+  const popupViewer = customDesignNow?.pieces.find((p) => !p.hidden && VIEWER_PARTS.includes(p.part) && p.props?.mode !== "inline");
+  // no folder viewer at all: a plain pop-up in the middle of the screen
+  const showPopup = !!sectionHead && !inlineViewer && !popupViewer && (!filtering || !customHas(LIST_PARTS));
+  function renderPiece(p: DesignPiece, part: PartDef): React.ReactNode {
+    const pr = (p.props || {}) as Record<string, PropValue>;
+    const visible = topFolders.filter(folderVisible);
+    switch (part.id) {
+      case "topbar": case "classic-topbar": case "nova-topbar": case "orbit-topbar": return topbarEl;
+      case "search": return (
+        <div className={`cz-search ${pr.big ? "big" : ""}`}>
+          <SearchBox value={search} onChange={setSearch} inputRef={searchRef} placeholder={String(pr.placeholder || "") || `Search ${allRefs.length} websites…`}
+            refs={allRefs} folders={sortedFolders} tags={allTags} onEnter={openTopResult} onFocusResults={focusFirstResult}
+            onPickLink={(r) => trackAndOpen(r.folder, r.link, true)} onPickFolder={(f) => { setSearch(""); openFolderCustom(f); }} />
+        </div>
+      );
+      case "title": return <h1 className={`cz-text-title cz-size-${pr.size} ${pr.gradient ? "cz-gradient" : ""}`} style={{ textAlign: pr.align as "left" }}>{aprilOn ? Array.from(title).reverse().join("") : title}</h1>;
+      case "subtitle": return <p className="cz-subtitle" style={{ textAlign: pr.align as "left" }}>{data?.settings?.subtitle || DEFAULT_SUBTITLE}</p>;
+      case "greeting": return <p className={`cz-greeting cz-size-${pr.size}`} style={{ textAlign: pr.align as "left" }} suppressHydrationWarning>{greetingText}{pr.wave ? " 👋" : ""}</p>;
+      case "stats": return <div className="cz-stats hero-stats">{statsEl}</div>;
+      case "folders": case "classic-folders": {
+        const cols = String(pr.cols || "auto");
+        return <div className={`cz-folders ${cols !== "auto" ? `cz-cols-${cols}` : ""}`}>{filtering && !customHas(["results"]) && !showPopup && !inlineViewer && resultsEl}{renderMain()}</div>;
+      }
+      case "folder": {
+        const f = folderById.get(String(pr.folder)) || visible[0];
+        return f ? <div className="cz-folders cz-one">{renderMain(f.id)}</div> : <p className="cz-empty">📁 Pick a folder for this piece</p>;
+      }
+      case "apps": return (
+        <div className={`cz-apps cz-apps-${pr.size}`}>
+          {visible.map((f) => {
+            const n = unreadOf(f);
+            return (
+              <button key={f.id} className="cz-app" style={{ "--fc": f.color || "var(--accent)" } as React.CSSProperties} onClick={() => openFolderCustom(f)} title={f.description || f.name}>
+                <span className="cz-app-icon"><span aria-hidden="true">{f.emoji}</span>{n > 0 && <span className="cz-badge">{n > 9 ? "9+" : n}</span>}</span>
+                {pr.labels !== false && <span className="cz-app-name">{f.name}</span>}
+              </button>
+            );
+          })}
+        </div>
+      );
+      case "chips": return (
+        <nav className="folder-nav cz-chips" aria-label="Folders">
+          {visible.map((f) => (
+            <button key={f.id} className={activeSection === `folder:${f.id}` ? "on" : ""} onClick={() => openFolderCustom(f)} style={f.color ? ({ "--folder-accent": f.color } as React.CSSProperties) : undefined}>
+              <span>{f.emoji}</span> {f.name} <em>{f.rule ? "✨" : f.links.length}</em>
+            </button>
+          ))}
+        </nav>
+      );
+      case "classic-chips": return chipsEl;
+      case "starred": return <>{pieceTitle("⭐", "Starred")}{refList(favorites, String(pr.style), Number(pr.max) || 12, "Press ☆ on a website to keep it here.")}</>;
+      case "later": return <>{pieceTitle("🕐", "Read later")}{refList(readLater, String(pr.style), Number(pr.max) || 12, "Press 🕐 on a website to save it for later.")}</>;
+      case "recent": return <>{pieceTitle("📈", "Recently opened")}{refList(recentOpened, String(pr.style), Number(pr.max) || 8, "Websites you open show up here.")}</>;
+      case "quick": return quickBlock;
+      case "today": return todayBlock || <p className="cz-empty">📅 Today is turned off on this site.</p>;
+      case "polls": return pollsBlock || <p className="cz-empty">🗳️ Polls are turned off on this site.</p>;
+      case "banners": return <div className="cz-banners">{bannersEl}</div>;
+      case "start": return startEl;
+      case "results": return filtering ? resultsEl : builderPreview ? <div className="cz-ghost">🔎 Search results bar — shows while searching</div> : null;
+      case "actions": case "classic-actions": return actionsRowEl;
+      case "classic-hero": return heroEl;
+      case "classic-footer": case "footer": return footerEl;
+      case "link": {
+        const q = String(pr.q || "").trim().toLowerCase();
+        const r = q ? allRefs.find((x) => x.link.name.toLowerCase() === q) || allRefs.find((x) => x.link.url.toLowerCase().includes(q) || x.link.name.toLowerCase().includes(q)) : undefined;
+        if (!r) return <p className="cz-empty">🔗 Type a website&apos;s name for this piece</p>;
+        return (
+          <a className="cz-bigtile" href={safeHref(r.link.url)} target={look.newTab ? "_blank" : undefined} rel="noopener noreferrer" onClick={() => trackAndOpen(r.folder, r.link)} title={r.link.name}>
+            <Favicon url={r.link.url} name={r.link.name} size={44} custom={r.link.iconImg} />
+            {pr.showName !== false && <span>{r.link.name}</span>}
+          </a>
+        );
+      }
+      case "chatpreview": return <ChatPreviewWidget max={Number(pr.max) || 6} loggedIn={!!user} onOpen={() => openChat()} />;
+      case "heading": return <h2 className={`cz-heading cz-size-${pr.size}`} style={{ textAlign: pr.align as "left" }}>{String(pr.text || "")}</h2>;
+      case "text": return <div className={`cz-para cz-size-${pr.size}`} style={{ textAlign: pr.align as "left" }}><Markdown text={String(pr.text || "")} /></div>;
+      case "image": {
+        const src = safeImageUrl(pr.src);
+        // eslint-disable-next-line @next/next/no-img-element
+        return src ? <img className="cz-img" src={src} alt={String(pr.alt || "")} style={{ objectFit: pr.fit as "cover" }} referrerPolicy="no-referrer" /> : <p className="cz-empty">🖼️ Add a picture address (https://…)</p>;
+      }
+      case "clock": return <ClockWidget size={String(pr.size)} align={String(pr.align)} seconds={!!pr.seconds} h24={!!pr.h24} date={pr.date !== false} />;
+      case "analog": return <AnalogWidget seconds={pr.seconds !== false} numbers={!!pr.numbers} />;
+      case "date": return <DateWidget size={String(pr.size)} align={String(pr.align)} format={String(pr.format)} />;
+      case "calendar": return <CalendarWidget />;
+      case "events": return <EventsWidget max={Number(pr.max) || 4} />;
+      case "countdown": return <CountdownWidget title={String(pr.title || "")} date={String(pr.date || "")} />;
+      case "pomodoro": return <PomodoroWidget work={Number(pr.work) || 25} rest={Number(pr.rest) || 5} />;
+      case "stopwatch": return <StopwatchWidget />;
+      case "dayprogress": return <DayProgressWidget from={String(pr.from)} to={String(pr.to)} label={String(pr.label || "")} />;
+      case "note": return <NoteWidget id={p.id} />;
+      case "todo": return <TodoWidget id={p.id} title={String(pr.title || "To do")} />;
+      case "online": return <div className="cz-online"><OnlinePill count={presence.count} users={presence.users} onClick={() => setModal({ type: "leaderboard" })} /></div>;
+      case "random": {
+        const r = allRefs.length ? allRefs[randomSeed % allRefs.length] : undefined;
+        return (
+          <div className="cz-random">
+            {pieceTitle("🎲", "Try this")}
+            {r ? (
+              <a className="cz-bigtile" href={safeHref(r.link.url)} target={look.newTab ? "_blank" : undefined} rel="noopener noreferrer" onClick={() => trackAndOpen(r.folder, r.link)}>
+                <Favicon url={r.link.url} name={r.link.name} size={36} custom={r.link.iconImg} /><span>{r.link.name}</span>
+              </a>
+            ) : <p className="cz-empty">No websites yet</p>}
+            <button className="cz-btn cz-btn-ghost" onClick={() => setRandomSeed(Math.floor(Math.random() * 1e6))}>🔄 Another</button>
+          </div>
+        );
+      }
+      case "quote": return <QuoteWidget align={String(pr.align)} />;
+      case "spotlight": {
+        const id = data?.settings?.linkOfDay?.linkId;
+        const r = (id && allRefs.find((x) => x.link.id === id)) || [...allRefs].sort((a, b) => (b.link.likes?.length || 0) - (a.link.likes?.length || 0))[0];
+        return (
+          <div className="cz-random">
+            {pieceTitle("🔦", "Spotlight")}
+            {r ? (
+              <a className="cz-bigtile" href={safeHref(r.link.url)} target={look.newTab ? "_blank" : undefined} rel="noopener noreferrer" onClick={() => trackAndOpen(r.folder, r.link)}>
+                <Favicon url={r.link.url} name={r.link.name} size={36} custom={r.link.iconImg} /><span>{r.link.name}</span>
+              </a>
+            ) : <p className="cz-empty">Nothing in the spotlight yet</p>}
+          </div>
+        );
+      }
+      case "box": case "glass": case "circle": return <div className="wg-shape" />;
+      case "line": case "divider": case "blob": case "gradient": case "pattern": case "sticker": case "bgimage": return <ShapeWidget part={part.id} props={{ ...pr, src: safeImageUrl(pr.src) }} />;
+      case "profile": return user ? <div className="cz-profile">{userMenuEl}{pr.showName ? <span className="cz-profile-name">{personal.profile.displayName || user}</span> : null}</div> : <button className="btn btn-secondary btn-sm" onClick={() => openLogin()}>Log in</button>;
+      case "login": return user ? <button className="cz-btn cz-btn-soft" onClick={handleLogout}>🚪 <span className="cz-btn-text">Log out</span></button> : <button className="cz-btn cz-btn-filled" onClick={() => openLogin()}>🔑 <span className="cz-btn-text">Log in</span></button>;
+      case "bell": return user ? <div className="cz-iconbox"><NotificationBell notifications={liveNotifications} open={notifOpen} onOpen={() => setNotifOpen(true)} /></div> : builderPreview ? <div className="cz-ghost">🔔</div> : null;
+      case "more": return <div className="cz-iconbox">{moreMenuEl}</div>;
+      case "admin": return role || adminUnlocked ? <div className="cz-iconbox">{adminBtnEl}</div> : builderPreview ? <div className="cz-ghost">🛡️</div> : null;
+      case "logo": return <div className={`cz-logo ${pr.showName === false ? "no-name" : ""}`}>{brandEl}</div>;
+      case "sort": return (
+        <select className="cz-select" value={sort} onChange={(e) => changeSort(e.target.value as Sort)} aria-label="Sort websites">
+          <option value="manual">Manual order</option><option value="name">Name A–Z</option><option value="newest">Newest first</option>
+          <option value="clicks">Most visited</option><option value="likes">Most liked</option><option value="rating">Top rated</option>
+          {user && <option value="mine">My ratings</option>}
+        </select>
+      );
+      case "viewtoggle": return (
+        <div className="seg-toggle" role="group" aria-label="View">
+          <button className={view === "grid" ? "on" : ""} onClick={() => changeView("grid")} title="Tiles"><Icon name="grid" /></button>
+          <button className={view === "list" ? "on" : ""} onClick={() => changeView("list")} title="List"><Icon name="list" /></button>
+        </div>
+      );
+      case "themetoggle": return (
+        <button className={`cz-switch ${theme === "light" ? "on" : ""}`} role="switch" aria-checked={theme === "light"} onClick={() => changeTheme(theme === "dark" ? "light" : "dark")} title="Light / dark">
+          <span>{theme === "light" ? "☀️" : "🌙"}</span>
+        </button>
+      );
+      // the built-in designs' own pieces
+      case "nova-sidebar": return (
+        <NovaSidebar title={title} mark={look.seasonal ? logo.mark : "🔖"} section={activeSection} go={novaGo} folders={novaSideFolders} kids={novaKids}
+          counts={{ starred: favorites.length, later: readLater.length, recent: recentOpened.length, mystuff: personal.myStuff.length }}
+          unread={unreadOf} user={user} profile={personal.profile as MiniProfile} addLabel={addLabel} canNewFolder={!addingLocked} open={novaNav}
+          onClose={() => setNovaNav(false)} onAdd={() => { setNovaNav(false); addHere(); }} onNewFolder={() => { setNovaNav(false); openNewFolder(); }}
+          onTools={betaOk("tools") ? () => { setNovaNav(false); openTools(); } : undefined} onChat={() => { setNovaNav(false); openChat(); }}
+          onCustomize={() => { setNovaNav(false); setModal({ type: "customize" }); }} onTheme={() => changeTheme(theme === "dark" ? "light" : "dark")} theme={theme}
+          onProfile={() => { if (user) location.href = `/u/${encodeURIComponent(user)}`; }} onLogin={() => { setNovaNav(false); openLogin(); }} />
+      );
+      case "nova-home": return (
+        <div className="nv-content">
+          <NovaHome greeting={`${greetingText} 👋`} subtitle={data?.settings?.subtitle || DEFAULT_SUBTITLE} stats={statsEl} extras={<>{startEl}</>}
+            recent={recentOpened} folders={visible} kids={novaKids} onOpenFolder={openFolderCustom} onOpenLink={trackAndOpen} newTab={look.newTab} unread={unreadOf} />
+        </div>
+      );
+      case "orbit-home": return (
+        <OrbitHome greeting={greetingText} subtitle={data?.settings?.subtitle || DEFAULT_SUBTITLE} stats={statsEl} folders={visible} unread={unreadOf}
+          onOpenFolder={openFolderCustom} onNewFolder={!addingLocked ? () => openNewFolder() : undefined} />
+      );
+      case "orbit-dock": case "desk-dock": return (
+        <OrbitDock>
+          <DockButton label="Home" on={activeSection === "home" && !filtering} onClick={() => novaGo("home")}><Icon name="home" /></DockButton>
+          <DockButton label="Starred" on={activeSection === "starred"} onClick={() => novaGo("starred")}><Icon name="star" /></DockButton>
+          <DockButton label="Read later" on={activeSection === "later"} onClick={() => novaGo("later")}><Icon name="clock" /></DockButton>
+          {part.id === "orbit-dock" && <DockButton label="Recently opened" on={activeSection === "recent"} onClick={() => novaGo("recent")}><Icon name="chart" /></DockButton>}
+          {part.id === "orbit-dock" && favorites.length > 0 && <span className="ob-dock-sep" aria-hidden="true" />}
+          {part.id === "orbit-dock" && favorites.slice(0, 5).map((r) => <DockSite key={r.link.id} refItem={r} newTab={look.newTab} onOpen={trackAndOpen} />)}
+          <span className="ob-dock-sep" aria-hidden="true" />
+          <DockButton label={addLabel} onClick={addHere}><Icon name="plus" /></DockButton>
+          <DockButton label="Chat (C)" onClick={() => openChat()}><Icon name="chat" /></DockButton>
+          <DockButton label="Customize (P)" onClick={() => setModal({ type: "customize" })}><Icon name="palette" /></DockButton>
+        </OrbitDock>
+      );
+      case "board-head": return (
+        <header className="bd-head">
+          <div className="bd-title"><h1>{title}</h1><p>{data?.settings?.subtitle || DEFAULT_SUBTITLE}</p></div>
+          <div className="bd-stats">{statsEl}</div>
+          <div className="bd-actions">
+            <button className="btn btn-primary" onClick={() => openAdd()}><Icon name="plus" /> {addLabel}</button>
+            {!addingLocked && <button className="btn btn-secondary" onClick={() => openNewFolder()}><Icon name="folder" /> New folder</button>}
+            <button className="btn btn-secondary" onClick={toggleAll}>{sortedFolders.some((f) => !collapsed[f.id]) ? "Fold all" : "Unfold all"}</button>
+          </div>
+        </header>
+      );
+      case "board-columns": return (
+        <div className="bd-board">
+          {renderMain()}
+          {!addingLocked && !filtering && <button className="bd-newcol" onClick={() => openNewFolder()}><Icon name="plus" /> New folder</button>}
+        </div>
+      );
+      case "desk-home": return (
+        <div className="dk-wrap"><DeskHome greeting={greetingText} folders={novaSideFolders} unread={unreadOf} onJump={openFolderCustom} onNewFolder={!addingLocked ? () => openNewFolder() : undefined} /></div>
+      );
+      case "desk-boxes": return <div className="dk-board">{renderMain()}</div>;
+      case "journal-mast": return (
+        <JournalMast title={title} subtitle={data?.settings?.subtitle || DEFAULT_SUBTITLE}
+          edition={<>{allRefs.length} websites · {topFolders.length} sections · {presence.count} reading now</>}
+          nav={(
+            <>
+              <button className={activeSection === "home" && !filtering ? "on" : ""} onClick={() => novaGo("home")}>Front page</button>
+              {novaSideFolders.map((f) => <button key={f.id} className={activeSection === `folder:${f.id}` ? "on" : ""} onClick={() => openFolderCustom(f)}>{f.name}</button>)}
+              <span className="jr-nav-sep" aria-hidden="true" />
+              <button className={activeSection === "starred" ? "on" : ""} onClick={() => novaGo("starred")}>★ Starred</button>
+              <button className={activeSection === "later" ? "on" : ""} onClick={() => novaGo("later")}>Read later</button>
+            </>
+          )} />
+      );
+      case "journal-front": return (
+        <JournalFront refs={allRefs} folders={novaSideFolders} kids={novaKids} onOpenFolder={openFolderCustom} onOpenLink={trackAndOpen} newTab={look.newTab}
+          notices={todayBlock || pollsBlock ? <>{todayBlock}{pollsBlock}</> : undefined} recent={recentOpened} />
+      );
+      case "term-tree": return (
+        <TermTree host={termHost} user={user} section={filtering ? "" : activeSection} go={(s) => novaGo(s as NovaSection)} folders={novaSideFolders} kids={novaKids}
+          counts={{ starred: favorites.length, later: readLater.length, recent: recentOpened.length, mystuff: personal.myStuff.length }} unread={unreadOf}
+          actions={(
+            <>
+              <button onClick={addHere}>[+ {addingLocked ? "suggest" : "add"}]</button>
+              <button onClick={() => openChat()}>[chat]</button>
+              <button onClick={() => setModal({ type: "customize" })}>[customize]</button>
+              {user ? <a href={`/u/${encodeURIComponent(user)}`}>[~{user}]</a> : <button onClick={() => openLogin()}>[login]</button>}
+            </>
+          )} />
+      );
+      case "term-home": return (
+        <div className="tm-screen">
+          <TermHome host={termHost} user={user} title={title} version={APP_VERSION}
+            stats={`${allRefs.length} websites · ${data?.folders.length || 0} folders · ${totalClicks} visits · ${presence.count} online`}
+            folders={novaSideFolders} unread={unreadOf} onOpenFolder={openFolderCustom} recent={recentOpened} onOpenLink={trackAndOpen} newTab={look.newTab} />
+        </div>
+      );
+      case "term-prompt": return <div className="tm-screen"><TermPrompt host={termHost} user={user} path="~" cmd={String(pr.cmd || "")}><span className="tm-cursor" aria-hidden="true" /></TermPrompt></div>;
+      case "zen-hero": return <ZenHero greeting={greetingText} />;
+      case "zen-lists": return <div className="zn-cols">{renderMain()}</div>;
+      default:
+        if (VIEWER_PARTS.includes(part.id)) {
+          const lk = String(pr.look || "plain");
+          if (pr.mode !== "inline") {
+            // a pop-up window: floats over the page in its spot while a folder (or search) is open
+            if (sectionHead) return <div className={`cz-viewer-box cz-look-${lk}`}>{viewerChrome(lk, true)}</div>;
+            return null;
+          }
+          if (sectionHead) return <div className={`cz-viewer-box cz-look-${lk}`}>{viewerChrome(lk, false)}</div>;
+          if (pr.empty === "folders") return <div className="cz-folders">{renderMain()}</div>;
+          if (pr.empty === "hint") return <p className="cz-empty cz-pick">👈 Pick a folder to see its websites here</p>;
+          return <div />;
+        }
+        if (part.folder === "Functions & buttons") return pieceButton(pr);
+        return null;
+    }
+  }
+  const customLayout = () => {
+    if (!customDesignNow) {
+      return (
+        <div className="cz-loading">
+          <div className="skeleton" />
+          {!builderPreview && <p>Loading your design… <button className="link-btn" onClick={() => changeLook({ ...look, ui: "classic" })}>Use Classic instead</button></p>}
+        </div>
+      );
+    }
+    return (
+      <CustomCanvas design={customDesignNow} render={renderPiece} className={builderPreview ? "cz-in-builder" : ""}
+        extraClass={(p) => (sectionHead && p.id === popupViewer?.id ? "cz-floating" : "")}>
+        {sectionHead && popupViewer && <div className="cz-float-bg" onClick={closeSection} aria-hidden="true" />}
+        {showPopup && (
+          <div className="cz-pop" onClick={(e) => { if (e.target === e.currentTarget) closeSection(); }}>
+            <div className="cz-pop-win cz-look-plain">{viewerChrome("plain", true)}</div>
+          </div>
+        )}
+      </CustomCanvas>
+    );
+  };
+
   const LAYOUTS: Partial<Record<Design, () => React.ReactNode>> = { nova: novaLayout, orbit: orbitLayout, board: boardLayout, desk: deskLayout, journal: journalLayout, terminal: terminalLayout, zen: zenLayout };
-  const designEl = LAYOUTS[look.ui]?.();
+  const designEl = builderPreview || look.ui === "custom" ? customLayout() : LAYOUTS[look.ui]?.();
   /** these place the top bar themselves */
-  const ownTopbar = look.ui !== "classic" && look.ui !== "board" && look.ui !== "desk";
+  const ownTopbar = builderPreview || (look.ui !== "classic" && look.ui !== "board" && look.ui !== "desk");
 
   return (
     <div className={`shell ${showAdmin ? "with-admin" : ""}`}>
@@ -2901,20 +3489,10 @@ export default function HomePage() {
         </div>
       )}
       {dropHint && <div className="drop-overlay" aria-hidden="true"><div>🔗 Drop it on a folder, or anywhere to add it</div></div>}
-      {look.sideNav && !PAGED_DESIGNS.includes(look.ui) && <SideNav folders={topFolders} active={activeFolder} onJump={jumpToFolder} counts={(f) => f.links.length} />}
+      {look.sideNav && !PAGED_DESIGNS.includes(look.ui) && look.ui !== "custom" && !builderPreview && <SideNav folders={topFolders} active={activeFolder} onJump={jumpToFolder} counts={(f) => f.links.length} />}
       {designEl ?? (
       <div className="app">
-        <header className="hero">
-          <h1>{aprilOn ? Array.from(title).reverse().join("") : title}</h1>
-          {look.greeting && <p className="greeting">{greetingFor()}{user ? `, ${user}` : ""} 👋</p>}
-          <p>{data?.settings?.subtitle || DEFAULT_SUBTITLE}</p>
-          <div className="hero-stats">
-            <OnlinePill count={presence.count} users={presence.users} onClick={() => setModal({ type: "leaderboard" })} />
-            <span><strong>{allRefs.length}</strong> websites</span>
-            <span><strong>{data?.folders.length || 0}</strong> folders</span>
-            <span><strong>{totalClicks}</strong> visits</span>
-          </div>
-        </header>
+        {heroEl}
 
         {bannersEl}
 
@@ -2922,41 +3500,7 @@ export default function HomePage() {
           ? look.order.map((sec) => <Fragment key={sec}>{sec === "today" ? todayBlock : sec === "polls" ? pollsBlock : !filtering && quickBlock}</Fragment>)
           : <>{todayBlock}{pollsBlock}</>}
 
-        <div className="actions-row">
-          <div className="actions-left">
-            <button className="btn btn-primary" onClick={() => openAdd()}>
-              <Icon name="plus" /> {addingLocked ? "Suggest a website" : "Add website"}
-            </button>
-            {!addingLocked && (
-              <button className="btn btn-secondary" onClick={() => openNewFolder()}><Icon name="folder" /> New folder</button>
-            )}
-          </div>
-          <div className="actions-right">
-            {allTags.length > 0 && (
-              <button
-                className={`btn btn-secondary btn-sm tags-toggle ${showTags || tagFilters.length ? "active" : ""}`}
-                onClick={() => { const v = !showTags; setShowTags(v); writeLocal("showTags", v); if (!v) setTagFilters([]); }}
-                title="Filter by tag"
-              ># Tags</button>
-            )}
-            <button className="btn btn-secondary btn-sm" onClick={toggleAll} title="Collapse or expand every folder (X)">
-              {sortedFolders.some((f) => !collapsed[f.id]) ? "Collapse all" : "Expand all"}
-            </button>
-            <select value={sort} onChange={(e) => changeSort(e.target.value as Sort)} aria-label="Sort websites">
-              <option value="manual">Manual order</option>
-              <option value="name">Name A–Z</option>
-              <option value="newest">Newest first</option>
-              <option value="clicks">Most visited</option>
-              <option value="likes">Most liked</option>
-              <option value="rating">Top rated</option>
-              {user && <option value="mine">My ratings</option>}
-            </select>
-            <div className="seg-toggle" role="group" aria-label="View">
-              <button className={view === "grid" ? "on" : ""} onClick={() => changeView("grid")} title="Grid view"><Icon name="grid" /></button>
-              <button className={view === "list" ? "on" : ""} onClick={() => changeView("list")} title="List view"><Icon name="list" /></button>
-            </div>
-          </div>
-        </div>
+        {actionsRowEl}
 
         {spaces.length > 0 && (
           <div className="space-tabs" role="tablist" aria-label="Spaces">
@@ -2974,31 +3518,7 @@ export default function HomePage() {
             <button className="announcement-x" title="Got it" onClick={() => { setStartDismissed(true); writeLocal("startDismissed", true); }}><Icon name="x" /></button>
           </div>
         )}
-        {topFolders.length > 0 && (
-          <nav className="folder-nav sticky" aria-label="Jump to folder">
-            <span className="nav-label">Jump to</span>
-            {topFolders.map((f, i) => {
-              const unread = metaFor(f).unread;
-              return (
-                <button
-                  key={f.id}
-                  className={`${activeFolder === f.id ? "on" : ""} ${chipDrag && chipDrag !== f.id ? "chip-drop" : ""}`}
-                  onClick={() => jumpToFolder(f.id)}
-                  style={f.color ? ({ "--folder-accent": f.color } as React.CSSProperties) : undefined}
-                  draggable
-                  title={`${i < 9 ? `Alt+${i + 1} · ` : ""}drag to rearrange${adminUnlocked && !personal.folderOrder.length ? " for everyone" : " for you"}`}
-                  onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", f.id); setChipDrag(f.id); }}
-                  onDragEnd={() => setChipDrag(null)}
-                  onDragOver={(e) => { if (chipDrag) e.preventDefault(); }}
-                  onDrop={(e) => { e.preventDefault(); if (chipDrag) reorderChips(chipDrag, f.id); }}
-                >
-                  <span>{f.emoji}</span> {f.name} <em>{f.rule ? "✨" : f.links.length}</em>
-                  {unread > 0 && <span className="chip-new" title={`${unread} new since your last visit`}>{unread}</span>}
-                </button>
-              );
-            })}
-          </nav>
-        )}
+        {chipsEl}
         {(personal.views.length > 0 || filtering) && (
           <div className="views-bar">
             <span className="nav-label">Views</span>

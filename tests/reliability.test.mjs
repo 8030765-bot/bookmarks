@@ -62,8 +62,8 @@ ok("form posts blocked", form.status === 415);
 
 // security headers
 const page = await fetch(`${BASE}/`);
-ok("CSP header set", (page.headers.get("content-security-policy") || "").includes("frame-ancestors 'none'"));
-ok("clickjacking protection", page.headers.get("x-frame-options") === "DENY");
+ok("CSP header set", (page.headers.get("content-security-policy") || "").includes("frame-ancestors 'self'"));
+ok("clickjacking protection (only the site can frame itself)", page.headers.get("x-frame-options") === "SAMEORIGIN");
 ok("no x-powered-by", !page.headers.get("x-powered-by"));
 
 // health + quota handling

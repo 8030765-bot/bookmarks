@@ -18,6 +18,7 @@ function DesignThumb({ id }: { id: Design }) {
       {id === "desk" && <><span className="t-bar" /><span className="t-clock" />{boxes([[44, 18, 8, 9], [54, 18, 8, 9], [64, 18, 8, 9], [74, 18, 8, 9]], "t-app")}{boxes([[6, 36, 28, 22], [36, 36, 28, 22], [66, 36, 28, 22], [6, 62, 28, 16], [36, 62, 28, 16]], "t-col")}<span className="t-dock" /></>}
       {id === "journal" && <><span className="t-mast" /><span className="t-rule" />{boxes([[6, 36, 54, 34], [64, 36, 30, 6], [64, 46, 30, 6], [64, 56, 30, 6], [6, 76, 26, 4], [36, 76, 26, 4], [66, 76, 28, 4]], "t-ink")}</>}
       {id === "terminal" && <><span className="t-tree" />{boxes([[34, 14, 40, 5], [34, 26, 56, 5], [34, 36, 48, 5], [34, 46, 52, 5], [34, 56, 30, 5], [34, 70, 8, 6]], "t-line")}</>}
+      {id === "custom" && <>{boxes([[6, 10, 30, 14], [40, 10, 54, 14], [6, 30, 56, 50], [66, 30, 28, 22], [66, 58, 28, 22]], "t-piece")}<span className="t-cursor">↖</span></>}
       {id === "zen" && <><span className="t-big" />{boxes([[10, 58, 22, 4], [10, 66, 18, 4], [10, 74, 20, 4], [40, 58, 20, 4], [40, 66, 22, 4], [70, 58, 20, 4], [70, 66, 16, 4]], "t-text")}</>}
     </span>
   );
@@ -123,6 +124,13 @@ export function ThemeEditor({ look, onChange, onClose, startView, onStartView, f
                 <em>{d.blurb}</em>
               </button>
             ))}
+            <button type="button" className={`ui-option ui-build ${look.ui === "custom" ? "on" : ""}`} aria-checked={look.ui === "custom"} role="radio"
+              onClick={() => window.open(look.ui === "custom" && look.customDesign ? `/builder?id=${look.customDesign}` : "/builder", "bookmarks-builder")}>
+              <span className="ui-new">New</span>
+              <DesignThumb id="custom" />
+              <strong>🎨 Build your own</strong>
+              <em>{look.ui === "custom" ? "You're using a design you built — click to change it in the builder." : "Drag pieces of every design onto a page, Figma style, and colour everything. Opens in a new tab."}</em>
+            </button>
           </div>
         </div>
         <Preview />

@@ -13,19 +13,20 @@ const csp = [
   "media-src 'self' data:",
   "worker-src 'self'",
   "manifest-src 'self'",
-  "frame-ancestors 'none'",
+  // only the site itself may show its pages in a frame (the design builder's live preview)
+  "frame-ancestors 'self'",
   "base-uri 'self'",
   "form-action 'self'",
   "object-src 'none'",
 ].join("; ");
 
 // the folder widget (/embed/…) may be shown inside other sites; nothing else can
-const embedCsp = csp.replace("frame-ancestors 'none'", "frame-ancestors *");
+const embedCsp = csp.replace("frame-ancestors 'self'", "frame-ancestors *");
 
 const securityHeaders = [
   { key: "Content-Security-Policy", value: csp },
   { key: "X-Content-Type-Options", value: "nosniff" },
-  { key: "X-Frame-Options", value: "DENY" },
+  { key: "X-Frame-Options", value: "SAMEORIGIN" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Permissions-Policy", value: "camera=(), geolocation=(), microphone=(self), payment=()" },
 ];

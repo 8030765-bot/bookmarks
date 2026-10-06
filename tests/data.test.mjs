@@ -89,7 +89,7 @@ ok("calendar file for events", res.headers.get("content-type").includes("text/ca
 res = await fetch(`${BASE}/embed/${sci}`);
 ok("embed pages may be framed by other sites", (res.headers.get("content-security-policy") || "").includes("frame-ancestors *") && !res.headers.get("x-frame-options"));
 res = await fetch(`${BASE}/`);
-ok("…but nothing else can", (res.headers.get("content-security-policy") || "").includes("frame-ancestors 'none'") && res.headers.get("x-frame-options") === "DENY");
+ok("…but other pages only by the site itself", (res.headers.get("content-security-policy") || "").includes("frame-ancestors 'self'") && res.headers.get("x-frame-options") === "SAMEORIGIN");
 
 /* ---------- bring your settings to another account ---------- */
 await me("ivy", { action: "linkPref", linkId: desmos.id, patch: { note: "use for homework", later: true } });

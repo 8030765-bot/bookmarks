@@ -243,6 +243,8 @@ export interface SiteSettings {
   siteBirthday?: string;
   /** look: the theme new visitors start with (a theme code) */
   defaultTheme?: string;
+  /** look: a design from the design builder that new visitors start with (its id) */
+  defaultDesign?: string;
   /** look: an admin-picked theme people can try this month */
   themeOfMonth?: { code: string; name: string };
   /** fun: April Fools mode, switched on by an admin */

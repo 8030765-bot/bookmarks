@@ -823,6 +823,7 @@ export async function handleAction(
       // look
       const themeCode = (v: unknown) => (typeof v === "string" && /^TB1\.[A-Za-z0-9_-]{2,600}$/.test(v) ? v : undefined);
       if (patch.defaultTheme !== undefined) s.defaultTheme = themeCode(patch.defaultTheme);
+      if (patch.defaultDesign !== undefined) s.defaultDesign = typeof patch.defaultDesign === "string" && /^[a-z0-9]{8}$/.test(patch.defaultDesign) ? patch.defaultDesign : undefined;
       if (patch.themeOfMonth !== undefined) {
         const t = patch.themeOfMonth as Record<string, unknown> | null;
         const code = themeCode(t?.code);

@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import "./nova.css";
 import "./designs.css";
+import "./custom.css";
 import LookBoot from "./components/LookBoot";
 import EscapeClose from "./components/EscapeClose";
 import { PageFeedback } from "./components/Help";

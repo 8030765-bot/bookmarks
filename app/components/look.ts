@@ -66,13 +66,16 @@ export const DESIGNS = [
   { id: "terminal", name: "Terminal", emoji: "💻", blurb: "A retro hacker screen: green text, a folder tree, and websites as files." },
   { id: "zen", name: "Zen", emoji: "🍃", blurb: "Calm and minimal: a big clock, one search box, and plain lists of links." },
 ] as const;
-export type Design = (typeof DESIGNS)[number]["id"];
+/** "custom" is a design made in the design builder (see Look.customDesign) */
+export type Design = (typeof DESIGNS)[number]["id"] | "custom";
 /** designs that show one folder at a time (with a Home page) */
 export const PAGED_DESIGNS: readonly Design[] = ["nova", "orbit", "journal", "terminal"];
 
 export interface Look {
   /** the overall design (see DESIGNS) */
   ui: Design;
+  /** the design-builder design to use when ui is "custom" */
+  customDesign: string;
   palette: Palette;
   accent: string;
   density: "comfy" | "compact" | "large";
@@ -139,7 +142,7 @@ export interface Look {
 }
 export const DEFAULT_ORDER: Section[] = ["today", "polls", "quick"];
 export const DEFAULT_LOOK: Look = {
-  ui: "classic",
+  ui: "classic", customDesign: "",
   palette: "black", accent: "", density: "comfy", motion: true, newTab: true, descriptions: false, iconTint: false, specialFolders: false, hideEmpty: false,
   font: "inter", fontScale: 1, weight: "normal", lineHeight: 1.5,
   radius: 14, cardStyle: "outlined", hover: "none", iconGrid: false, folderHeader: "plain", folderBorders: false, width: "normal", smallHeader: false, sideNav: false,
@@ -158,7 +161,9 @@ export function cleanLook(raw: Partial<Look> | null | undefined): Look {
   const oneOf = (list: readonly unknown[]) => (v: unknown) => list.includes(v);
   const bool = (v: unknown) => typeof v === "boolean";
   const num = (min: number, max: number) => (v: unknown) => typeof v === "number" && v >= min && v <= max;
-  pick("ui", oneOf(DESIGNS.map((d) => d.id)));
+  pick("ui", oneOf([...DESIGNS.map((d) => d.id), "custom"]));
+  pick("customDesign", (v) => typeof v === "string" && (v === "" || /^[a-z0-9]{8}$/.test(v)));
+  if (out.ui === "custom" && !out.customDesign) out.ui = "classic";
   pick("palette", oneOf(PALETTES.map((p) => p.id)));
   pick("accent", (v) => typeof v === "string" && (v === "" || /^#[0-9a-f]{6}$/i.test(v)));
   pick("density", oneOf(["comfy", "compact", "large"]));
@@ -190,7 +195,7 @@ export function cleanLook(raw: Partial<Look> | null | undefined): Look {
 }
 
 /* ---------- share a theme as a code ---------- */
-const SHARE_KEYS: (keyof Look)[] = ["ui", "palette", "accent", "font", "fontScale", "weight", "lineHeight", "radius", "cardStyle", "hover", "folderHeader",
+const SHARE_KEYS: (keyof Look)[] = ["ui", "customDesign", "palette", "accent", "font", "fontScale", "weight", "lineHeight", "radius", "cardStyle", "hover", "folderHeader",
   "folderBorders", "bg", "animatedBg", "gradientTitle", "glow", "minimal", "iconStyle", "width", "density"];
 export function encodeTheme(look: Look): string {
   const o: Record<string, unknown> = {};
@@ -265,7 +270,7 @@ export function effectivePalette(look: Look, prefersDark: boolean, now = new Dat
 }
 
 /* ---------- fonts load only when someone picks them ---------- */
-function ensureFont(google?: string, id = "font") {
+export function ensureFont(google?: string, id = "font") {
   if (!google) return;
   const href = `https://fonts.googleapis.com/css2?family=${google}&display=swap`;
   const elId = `gf-${id}`;
@@ -278,6 +283,15 @@ function ensureFont(google?: string, id = "font") {
   document.head.appendChild(link);
 }
 
+/** each design's own fonts */
+export const DESIGN_FONTS: Partial<Record<Design, string>> = {
+  nova: "Plus+Jakarta+Sans:wght@500;600;700;800",
+  orbit: "Plus+Jakarta+Sans:wght@500;600;700;800",
+  journal: "Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..700&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400",
+  terminal: "JetBrains+Mono:wght@400;600;700;800&family=VT323",
+  zen: "Instrument+Serif:ital@0;1",
+};
+
 export interface LookContext { prefersDark: boolean; reduceMotion: boolean; seasonAccentAllowed?: boolean }
 export function applyLook(look: Look, ctx: LookContext = { prefersDark: true, reduceMotion: false }) {
   const root = document.documentElement;
@@ -289,14 +303,7 @@ export function applyLook(look: Look, ctx: LookContext = { prefersDark: true, re
   if (look.ui === "nova" || look.ui === "orbit") root.setAttribute("data-glass", "on");
   else root.removeAttribute("data-glass");
   // each design's own fonts (loaded only when it's on)
-  const designFont: Partial<Record<Design, string>> = {
-    nova: "Plus+Jakarta+Sans:wght@500;600;700;800",
-    orbit: "Plus+Jakarta+Sans:wght@500;600;700;800",
-    journal: "Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..700&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400",
-    terminal: "JetBrains+Mono:wght@400;600;700;800&family=VT323",
-    zen: "Instrument+Serif:ital@0;1",
-  };
-  if (designFont[look.ui]) ensureFont(designFont[look.ui], "display");
+  if (DESIGN_FONTS[look.ui]) ensureFont(DESIGN_FONTS[look.ui], "display");
   set("theme", isLightPalette(palette) ? "light" : "dark");
   set("palette", palette);
   set("density", look.density);

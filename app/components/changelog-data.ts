@@ -1,6 +1,16 @@
 /** Updates to the site itself, newest first (shared by the changelog page and the "what's new" pop-up). */
 export const RELEASES: { version: string; date: string; title: string; items: string[] }[] = [
   {
+    version: "3.1", date: "2026-10", title: "Build your own design",
+    items: [
+      "🎨 The design builder (Customize → Design → Build your own): make your own home page, Figma style",
+      "Drag in over 100 parts — every piece of every design, clocks, timers, notes, shapes and buttons — then move, resize and colour them",
+      "Pieces snap to a grid; hold Ctrl to place them anywhere, with guides when edges line up",
+      "Program your own buttons to open a website, a folder, a search, chat and more",
+      "Share your design to the gallery (a moderator checks it first) or use someone else's",
+    ],
+  },
+  {
     version: "3.0", date: "2026-10", title: "Safety, help & Español",
     items: [
       "The site in Spanish — pick “Español” in Customize → Text",
