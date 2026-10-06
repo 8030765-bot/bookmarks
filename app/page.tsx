@@ -654,11 +654,26 @@ export default function HomePage() {
   }, [unreadCount]);
   useEffect(() => { setPingOn(readLocal("pingSound", true)); setPingName(readLocal("pingName", "classic")); }, []);
   const quietNow = (!!personal.dndUntil && Date.parse(personal.dndUntil) > Date.now()) || inQuietHours(personal.quietHours);
+  /** Chat is its own app now (servers, channels — like Discord); it opens in a new tab. */
+  function chatUrl(t: { channel?: string; msg?: string; text?: string } = {}) {
+    const q = new URLSearchParams();
+    if (t.channel) q.set("ch", t.channel);
+    if (t.msg) q.set("msg", t.msg);
+    if (t.text) q.set("text", t.text);
+    return `/chat${q.toString() ? `?${q}` : ""}`;
+  }
+  function openChat(t: { channel?: string; msg?: string; text?: string } = {}) {
+    const url = chatUrl(t);
+    const w = window.open(url, "bookmarks-chat");
+    if (!w) location.href = url; // pop-ups blocked: go there in this tab
+    else w.focus();
+  }
+  // old links (notifications, the app shortcut) say /?chat=open — send them to the chat app
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get("chat") !== "open") return;
-    setChatOpen(true);
-    setChatTarget({ channel: params.get("ch") || undefined, msg: params.get("msg") || undefined });
+    location.replace(chatUrl({ channel: params.get("ch") || undefined, msg: params.get("msg") || undefined }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ?add=<url>&title=… (the "add from anywhere" bookmark, or sharing from a phone) opens the add box
@@ -1516,8 +1531,7 @@ export default function HomePage() {
     sendToFriend: user ? (l) => setSendLink(l) : undefined,
     shareToChat: (l) => {
       if (!user) { showToast("Log in to chat"); openLogin(); return; }
-      setChatTarget({ text: `${l.name} ${l.url}` });
-      setChatOpen(true);
+      openChat({ text: `${l.name} ${l.url}` });
     },
   };
 
@@ -1818,7 +1832,7 @@ export default function HomePage() {
       n: () => openAdd(),
       f: () => openNewFolder(),
       r: randomBookmark,
-      c: () => setChatOpen((o) => !o),
+      c: () => openChat(),
       g: () => changeView(view === "grid" ? "list" : "grid"),
       t: () => changeTheme(theme === "dark" ? "light" : "dark"),
       "?": () => setModal({ type: "shortcuts" }),
@@ -1931,7 +1945,7 @@ export default function HomePage() {
       cmd("customize", "Customize look", "palette", () => setModal({ type: "customize" }), "P"),
       cmd("news", "What's new", "bell", openWhatsNew, "W"),
       cmd("suggest", "Suggest a change", "bulb", () => setSuggest({})),
-      cmd("chat", chatOpen ? "Close chat" : "Open chat", "chat", () => setChatOpen((o) => !o), "C"),
+      cmd("chat", "Open chat (servers & channels, in a new tab)", "chat", () => openChat(), "C"),
       cmd("theme", theme === "dark" ? "Light mode" : "Dark mode", theme === "dark" ? "sun" : "moon", () => changeTheme(theme === "dark" ? "light" : "dark"), "T"),
       cmd("view", view === "grid" ? "List view" : "Grid view", view === "grid" ? "list" : "grid", () => changeView(view === "grid" ? "list" : "grid"), "G"),
       cmd("admin", adminUnlocked ? (adminOpen ? "Close admin panel" : "Open admin panel") : "Admin login", "lock", toggleAdmin),
@@ -2205,7 +2219,7 @@ export default function HomePage() {
                       <button onClick={() => { setUserMenu(false); setClubsOpen(true); }}><Icon name="tag" /> Clubs</button>
                       <button onClick={() => { setUserMenu(false); setModal({ type: "saved" }); }}><Icon name="star" /> Saved messages</button>
                       <button onClick={() => { setUserMenu(false); setSuggest({}); }}><Icon name="bulb" /> My suggestions</button>
-                      <button onClick={() => { setUserMenu(false); setChatOpen(true); }}><Icon name="chat" /> Open chat</button>
+                      <button onClick={() => { setUserMenu(false); openChat(); }}><Icon name="chat" /> Open chat</button>
                       <button onClick={handleLogout}><Icon name="logout" /> Log out</button>
                     </div>
                   </>
@@ -2283,7 +2297,7 @@ export default function HomePage() {
             <div className="chat-hits">
               <span className="nav-label">In chat</span>
               {chatHits.slice(0, 3).map((m) => (
-                <button key={m.id} className="chat-hit" onClick={() => setChatOpen(true)} title="Open chat">
+                <button key={m.id} className="chat-hit" onClick={() => openChat({ channel: m.channel, msg: m.id })} title="Open in chat">
                   <strong>{m.user}:</strong> {m.text.length > 80 ? `${m.text.slice(0, 80)}…` : m.text}
                 </button>
               ))}
@@ -2543,7 +2557,7 @@ export default function HomePage() {
         onAdd={() => { setNovaNav(false); addHere(); }}
         onNewFolder={() => { setNovaNav(false); openNewFolder(); }}
         onTools={betaOk("tools") ? () => { setNovaNav(false); openTools(); } : undefined}
-        onChat={() => { setNovaNav(false); setChatOpen((o) => !o); }}
+        onChat={() => { setNovaNav(false); openChat(); }}
         onCustomize={() => { setNovaNav(false); setModal({ type: "customize" }); }}
         onTheme={() => changeTheme(theme === "dark" ? "light" : "dark")}
         theme={theme}
@@ -2620,7 +2634,7 @@ export default function HomePage() {
         {favorites.slice(0, 6).map((r) => <DockSite key={r.link.id} refItem={r} newTab={look.newTab} onOpen={trackAndOpen} />)}
         <span className="ob-dock-sep" aria-hidden="true" />
         <DockButton label={addLabel} onClick={addHere}><Icon name="plus" /></DockButton>
-        <DockButton label="Chat (C)" on={chatOpen} onClick={() => setChatOpen((o) => !o)}><Icon name="chat" /></DockButton>
+        <DockButton label="Chat (C)" on={chatOpen} onClick={() => openChat()}><Icon name="chat" /></DockButton>
         <DockButton label="Customize (P)" onClick={() => setModal({ type: "customize" })}><Icon name="palette" /></DockButton>
       </OrbitDock>
     </div>
@@ -2685,7 +2699,7 @@ export default function HomePage() {
         <DockButton label="Read later" on={search.trim() === "is:later"} onClick={() => setSearch(search.trim() === "is:later" ? "" : "is:later")}><Icon name="clock" /></DockButton>
         <span className="ob-dock-sep" aria-hidden="true" />
         <DockButton label={addLabel} onClick={() => openAdd()}><Icon name="plus" /></DockButton>
-        <DockButton label="Chat (C)" on={chatOpen} onClick={() => setChatOpen((o) => !o)}><Icon name="chat" /></DockButton>
+        <DockButton label="Chat (C)" on={chatOpen} onClick={() => openChat()}><Icon name="chat" /></DockButton>
         <DockButton label="Customize (P)" onClick={() => setModal({ type: "customize" })}><Icon name="palette" /></DockButton>
       </OrbitDock>
     </div>
@@ -2766,7 +2780,7 @@ export default function HomePage() {
             <button onClick={addHere}>[+ {addingLocked ? "suggest" : "add"}]</button>
             {!addingLocked && <button onClick={() => openNewFolder()}>[mkdir]</button>}
             {betaOk("tools") && <button onClick={() => openTools()}>[tools]</button>}
-            <button onClick={() => setChatOpen((o) => !o)}>[chat]</button>
+            <button onClick={() => openChat()}>[chat]</button>
             <button onClick={() => setModal({ type: "customize" })}>[customize]</button>
             <button onClick={() => changeTheme(theme === "dark" ? "light" : "dark")}>[{theme === "dark" ? "light" : "dark"}]</button>
             {user ? <a href={`/u/${encodeURIComponent(user)}`}>[~{user}]</a> : <button onClick={() => openLogin()}>[login]</button>}
@@ -3413,8 +3427,7 @@ export default function HomePage() {
             setNotifOpen(false);
             if (["mention", "reply", "dm"].includes(n.kind) || n.link?.includes("chat=open")) {
               const params = new URLSearchParams((n.link || "").split("?")[1] || "");
-              setChatTarget({ channel: params.get("ch") || undefined, msg: params.get("msg") || undefined });
-              setChatOpen(true);
+              openChat({ channel: params.get("ch") || undefined, msg: params.get("msg") || undefined });
               return;
             }
             const m = n.link?.match(/#(link|folder)-(.+)$/);
@@ -3453,7 +3466,7 @@ export default function HomePage() {
         <ClubsModal
           me={user}
           staff={!!role}
-          onOpenChannel={(ch) => { setChatTarget({ channel: ch }); setChatOpen(true); }}
+          onOpenChannel={(ch) => openChat({ channel: ch })}
           onOpenFolder={(id) => jumpToFolder(id)}
           onChanged={() => load()}
           toast={showToast}
@@ -3468,7 +3481,7 @@ export default function HomePage() {
             <div className="notif-list">
               {personal.savedMessages.map((m) => (
                 <div key={m.id} className="notif read">
-                  <button className="notif-main" onClick={() => { setModal(null); setChatTarget({ channel: m.channel, msg: m.id }); setChatOpen(true); }}>
+                  <button className="notif-main" onClick={() => { setModal(null); openChat({ channel: m.channel, msg: m.id }); }}>
                     <span className="notif-text"><strong>{m.user}</strong> {m.text}<span className="notif-time">#{m.channel} · {new Date(m.at).toLocaleString()}</span></span>
                   </button>
                   <span className="notif-tools"><button className="btn-icon sm" title="Remove" onClick={() => personal.saveMessage(m, false)}><Icon name="x" /></button></span>
@@ -3537,6 +3550,7 @@ export default function HomePage() {
         hidden={look.focus}
         open={chatOpen}
         setOpen={setChatOpen}
+        onFab={() => openChat()}
         chatEnabled={data?.settings?.chatEnabled !== false}
         user={user}
         online={presence.users}
@@ -3563,7 +3577,7 @@ export default function HomePage() {
             title: user ? `Logged in as ${user}` : "Not logged in",
             sub: `${allRefs.length} websites · ${data?.folders.length || 0} folders · ${totalClicks} visits`,
             online: !!user,
-            run: () => { setShowCmd(false); if (!user) openLogin(); else setChatOpen(true); },
+            run: () => { setShowCmd(false); if (!user) openLogin(); else openChat(); },
           }}
           shortcuts={paletteActions().slice(0, 8)}
           sections={[
@@ -3580,7 +3594,7 @@ export default function HomePage() {
         onHome={() => { setSearch(""); setTagFilters([]); window.scrollTo({ top: 0, behavior: look.motion ? "smooth" : "auto" }); }}
         onSearch={() => { window.scrollTo({ top: 0 }); setTimeout(() => searchRef.current?.focus(), 50); }}
         onAdd={() => openAdd()}
-        onChat={() => setChatOpen((o) => !o)}
+        onChat={() => openChat()}
         onMore={() => { window.scrollTo({ top: 0 }); setMoreMenu(true); }}
         chatOpen={chatOpen}
         unread={unreadCount}

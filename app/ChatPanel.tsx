@@ -68,6 +68,7 @@ export default function ChatPanel({
   fullPage = false,
   siteLinks = [],
   hidden = false,
+  onFab,
 }: {
   open: boolean;
   setOpen: (fn: (open: boolean) => boolean) => void;
@@ -99,6 +100,8 @@ export default function ChatPanel({
   siteLinks?: KnownLink[];
   /** focus mode: nothing shows */
   hidden?: boolean;
+  /** the round chat button opens this instead (the chat app in a new tab) */
+  onFab?: () => void;
 }) {
   const [s, setS] = useState<ChatState>({ channel: "general", messages: [], hasMore: false, roles: {}, pins: [], channels: [], keywords: [], shortcodes: {}, maxLen: 500, notifyLevels: {}, images: true });
   const channel = s.channel;
@@ -946,7 +949,7 @@ export default function ChatPanel({
   if (hidden) return null;
   return (
     <>
-      <button className={`chat-fab ${mentioned ? "ping" : ""}`} onClick={() => setOpen((o) => !o)} aria-label="Toggle chat">
+      <button className={`chat-fab ${mentioned ? "ping" : ""}`} onClick={() => (onFab ? onFab() : setOpen((o) => !o))} aria-label={onFab ? "Open chat in a new tab" : "Toggle chat"} title={onFab ? "Open chat (new tab)" : undefined}>
         {open ? <Icon name="x" /> : <Icon name="chat" />}
         {unread > 0 && <span className="chat-badge">{unread > 9 ? "9+" : unread}</span>}
       </button>

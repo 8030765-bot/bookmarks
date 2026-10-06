@@ -137,7 +137,32 @@ export interface ChatChannel {
   slow?: number;
   /** a club's private-ish channel (members, plus moderators) */
   clubId?: string;
+  /** a channel inside a server (see ChatServer) */
+  serverId?: string;
   createdAt?: string;
+}
+
+/** A Discord-style server: a group with its own channels. Staff can see every one. */
+export interface ChatServer {
+  id: string;
+  name: string;
+  /** an emoji or a letter */
+  icon: string;
+  color: string;
+  description?: string;
+  /** lowercase username */
+  owner: string;
+  createdAt: string;
+  /** listed in Explore; otherwise you need the invite code */
+  public: boolean;
+  invite: string;
+  /** lowercase usernames, including the owner */
+  members: string[];
+  /** members who can manage channels, messages and members */
+  mods?: string[];
+  banned?: string[];
+  /** channel ids, in order */
+  channels: string[];
 }
 
 export interface Club {
@@ -192,6 +217,8 @@ export interface SiteSettings {
   chatEnabled?: boolean;
   /** members may send pictures in chat (each is checked by a moderator) — default on */
   chatImages?: boolean;
+  /** members can make their own chat servers (default on) */
+  chatServers?: boolean;
   theme?: "dark" | "light" | "auto";
   viewMode?: "grid" | "list";
   sortBy?: "name" | "newest" | "clicks" | "manual";

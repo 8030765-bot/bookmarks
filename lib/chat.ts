@@ -121,6 +121,10 @@ export interface SendOptions {
   /** a picture already saved with lib/images */
   img?: string;
   imgPending?: boolean;
+  /** a server channel: only these (lowercase) people get told about mentions and keywords */
+  audience?: string[];
+  /** how the channel is named in notifications, e.g. "Study Group › #general" */
+  where?: string;
 }
 
 function rollDice(spec: string): string | null {
@@ -211,22 +215,24 @@ export async function postMessage(username: string, text: string, opts: SendOpti
   // notify @mentions, the person being replied to, and anyone watching for a keyword (never yourself)
   const link = `/?chat=open&ch=${ch}&msg=${msg.id}`;
   const told = new Set<string>([who]);
+  const where = opts.where || `#${channel.name}`;
   // people who set this channel to "Nothing" don't get told
   const levels = (await redis.hgetall<Record<string, Record<string, NotifyLevel>>>(NOTIFY_KEY).catch(() => null)) || {};
   const tell = (t: string, kind: "reply" | "mention", text: string) => {
     if (told.has(t)) return;
+    if (opts.audience && !opts.audience.includes(t)) return;
     told.add(t);
     if (levels[t]?.[ch] === "none") return;
     notify(t, { kind, from: username, text, link }).catch(() => {});
   };
-  if (msg.replyTo) tell(msg.replyTo.user.toLowerCase(), "reply", `${username} replied to you in #${channel.name}: ${trimmed.slice(0, 60)}`);
-  for (const m of trimmed.matchAll(/@([a-zA-Z0-9_]{3,20})/g)) tell(m[1].toLowerCase(), "mention", `${username} mentioned you in #${channel.name}: ${trimmed.slice(0, 60)}`);
+  if (msg.replyTo) tell(msg.replyTo.user.toLowerCase(), "reply", `${username} replied to you in ${where}: ${trimmed.slice(0, 60)}`);
+  for (const m of trimmed.matchAll(/@([a-zA-Z0-9_]{3,20})/g)) tell(m[1].toLowerCase(), "mention", `${username} mentioned you in ${where}: ${trimmed.slice(0, 60)}`);
   try {
     const watchers = (await redis.hgetall<Record<string, string[]>>(KEYWORDS_KEY)) || {};
     const lower = trimmed.toLowerCase();
     for (const [u, words] of Object.entries(watchers)) {
       const hit = (words || []).find((w) => new RegExp(`(^|\\W)${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\W|$)`, "i").test(lower));
-      if (hit) tell(u, "mention", `“${hit}” came up in #${channel.name}: ${username}: ${trimmed.slice(0, 60)}`);
+      if (hit) tell(u, "mention", `“${hit}” came up in ${where}: ${username}: ${trimmed.slice(0, 60)}`);
     }
   } catch {
     // keyword alerts are a nice-to-have

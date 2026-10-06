@@ -12,19 +12,30 @@ import { getClub, isMember } from "@/lib/clubs";
 import { rateLimit } from "@/lib/ratelimit";
 import { ChatChannel } from "@/lib/types";
 import { assertWritable, bumpStat, filterWords, modCan, restriction } from "@/lib/moderation";
+import { canManageServer, isServerMember, listServers } from "@/lib/servers";
 
 export const dynamic = "force-dynamic";
 
 const isStaff = (ctx: AuthContext) => ctx.role === "owner" || ctx.role === "admin" || ctx.role === "mod";
 
-/** Club channels are for the club's members (and moderators); everything else is public. */
+/** Club channels are for the club's members, server channels for the server's members (staff see both); everything else is public. */
 async function visibleChannels(ctx: AuthContext): Promise<ChatChannel[]> {
-  const all = await listChannels();
+  const [all, servers] = await Promise.all([listChannels(), listServers()]);
+  const byId = new Map(servers.map((s) => [s.id, s]));
   const out: ChatChannel[] = [];
   for (const c of all) {
-    if (!c.clubId || isStaff(ctx) || (ctx.user && isMember(await getClub(c.clubId), ctx.user))) out.push(c);
+    if (c.serverId) {
+      if (isStaff(ctx) || isServerMember(byId.get(c.serverId), ctx.user)) out.push(c);
+    } else if (!c.clubId || isStaff(ctx) || (ctx.user && isMember(await getClub(c.clubId), ctx.user))) out.push(c);
   }
   return out;
+}
+/** A server's owner and moderators look after the messages in its channels. */
+async function managesServerChannel(ctx: AuthContext, ch: string) {
+  if (!ctx.user || !ch.startsWith("s-")) return false;
+  const sid = ch.split("-")[1];
+  const s = (await listServers()).find((x) => x.id === sid);
+  return !!s && s.channels.includes(ch) && canManageServer(s, ctx.user, false);
 }
 async function requireChannel(ctx: AuthContext, ch: string) {
   const c = (await visibleChannels(ctx)).find((x) => x.id === ch);
@@ -92,8 +103,9 @@ export async function POST(req: NextRequest) {
     };
     const id = String(body.id || "");
     switch (action) {
-      case "send":
-        await requireChannel(ctx, ch);
+      case "send": {
+        const chan = await requireChannel(ctx, ch);
+        const server = chan.serverId ? (await listServers()).find((x) => x.id === chan.serverId) : undefined;
         await rateLimit(`chat:${user.toLowerCase()}`, 30, 60);
         {
           const why = await restriction(user);
@@ -116,6 +128,7 @@ export async function POST(req: NextRequest) {
               linkAllow: settings?.chatLinkAllow,
               img: img?.id,
               imgPending: img?.status === "pending",
+              ...(server ? { audience: server.members, where: `${server.name} › #${chan.name}` } : {}),
             });
           } catch (e) {
             if (img) await deleteImage(img.id);
@@ -124,6 +137,7 @@ export async function POST(req: NextRequest) {
         }
         await bumpStat("messages");
         return reply();
+      }
       case "react":
         await requireChannel(ctx, ch);
         await toggleReaction(user, ch, id, String(body.emoji || ""));
@@ -135,7 +149,7 @@ export async function POST(req: NextRequest) {
         // your own message, or anyone's if you moderate
         const owner = await messageOwner(ch, id);
         if (!owner) throw new Error("Message not found");
-        if (owner.toLowerCase() !== user.toLowerCase()) {
+        if (owner.toLowerCase() !== user.toLowerCase() && !(await managesServerChannel(ctx, ch))) {
           checkMod(ctx, typeof body.password === "string" ? body.password : undefined);
           if (!(await modCan(ctx.role, "deleteMessages")) && ctx.role === "mod") throw new Error("Admins only — moderators can't delete messages here");
           await audit(ctx, "deleteMessage", `${owner}: ${id}`).catch(() => {});
@@ -155,7 +169,7 @@ export async function POST(req: NextRequest) {
         await votePoll(user, ch, id, Number(body.option));
         return reply();
       case "pin":
-        checkMod(ctx);
+        if (!(await managesServerChannel(ctx, ch))) checkMod(ctx);
         await setPinned(ch, id, body.pinned !== false);
         await audit(ctx, body.pinned !== false ? "pinMessage" : "unpinMessage", id).catch(() => {});
         return reply();
@@ -179,7 +193,7 @@ export async function POST(req: NextRequest) {
           rules: typeof c.rules === "string" ? c.rules.trim().slice(0, 600) || undefined : existing?.rules,
           slow: typeof c.slow === "number" ? Math.min(300, Math.max(0, Math.round(c.slow))) || undefined : existing?.slow,
         };
-        if (!existing && (await listChannels()).length >= 20) throw new Error("That's plenty of channels already");
+        if (!existing && (await listChannels()).filter((x) => !x.serverId).length >= 20) throw new Error("That's plenty of channels already");
         await saveChannel(next);
         await audit(ctx, "saveChannel", `#${next.name}`).catch(() => {});
         return NextResponse.json({ channels: await visibleChannels(ctx) });
