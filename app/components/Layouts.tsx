@@ -139,9 +139,8 @@ export function DockSite({ refItem, newTab, onOpen }: { refItem: LinkRef; newTab
 /* ============================== 🖥️ Desk ============================== */
 
 /** Desk's top: a clock and greeting, and every folder as an app icon that jumps to its column. */
-export function DeskHome({ greeting, stats, folders, unread, onJump, onNewFolder }: {
+export function DeskHome({ greeting, folders, unread, onJump, onNewFolder }: {
   greeting: string;
-  stats: ReactNode;
   folders: Folder[];
   unread: (f: Folder) => number;
   onJump: (f: Folder) => void;
@@ -150,12 +149,9 @@ export function DeskHome({ greeting, stats, folders, unread, onJump, onNewFolder
   const { time, date } = useClock();
   return (
     <div className="dk-home">
-      <header className="dk-head">
-        <div className="dk-clock">
-          <time suppressHydrationWarning>{time}</time>
-          <span suppressHydrationWarning><strong>{greeting}</strong> · {date}</span>
-        </div>
-        <div className="dk-stats">{stats}</div>
+      <header className="dk-clock">
+        <time suppressHydrationWarning>{time}</time>
+        <span suppressHydrationWarning><strong>{greeting}</strong>{date}</span>
       </header>
       <div className="dk-apps" role="list" aria-label="Jump to a folder">
         {folders.map((f) => {

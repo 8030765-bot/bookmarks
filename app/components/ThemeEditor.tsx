@@ -15,7 +15,7 @@ function DesignThumb({ id }: { id: Design }) {
       {id === "nova" && <><span className="t-side" /><span className="t-title" />{boxes([[34, 40, 28, 22], [66, 40, 28, 22], [34, 66, 28, 18], [66, 66, 28, 18]])}</>}
       {id === "orbit" && <><span className="t-clock" />{boxes([[18, 40, 12, 12], [36, 40, 12, 12], [54, 40, 12, 12], [72, 40, 12, 12], [18, 58, 12, 12], [36, 58, 12, 12]], "t-app")}<span className="t-dock" /></>}
       {id === "board" && <><span className="t-bar" />{boxes([[5, 22, 21, 62], [28, 22, 21, 48], [51, 22, 21, 56], [74, 22, 21, 30]], "t-col")}</>}
-      {id === "desk" && <><span className="t-bar" /><span className="t-clock" />{boxes([[44, 18, 8, 9], [54, 18, 8, 9], [64, 18, 8, 9], [74, 18, 8, 9]], "t-app")}{boxes([[5, 34, 21, 44], [28, 34, 21, 34], [51, 34, 21, 40], [74, 34, 21, 24]], "t-col")}<span className="t-dock" /></>}
+      {id === "desk" && <><span className="t-bar" /><span className="t-clock" />{boxes([[44, 18, 8, 9], [54, 18, 8, 9], [64, 18, 8, 9], [74, 18, 8, 9]], "t-app")}{boxes([[6, 36, 28, 22], [36, 36, 28, 22], [66, 36, 28, 22], [6, 62, 28, 16], [36, 62, 28, 16]], "t-col")}<span className="t-dock" /></>}
       {id === "journal" && <><span className="t-mast" /><span className="t-rule" />{boxes([[6, 36, 54, 34], [64, 36, 30, 6], [64, 46, 30, 6], [64, 56, 30, 6], [6, 76, 26, 4], [36, 76, 26, 4], [66, 76, 28, 4]], "t-ink")}</>}
       {id === "terminal" && <><span className="t-tree" />{boxes([[34, 14, 40, 5], [34, 26, 56, 5], [34, 36, 48, 5], [34, 46, 52, 5], [34, 56, 30, 5], [34, 70, 8, 6]], "t-line")}</>}
       {id === "zen" && <><span className="t-big" />{boxes([[10, 58, 22, 4], [10, 66, 18, 4], [10, 74, 20, 4], [40, 58, 20, 4], [40, 66, 22, 4], [70, 58, 20, 4], [70, 66, 16, 4]], "t-text")}</>}

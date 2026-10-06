@@ -2663,12 +2663,11 @@ export default function HomePage() {
 
   /* 🖥️ Desk: Orbit's clock, apps and dock + Board's columns, in Board's colours */
   const deskLayout = () => (
-    <div className="bd-layout dk-layout">
-      <div className="bd-wrap">
+    <div className="dk-layout">
+      <div className="dk-wrap">
         {bannersEl}
         <DeskHome
           greeting={greetingText}
-          stats={statsEl}
           folders={novaSideFolders}
           unread={unreadOf}
           onJump={(f) => { if (filtering) { setSearch(""); setTagFilters([]); } setTimeout(() => jumpToFolder(f.id), 30); }}
@@ -2676,24 +2675,14 @@ export default function HomePage() {
         />
         {startEl}
         {filtering && resultsEl}
-      </div>
-      <div className="bd-board">
-        {renderMain()}
-        {!addingLocked && !filtering && (
-          <button className="bd-newcol" onClick={() => openNewFolder()}><Icon name="plus" /> New folder</button>
-        )}
-      </div>
-      <div className="bd-wrap">
+        <div className="dk-board">{renderMain()}</div>
         {todayBlock}{pollsBlock}
         {footerEl}
       </div>
       <OrbitDock>
-        <DockButton label="Home" on={!filtering} onClick={() => { setSearch(""); setTagFilters([]); window.scrollTo({ top: 0, behavior: look.motion ? "smooth" : "auto" }); document.querySelector(".bd-board")?.scrollTo({ left: 0, behavior: look.motion ? "smooth" : "auto" }); }}><Icon name="home" /></DockButton>
+        <DockButton label="Home" on={!filtering} onClick={() => { setSearch(""); setTagFilters([]); window.scrollTo({ top: 0, behavior: look.motion ? "smooth" : "auto" }); }}><Icon name="home" /></DockButton>
         <DockButton label="Starred" on={search.trim() === "is:fav"} onClick={() => setSearch(search.trim() === "is:fav" ? "" : "is:fav")}><Icon name="star" /></DockButton>
         <DockButton label="Read later" on={search.trim() === "is:later"} onClick={() => setSearch(search.trim() === "is:later" ? "" : "is:later")}><Icon name="clock" /></DockButton>
-        <DockButton label="Fold or unfold every column (X)" onClick={toggleAll}><Icon name="list" /></DockButton>
-        {favorites.length > 0 && <span className="ob-dock-sep" aria-hidden="true" />}
-        {favorites.slice(0, 6).map((r) => <DockSite key={r.link.id} refItem={r} newTab={look.newTab} onOpen={trackAndOpen} />)}
         <span className="ob-dock-sep" aria-hidden="true" />
         <DockButton label={addLabel} onClick={() => openAdd()}><Icon name="plus" /></DockButton>
         <DockButton label="Chat (C)" on={chatOpen} onClick={() => setChatOpen((o) => !o)}><Icon name="chat" /></DockButton>

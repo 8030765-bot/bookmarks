@@ -172,62 +172,62 @@
 /* =====================================================================
    🗂️ BOARD — every folder as a column you scroll across
    ===================================================================== */
-:root:is([data-ui=board],[data-ui=desk]) body{background-color:var(--bg);background-image:radial-gradient(color-mix(in srgb,var(--text) 10%,transparent) 1px,transparent 1.3px);background-size:22px 22px;background-attachment:fixed}
-:root:is([data-ui=board],[data-ui=desk]) .topbar-inner{max-width:none;padding-left:24px;padding-right:24px}
-:root:is([data-ui=board],[data-ui=desk]) .bd-wrap{padding:0 24px}
-:root:is([data-ui=board],[data-ui=desk]) .bd-head{display:flex;align-items:flex-end;flex-wrap:wrap;gap:1rem 1.6rem;padding:1.6rem 0 1.1rem}
-:root:is([data-ui=board],[data-ui=desk]) .bd-title h1{font-size:1.75rem;font-weight:800;letter-spacing:-.035em;line-height:1.1}
-:root:is([data-ui=board],[data-ui=desk]) .bd-title p{margin-top:.25rem;color:var(--text-muted);font-size:.9rem}
-:root:is([data-ui=board],[data-ui=desk]) .bd-stats{display:flex;flex-wrap:wrap;gap:.4rem}
-:root:is([data-ui=board],[data-ui=desk]) .bd-stats>*{display:inline-flex;align-items:center;gap:.3rem;padding:.3rem .7rem;border-radius:8px;font-size:.78rem;color:var(--text-muted);background:var(--surface);border:1px solid var(--border)}
-:root:is([data-ui=board],[data-ui=desk]) .bd-stats strong{color:var(--text)}
-:root:is([data-ui=board],[data-ui=desk]) .bd-actions{display:flex;flex-wrap:wrap;gap:.5rem;margin-left:auto}
-:root:is([data-ui=board],[data-ui=desk]) .bd-wrap .results-bar{margin-bottom:.8rem}
+:root[data-ui=board] body{background-color:var(--bg);background-image:radial-gradient(color-mix(in srgb,var(--text) 10%,transparent) 1px,transparent 1.3px);background-size:22px 22px;background-attachment:fixed}
+:root[data-ui=board] .topbar-inner{max-width:none;padding-left:24px;padding-right:24px}
+:root[data-ui=board] .bd-wrap{padding:0 24px}
+:root[data-ui=board] .bd-head{display:flex;align-items:flex-end;flex-wrap:wrap;gap:1rem 1.6rem;padding:1.6rem 0 1.1rem}
+:root[data-ui=board] .bd-title h1{font-size:1.75rem;font-weight:800;letter-spacing:-.035em;line-height:1.1}
+:root[data-ui=board] .bd-title p{margin-top:.25rem;color:var(--text-muted);font-size:.9rem}
+:root[data-ui=board] .bd-stats{display:flex;flex-wrap:wrap;gap:.4rem}
+:root[data-ui=board] .bd-stats>*{display:inline-flex;align-items:center;gap:.3rem;padding:.3rem .7rem;border-radius:8px;font-size:.78rem;color:var(--text-muted);background:var(--surface);border:1px solid var(--border)}
+:root[data-ui=board] .bd-stats strong{color:var(--text)}
+:root[data-ui=board] .bd-actions{display:flex;flex-wrap:wrap;gap:.5rem;margin-left:auto}
+:root[data-ui=board] .bd-wrap .results-bar{margin-bottom:.8rem}
 
-:root:is([data-ui=board],[data-ui=desk]) .bd-board{display:flex;align-items:flex-start;gap:14px;overflow-x:auto;padding:4px 24px 28px;scroll-snap-type:x proximity;scroll-padding:0 24px;min-height:55vh;overscroll-behavior-x:contain}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board>main.folders{display:contents}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board main>.folder-card{
+:root[data-ui=board] .bd-board{display:flex;align-items:flex-start;gap:14px;overflow-x:auto;padding:4px 24px 28px;scroll-snap-type:x proximity;scroll-padding:0 24px;min-height:55vh;overscroll-behavior-x:contain}
+:root[data-ui=board] .bd-board>main.folders{display:contents}
+:root[data-ui=board] .bd-board main>.folder-card{
   flex:0 0 316px;margin:0;scroll-snap-align:start;max-height:calc(100vh - var(--topbar-h,57px) - 28px);overflow-y:auto;overscroll-behavior:contain;
   display:flex;flex-direction:column;border-radius:16px;background:color-mix(in srgb,var(--surface) 94%,transparent);border:1px solid var(--border);
   box-shadow:0 1px 0 color-mix(in srgb,#fff 4%,transparent) inset,0 16px 32px -24px rgba(0,0,0,.6);
   animation:bdIn .4s ease both;scrollbar-width:thin;
 }
 @keyframes bdIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board main>.folder-card:before{left:0;right:0;top:0;bottom:auto;width:auto;height:4px;opacity:1;background:var(--folder-accent,var(--accent));z-index:4}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board main>.folder-card>.fh{position:sticky;top:0;z-index:3;flex-shrink:0;padding:.85rem .75rem .55rem;background:color-mix(in srgb,var(--surface) 96%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board main>.folder-card>.fh .fh-name{font-weight:750}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board main>.folder-card>.fh .fh-when{display:none}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board main>.folder-card>.fh .fh-actions .btn-icon{width:28px;height:28px}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board .cards,:root:is([data-ui=board],[data-ui=desk]) .bd-board .cards.list{display:flex;flex-direction:column;align-items:stretch;gap:8px;padding:.6rem .65rem .8rem}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board .card{padding:.6rem .65rem;border-radius:12px;background:var(--bg);box-shadow:inset 3px 0 0 var(--card-accent,transparent),0 1px 2px rgba(0,0,0,.18);transition:transform .15s,border-color .15s,box-shadow .15s}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board .card:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--folder-accent,var(--accent)) 50%,var(--border));box-shadow:inset 3px 0 0 var(--card-accent,transparent),0 10px 20px -12px rgba(0,0,0,.6)}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board .card-icon{width:32px;height:32px}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board .card-meta{padding-left:calc(32px + .7rem)}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board .cards.list .card-meta{padding-left:0}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board .sub-folders{padding:0 .4rem .4rem}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board .sub-folders .folder-card{margin:.3rem 0 0;border-radius:12px;background:color-mix(in srgb,var(--text) 3%,transparent);border:1px dashed var(--border-light);box-shadow:none;overflow:visible}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board .sub-folders .folder-card>.fh{position:static;background:none;border:none;padding:.55rem .6rem .2rem}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board .show-more{margin:0 .65rem .8rem}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board .drag-hint{display:none}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board .empty-state{flex:1 0 min(100%,520px)}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board main>.my-stuff{flex-basis:380px}
+:root[data-ui=board] .bd-board main>.folder-card:before{left:0;right:0;top:0;bottom:auto;width:auto;height:4px;opacity:1;background:var(--folder-accent,var(--accent));z-index:4}
+:root[data-ui=board] .bd-board main>.folder-card>.fh{position:sticky;top:0;z-index:3;flex-shrink:0;padding:.85rem .75rem .55rem;background:color-mix(in srgb,var(--surface) 96%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
+:root[data-ui=board] .bd-board main>.folder-card>.fh .fh-name{font-weight:750}
+:root[data-ui=board] .bd-board main>.folder-card>.fh .fh-when{display:none}
+:root[data-ui=board] .bd-board main>.folder-card>.fh .fh-actions .btn-icon{width:28px;height:28px}
+:root[data-ui=board] .bd-board .cards,:root[data-ui=board] .bd-board .cards.list{display:flex;flex-direction:column;align-items:stretch;gap:8px;padding:.6rem .65rem .8rem}
+:root[data-ui=board] .bd-board .card{padding:.6rem .65rem;border-radius:12px;background:var(--bg);box-shadow:inset 3px 0 0 var(--card-accent,transparent),0 1px 2px rgba(0,0,0,.18);transition:transform .15s,border-color .15s,box-shadow .15s}
+:root[data-ui=board] .bd-board .card:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--folder-accent,var(--accent)) 50%,var(--border));box-shadow:inset 3px 0 0 var(--card-accent,transparent),0 10px 20px -12px rgba(0,0,0,.6)}
+:root[data-ui=board] .bd-board .card-icon{width:32px;height:32px}
+:root[data-ui=board] .bd-board .card-meta{padding-left:calc(32px + .7rem)}
+:root[data-ui=board] .bd-board .cards.list .card-meta{padding-left:0}
+:root[data-ui=board] .bd-board .sub-folders{padding:0 .4rem .4rem}
+:root[data-ui=board] .bd-board .sub-folders .folder-card{margin:.3rem 0 0;border-radius:12px;background:color-mix(in srgb,var(--text) 3%,transparent);border:1px dashed var(--border-light);box-shadow:none;overflow:visible}
+:root[data-ui=board] .bd-board .sub-folders .folder-card>.fh{position:static;background:none;border:none;padding:.55rem .6rem .2rem}
+:root[data-ui=board] .bd-board .show-more{margin:0 .65rem .8rem}
+:root[data-ui=board] .bd-board .drag-hint{display:none}
+:root[data-ui=board] .bd-board .empty-state{flex:1 0 min(100%,520px)}
+:root[data-ui=board] .bd-board main>.my-stuff{flex-basis:380px}
 /* a folded-up column turns into a slim spine */
-:root:is([data-ui=board],[data-ui=desk]) .bd-board main>.folder-card:not(.my-stuff):not(:has(>.cards)):not(:has(>.folder-empty)){flex-basis:60px;overflow:hidden;max-height:420px}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board main>.folder-card:not(.my-stuff):not(:has(>.cards)):not(:has(>.folder-empty))>*:not(.fh){display:none}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board main>.folder-card:not(.my-stuff):not(:has(>.cards)):not(:has(>.folder-empty))>.fh{position:static;flex-direction:column;align-items:center;padding:.9rem 0;border:none;background:none;height:100%}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board main>.folder-card:not(.my-stuff):not(:has(>.cards)):not(:has(>.folder-empty)) .fh-toggle{writing-mode:vertical-rl;flex-direction:row;align-items:center;gap:.6rem}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board main>.folder-card:not(.my-stuff):not(:has(>.cards)):not(:has(>.folder-empty)) .fh-toggle .chev{transform:rotate(-90deg)}
-:root:is([data-ui=board],[data-ui=desk]) .bd-board main>.folder-card:not(.my-stuff):not(:has(>.cards)):not(:has(>.folder-empty)) .fh-actions,
-:root:is([data-ui=board],[data-ui=desk]) .bd-board main>.folder-card:not(.my-stuff):not(:has(>.cards)):not(:has(>.folder-empty)) .fh-sub{display:none}
-:root:is([data-ui=board],[data-ui=desk]) .bd-newcol{flex:0 0 230px;height:130px;display:flex;align-items:center;justify-content:center;gap:.45rem;border-radius:16px;border:2px dashed var(--border-light);color:var(--text-muted);font-weight:650;transition:border-color .15s,color .15s,background .15s}
-:root:is([data-ui=board],[data-ui=desk]) .bd-newcol:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
-:root:is([data-ui=board],[data-ui=desk]) .bd-newcol svg{width:18px;height:18px}
-:root:is([data-ui=board],[data-ui=desk]) .bd-wrap .today,:root:is([data-ui=board],[data-ui=desk]) .bd-wrap .polls{margin-top:1rem}
+:root[data-ui=board] .bd-board main>.folder-card:not(.my-stuff):not(:has(>.cards)):not(:has(>.folder-empty)){flex-basis:60px;overflow:hidden;max-height:420px}
+:root[data-ui=board] .bd-board main>.folder-card:not(.my-stuff):not(:has(>.cards)):not(:has(>.folder-empty))>*:not(.fh){display:none}
+:root[data-ui=board] .bd-board main>.folder-card:not(.my-stuff):not(:has(>.cards)):not(:has(>.folder-empty))>.fh{position:static;flex-direction:column;align-items:center;padding:.9rem 0;border:none;background:none;height:100%}
+:root[data-ui=board] .bd-board main>.folder-card:not(.my-stuff):not(:has(>.cards)):not(:has(>.folder-empty)) .fh-toggle{writing-mode:vertical-rl;flex-direction:row;align-items:center;gap:.6rem}
+:root[data-ui=board] .bd-board main>.folder-card:not(.my-stuff):not(:has(>.cards)):not(:has(>.folder-empty)) .fh-toggle .chev{transform:rotate(-90deg)}
+:root[data-ui=board] .bd-board main>.folder-card:not(.my-stuff):not(:has(>.cards)):not(:has(>.folder-empty)) .fh-actions,
+:root[data-ui=board] .bd-board main>.folder-card:not(.my-stuff):not(:has(>.cards)):not(:has(>.folder-empty)) .fh-sub{display:none}
+:root[data-ui=board] .bd-newcol{flex:0 0 230px;height:130px;display:flex;align-items:center;justify-content:center;gap:.45rem;border-radius:16px;border:2px dashed var(--border-light);color:var(--text-muted);font-weight:650;transition:border-color .15s,color .15s,background .15s}
+:root[data-ui=board] .bd-newcol:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
+:root[data-ui=board] .bd-newcol svg{width:18px;height:18px}
+:root[data-ui=board] .bd-wrap .today,:root[data-ui=board] .bd-wrap .polls{margin-top:1rem}
 @media (max-width:700px){
-  :root:is([data-ui=board],[data-ui=desk]) .bd-wrap{padding:0 14px}
-  :root:is([data-ui=board],[data-ui=desk]) .bd-actions{margin-left:0}
-  :root:is([data-ui=board],[data-ui=desk]) .bd-board{padding:4px 14px 24px;gap:10px;scroll-snap-type:x mandatory;scroll-padding:0 14px}
-  :root:is([data-ui=board],[data-ui=desk]) .bd-board main>.folder-card{flex-basis:86vw;max-height:calc(100vh - var(--topbar-h,57px) - 90px)}
+  :root[data-ui=board] .bd-wrap{padding:0 14px}
+  :root[data-ui=board] .bd-actions{margin-left:0}
+  :root[data-ui=board] .bd-board{padding:4px 14px 24px;gap:10px;scroll-snap-type:x mandatory;scroll-padding:0 14px}
+  :root[data-ui=board] .bd-board main>.folder-card{flex-basis:86vw;max-height:calc(100vh - var(--topbar-h,57px) - 90px)}
 }
 
 
@@ -581,64 +581,106 @@
 
 
 /* =====================================================================
-   🖥️ DESK — Orbit's clock, app icons and dock + Board's columns,
-   in Board's flat colours (it also uses every Board rule above)
+   🖥️ DESK — Orbit's clock, app icons and dock + Board's folder boxes,
+   in Board's flat colours. Folders wrap into a grid (no sideways
+   scrolling) and the small stuff only shows when you hover.
    ===================================================================== */
-:root[data-ui=desk] .dk-layout{padding-bottom:110px}
-:root[data-ui=desk] .dk-head{display:flex;align-items:flex-end;flex-wrap:wrap;gap:1rem 2rem;padding:1.6rem 0 1.1rem}
-:root[data-ui=desk] .dk-clock{display:flex;flex-direction:column;gap:.35rem}
-:root[data-ui=desk] .dk-clock time{font-size:clamp(3rem,7vw,4.8rem);font-weight:800;line-height:.95;letter-spacing:-.055em;font-variant-numeric:tabular-nums}
-:root[data-ui=desk] .dk-clock span{font-size:.92rem;color:var(--text-muted)}
-:root[data-ui=desk] .dk-clock strong{color:var(--text);font-weight:650}
-:root[data-ui=desk] .dk-stats{display:flex;flex-wrap:wrap;gap:.4rem;margin-left:auto}
-:root[data-ui=desk] .dk-stats>*{display:inline-flex;align-items:center;gap:.3rem;padding:.3rem .7rem;border-radius:8px;font-size:.78rem;color:var(--text-muted);background:var(--surface);border:1px solid var(--border)}
-:root[data-ui=desk] .dk-stats strong{color:var(--text)}
+:root[data-ui=desk] body{background-color:var(--bg);background-image:radial-gradient(color-mix(in srgb,var(--text) 9%,transparent) 1px,transparent 1.3px);background-size:22px 22px;background-attachment:fixed}
+:root[data-ui=desk] .dk-layout{padding-bottom:96px}
+:root[data-ui=desk] .dk-wrap{max-width:1180px;margin:0 auto;padding:0 24px}
 
-/* folder apps — flat tiles tinted with the folder's colour */
-:root[data-ui=desk] .dk-apps{display:flex;gap:1rem;overflow-x:auto;padding:.4rem .2rem 1.2rem;scrollbar-width:thin}
-:root[data-ui=desk] .dk-app{flex:0 0 84px;display:flex;flex-direction:column;align-items:center;gap:.45rem;min-width:0;animation:bdIn .4s ease both}
+/* top: the clock on the left, folder apps on the right */
+:root[data-ui=desk] .dk-home{display:flex;align-items:center;flex-wrap:wrap;gap:1rem 2rem;padding:1.5rem 0 1.25rem}
+:root[data-ui=desk] .dk-clock{display:flex;flex-direction:column;gap:.2rem;flex-shrink:0}
+:root[data-ui=desk] .dk-clock time{font-size:2.9rem;font-weight:800;line-height:1;letter-spacing:-.05em;font-variant-numeric:tabular-nums}
+:root[data-ui=desk] .dk-clock span{display:flex;gap:.45rem;font-size:.82rem;color:var(--text-muted)}
+:root[data-ui=desk] .dk-clock strong{color:var(--text);font-weight:650}
+:root[data-ui=desk] .dk-apps{display:flex;flex-wrap:wrap;gap:.5rem .35rem;margin-left:auto;justify-content:flex-end}
+:root[data-ui=desk] .dk-app{width:68px;display:flex;flex-direction:column;align-items:center;gap:.3rem;min-width:0}
 :root[data-ui=desk] .dk-app-icon{
-  position:relative;width:62px;height:62px;border-radius:18px;display:grid;place-items:center;font-size:1.85rem;
-  background:color-mix(in srgb,var(--fc) 14%,var(--surface));border:1px solid color-mix(in srgb,var(--fc) 40%,var(--border));
-  box-shadow:inset 0 3px 0 var(--fc),0 10px 20px -16px rgba(0,0,0,.6);transition:transform .15s,border-color .15s,box-shadow .15s;
+  position:relative;width:46px;height:46px;border-radius:14px;display:grid;place-items:center;font-size:1.4rem;
+  background:color-mix(in srgb,var(--fc) 12%,var(--surface));border:1px solid var(--border);box-shadow:inset 0 2px 0 var(--fc);
+  transition:transform .15s,border-color .15s;
 }
-:root[data-ui=desk] .dk-app:hover .dk-app-icon{transform:translateY(-3px);border-color:var(--fc);box-shadow:inset 0 3px 0 var(--fc),0 14px 24px -14px rgba(0,0,0,.6)}
-:root[data-ui=desk] .dk-app:active .dk-app-icon{transform:scale(.95)}
+:root[data-ui=desk] .dk-app:hover .dk-app-icon{transform:translateY(-2px);border-color:var(--fc)}
 :root[data-ui=desk] .dk-app:focus-visible{outline:none}
 :root[data-ui=desk] .dk-app:focus-visible .dk-app-icon{outline:2px solid var(--accent);outline-offset:2px}
-:root[data-ui=desk] .dk-app-name{max-width:100%;font-size:.76rem;font-weight:600;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:root[data-ui=desk] .dk-app-name{max-width:100%;font-size:.7rem;font-weight:600;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 :root[data-ui=desk] .dk-app:hover .dk-app-name{color:var(--text)}
-:root[data-ui=desk] .dk-app-add .dk-app-icon{background:transparent;border:2px dashed var(--border-light);box-shadow:none;color:var(--text-muted)}
-:root[data-ui=desk] .dk-app-add .dk-app-icon svg{width:22px;height:22px}
+:root[data-ui=desk] .dk-app-add .dk-app-icon{background:transparent;border:1.5px dashed var(--border-light);box-shadow:none;color:var(--text-muted)}
+:root[data-ui=desk] .dk-app-add .dk-app-icon svg{width:18px;height:18px}
 :root[data-ui=desk] .dk-app-add:hover .dk-app-icon{border-color:var(--accent);color:var(--accent)}
-:root[data-ui=desk] .dk-badge{position:absolute;top:-6px;right:-6px;min-width:20px;height:20px;padding:0 5px;border-radius:999px;display:grid;place-items:center;font-size:.68rem;font-weight:800;color:#fff;background:var(--danger);box-shadow:0 0 0 2px var(--bg)}
+:root[data-ui=desk] .dk-badge{position:absolute;top:-5px;right:-5px;min-width:17px;height:17px;padding:0 4px;border-radius:999px;display:grid;place-items:center;font-size:.6rem;font-weight:800;color:#fff;background:var(--danger);box-shadow:0 0 0 2px var(--bg)}
+:root[data-ui=desk] .dk-wrap>.results-bar{margin-bottom:.9rem}
 
-/* the dock — a solid bar, no glass */
+/* folders: boxes that wrap into a grid */
+:root[data-ui=desk] .dk-board main.folders{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px;align-items:start;margin:0;padding:0;border:none}
+:root[data-ui=desk] .dk-board main.folders>*:not(.folder-card){grid-column:1/-1}
+:root[data-ui=desk] .dk-board main.folders>.folder-card{margin:0;border-radius:14px;background:var(--surface);border:1px solid var(--border);box-shadow:0 10px 24px -22px rgba(0,0,0,.7);animation:bdIn .35s ease both}
+@keyframes bdIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+:root[data-ui=desk] .dk-board .folder-card:before{left:0;right:0;top:0;bottom:auto;width:auto;height:3px;opacity:1;background:var(--folder-accent,var(--accent))}
+:root[data-ui=desk] .dk-board main.folders>.my-stuff{grid-column:1/-1}
+:root[data-ui=desk] .dk-board .fh{padding:.7rem .75rem .45rem;border-bottom:none;background:none}
+:root[data-ui=desk] .dk-board .fh-name{font-size:.95rem;font-weight:700}
+:root[data-ui=desk] .dk-board .fh-emoji{font-size:1rem}
+:root[data-ui=desk] .dk-board .fh-count{font-size:.7rem}
+:root[data-ui=desk] .dk-board .fh-when,:root[data-ui=desk] .dk-board .fh-sub,:root[data-ui=desk] .dk-board .fh-pin,:root[data-ui=desk] .dk-board .fh-fav,:root[data-ui=desk] .dk-board .fh-follow,:root[data-ui=desk] .dk-board .chev{display:none}
+:root[data-ui=desk] .dk-board .fh{position:relative}
+:root[data-ui=desk] .dk-board .fh-actions{position:absolute;top:.5rem;right:.5rem;padding:2px;border-radius:9px;background:var(--surface);box-shadow:-10px 0 10px var(--surface);opacity:0;pointer-events:none;transition:opacity .15s}
+:root[data-ui=desk] .dk-board .fh:hover .fh-actions,:root[data-ui=desk] .dk-board .fh:focus-within .fh-actions{pointer-events:auto}
+@media (hover:none){:root[data-ui=desk] .dk-board .fh-actions{position:static;opacity:1;pointer-events:auto;box-shadow:none}}
+:root[data-ui=desk] .dk-board .fh:hover .fh-actions,:root[data-ui=desk] .dk-board .fh:focus-within .fh-actions{opacity:1}
+:root[data-ui=desk] .dk-board .fh-actions .btn-icon{width:26px;height:26px}
+/* websites: slim one-line rows */
+:root[data-ui=desk] .dk-board .cards,:root[data-ui=desk] .dk-board .cards.list{display:flex;flex-direction:column;align-items:stretch;gap:2px;padding:0 .4rem .5rem}
+:root[data-ui=desk] .dk-board .card{flex-direction:row;align-items:center;padding:.38rem .4rem;border:none;border-radius:9px;background:none;box-shadow:none}
+:root[data-ui=desk] .dk-board .card:hover{background:var(--surface-hover)}
+:root[data-ui=desk] .dk-board .card-main{flex:1;gap:.6rem}
+:root[data-ui=desk] .dk-board .card-icon{width:26px;height:26px;border-radius:7px}
+:root[data-ui=desk] .dk-board .card-body{flex-direction:row;align-items:baseline;gap:.5rem}
+:root[data-ui=desk] .dk-board .card-name{font-size:.87rem;font-weight:550}
+:root[data-ui=desk] .dk-board .card-body{min-width:0;flex:1}
+:root[data-ui=desk] .dk-board .card-name{flex-shrink:0;max-width:100%}
+:root[data-ui=desk] .dk-board .card-host{flex:1;min-width:0;font-size:.72rem;opacity:.8}
+:root[data-ui=desk] .dk-board .card-desc,:root[data-ui=desk] .dk-board .card-meta,:root[data-ui=desk] .dk-board .like-btn,:root[data-ui=desk] .dk-board .card-check{display:none}
+:root[data-ui=desk] .dk-board .card-actions{position:absolute;top:50%;right:.3rem;transform:translateY(-50%);background:var(--surface-hover)}
+:root[data-ui=desk] .dk-board .card.expanded{flex-direction:column;align-items:stretch;margin:.3rem 0;padding:.6rem;background:var(--bg);border:1px solid var(--border)}
+:root[data-ui=desk] .dk-board .card.expanded .card-actions{position:static;transform:none;align-self:flex-end}
+:root[data-ui=desk] .dk-board .card.expanded .card-meta,:root[data-ui=desk] .dk-board .card.expanded .like-btn{display:flex;padding-left:0}
+:root[data-ui=desk] .dk-board .card.expanded .card-desc{display:block}
+:root[data-ui=desk] .dk-board .sub-folders{padding:0 .4rem .4rem}
+:root[data-ui=desk] .dk-board .sub-folders .folder-card{margin:.2rem 0 0;border:none;border-top:1px solid var(--border);border-radius:0;background:none;box-shadow:none}
+:root[data-ui=desk] .dk-board .sub-folders .folder-card:before{display:none}
+:root[data-ui=desk] .dk-board .sub-folders .fh{padding:.55rem .35rem .25rem}
+:root[data-ui=desk] .dk-board .show-more{margin:0 .5rem .6rem;padding:.35rem;font-size:.8rem}
+:root[data-ui=desk] .dk-board .folder-empty{padding:.4rem .8rem .8rem;font-size:.82rem}
+:root[data-ui=desk] .dk-board .drag-hint,:root[data-ui=desk] .dk-board .az-index{display:none}
+:root[data-ui=desk] .dk-wrap .today,:root[data-ui=desk] .dk-wrap .polls{margin-top:1.4rem}
+
+/* the dock — a small solid bar */
 :root[data-ui=desk] .ob-dock{
-  position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:85;display:flex;align-items:flex-end;gap:6px;padding:7px 9px;border-radius:18px;
-  background:var(--surface);border:1px solid var(--border);box-shadow:0 1px 0 color-mix(in srgb,#fff 4%,transparent) inset,0 18px 40px -20px rgba(0,0,0,.65);
+  position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:85;display:flex;align-items:center;gap:4px;padding:5px;border-radius:16px;
+  background:var(--surface);border:1px solid var(--border);box-shadow:0 18px 40px -20px rgba(0,0,0,.6);
 }
-:root[data-ui=desk] .ob-dock-btn{position:relative;width:46px;height:46px;flex-shrink:0;border-radius:12px;display:grid;place-items:center;color:var(--text-muted);background:var(--bg);border:1px solid var(--border);transform-origin:50% 100%;transition:transform .15s,color .15s,border-color .15s}
-:root[data-ui=desk] .ob-dock-btn:hover{transform:translateY(-5px) scale(1.1);color:var(--text);border-color:var(--border-light)}
-:root[data-ui=desk] .ob-dock-btn svg{width:20px;height:20px}
-:root[data-ui=desk] .ob-dock-btn.on{color:var(--text);border-color:var(--text)}
-:root[data-ui=desk] .ob-dock-btn.on::after{content:"";position:absolute;bottom:-6px;left:50%;width:4px;height:4px;margin-left:-2px;border-radius:50%;background:var(--text)}
-:root[data-ui=desk] .ob-dock-btn.site img,:root[data-ui=desk] .ob-dock-btn.site .fav-letter{width:24px!important;height:24px!important;border-radius:6px}
-:root[data-ui=desk] .ob-dock-sep{width:1px;align-self:stretch;margin:5px 3px;background:var(--border)}
-:root[data-ui=desk] .chat-fab{bottom:5.4rem}
-:root[data-ui=desk] .to-top{bottom:5.8rem}
+:root[data-ui=desk] .ob-dock-btn{position:relative;width:40px;height:40px;flex-shrink:0;border-radius:11px;display:grid;place-items:center;color:var(--text-muted);transition:transform .15s,color .15s,background .15s}
+:root[data-ui=desk] .ob-dock-btn:hover{transform:translateY(-3px);color:var(--text);background:var(--surface-hover)}
+:root[data-ui=desk] .ob-dock-btn svg{width:19px;height:19px}
+:root[data-ui=desk] .ob-dock-btn.on{color:var(--text);background:var(--surface-hover)}
+:root[data-ui=desk] .ob-dock-sep{width:1px;height:22px;margin:0 3px;background:var(--border)}
+:root[data-ui=desk] .chat-fab{bottom:5rem}
+:root[data-ui=desk] .to-top{bottom:5.4rem}
 :root[data-ui=desk][data-motion=off] .ob-dock-btn:hover,:root[data-ui=desk][data-motion=off] .dk-app:hover .dk-app-icon{transform:none}
 @media (max-width:700px){
-  :root[data-ui=desk] .dk-head{padding:1.1rem 0 .8rem}
-  :root[data-ui=desk] .dk-stats{margin-left:0}
-  :root[data-ui=desk] .dk-app{flex-basis:70px}
-  :root[data-ui=desk] .dk-app-icon{width:54px;height:54px;border-radius:15px;font-size:1.55rem}
-  :root[data-ui=desk] .ob-dock{bottom:calc(72px + env(safe-area-inset-bottom,0px));gap:4px;padding:6px 7px}
-  :root[data-ui=desk] .ob-dock-btn{width:40px;height:40px}
-  :root[data-ui=desk] .ob-dock-btn.site,:root[data-ui=desk] .ob-dock-sep{display:none}
+  :root[data-ui=desk] .dk-wrap{padding:0 14px}
+  :root[data-ui=desk] .dk-home{padding:1.1rem 0 1rem}
+  :root[data-ui=desk] .dk-apps{margin-left:0;justify-content:flex-start}
+  :root[data-ui=desk] .dk-board main.folders{grid-template-columns:minmax(0,1fr)}
+  :root[data-ui=desk] .dk-board .card-host{display:none}
+  :root[data-ui=desk] .dk-board .card-actions{position:static;transform:none;background:none}
+  :root[data-ui=desk] .ob-dock{bottom:calc(72px + env(safe-area-inset-bottom,0px))}
   :root[data-ui=desk] .ob-dock-btn:hover{transform:none}
-  :root[data-ui=desk] .dk-layout{padding-bottom:160px}
-  :root[data-ui=desk] .chat-fab{bottom:9.2rem}
+  :root[data-ui=desk] .dk-layout{padding-bottom:150px}
+  :root[data-ui=desk] .chat-fab{bottom:8.8rem}
 }
 
 /* its drawing in the chooser */
@@ -652,3 +694,9 @@
 .ui-thumb.desk .t-col:nth-of-type(8){box-shadow:inset 0 3px 0 #3dd68c}
 .ui-thumb.desk .t-col:nth-of-type(9){box-shadow:inset 0 3px 0 #ffb84d}
 .ui-thumb.desk .t-dock{position:absolute;left:50%;bottom:4px;transform:translateX(-50%);width:50%;height:9px;border-radius:4px;background:#1a1e28;border:1px solid #3a4050}
+/* Desk: folder names stay at the top of their box (no sticky headers), and touch screens get just the ⋯ button on each row */
+:root[data-ui=desk] .dk-board .folder-card>.fh{position:relative!important;top:auto!important}
+@media (hover:none),(max-width:700px){
+  :root[data-ui=desk] .dk-board .card:not(.expanded) .card-actions .ca:not(:last-child){display:none}
+  :root[data-ui=desk] .dk-board .card:not(.expanded) .card-actions{position:static;transform:none;opacity:.7;background:none}
+}

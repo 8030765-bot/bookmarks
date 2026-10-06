@@ -61,7 +61,7 @@ export const DESIGNS = [
   { id: "nova", name: "Nova", emoji: "✨", blurb: "A sidebar app: Home dashboard, a page per folder, websites as big app tiles." },
   { id: "orbit", name: "Orbit", emoji: "🪐", blurb: "Like a phone home screen: a big clock, folder apps, a dock, and folders open as windows." },
   { id: "board", name: "Board", emoji: "🗂️", blurb: "Every folder side by side as a column you scroll across, like a planning board." },
-  { id: "desk", name: "Desk", emoji: "🖥️", blurb: "Orbit meets Board: a clock, folder app icons and a dock, with every folder as a column — in Board's clean colours." },
+  { id: "desk", name: "Desk", emoji: "🖥️", blurb: "Orbit meets Board: a clock, folder app icons and a dock, with folders as tidy boxes in a grid — in Board's clean colours." },
   { id: "journal", name: "Journal", emoji: "📰", blurb: "A newspaper: a front page with the top stories, and a section for every folder." },
   { id: "terminal", name: "Terminal", emoji: "💻", blurb: "A retro hacker screen: green text, a folder tree, and websites as files." },
   { id: "zen", name: "Zen", emoji: "🍃", blurb: "Calm and minimal: a big clock, one search box, and plain lists of links." },
