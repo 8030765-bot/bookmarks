@@ -55,9 +55,23 @@ export const HIDEABLE: { id: string; label: string }[] = [
   { id: "pet", label: "Site pet" },
 ];
 
+/** The overall designs: each is a different layout, not just new colours. */
+export const DESIGNS = [
+  { id: "classic", name: "Classic", emoji: "📄", blurb: "Every folder on one long page — how the site has always looked." },
+  { id: "nova", name: "Nova", emoji: "✨", blurb: "A sidebar app: Home dashboard, a page per folder, websites as big app tiles." },
+  { id: "orbit", name: "Orbit", emoji: "🪐", blurb: "Like a phone home screen: a big clock, folder apps, a dock, and folders open as windows." },
+  { id: "board", name: "Board", emoji: "🗂️", blurb: "Every folder side by side as a column you scroll across, like a planning board." },
+  { id: "journal", name: "Journal", emoji: "📰", blurb: "A newspaper: a front page with the top stories, and a section for every folder." },
+  { id: "terminal", name: "Terminal", emoji: "💻", blurb: "A retro hacker screen: green text, a folder tree, and websites as files." },
+  { id: "zen", name: "Zen", emoji: "🍃", blurb: "Calm and minimal: a big clock, one search box, and plain lists of links." },
+] as const;
+export type Design = (typeof DESIGNS)[number]["id"];
+/** designs that show one folder at a time (with a Home page) */
+export const PAGED_DESIGNS: readonly Design[] = ["nova", "orbit", "journal", "terminal"];
+
 export interface Look {
-  /** the overall design: "classic", or the new "nova" */
-  ui: "classic" | "nova";
+  /** the overall design (see DESIGNS) */
+  ui: Design;
   palette: Palette;
   accent: string;
   density: "comfy" | "compact" | "large";
@@ -143,7 +157,7 @@ export function cleanLook(raw: Partial<Look> | null | undefined): Look {
   const oneOf = (list: readonly unknown[]) => (v: unknown) => list.includes(v);
   const bool = (v: unknown) => typeof v === "boolean";
   const num = (min: number, max: number) => (v: unknown) => typeof v === "number" && v >= min && v <= max;
-  pick("ui", oneOf(["classic", "nova"]));
+  pick("ui", oneOf(DESIGNS.map((d) => d.id)));
   pick("palette", oneOf(PALETTES.map((p) => p.id)));
   pick("accent", (v) => typeof v === "string" && (v === "" || /^#[0-9a-f]{6}$/i.test(v)));
   pick("density", oneOf(["comfy", "compact", "large"]));
@@ -270,8 +284,18 @@ export function applyLook(look: Look, ctx: LookContext = { prefersDark: true, re
   const season = look.seasonal ? seasonFor() : "";
   const set = (k: string, v: string | boolean) => root.setAttribute(`data-${k}`, typeof v === "boolean" ? (v ? "on" : "off") : v);
   set("ui", look.ui);
-  // Nova's headings use Plus Jakarta Sans (loaded only when Nova is on)
-  if (look.ui === "nova") ensureFont("Plus+Jakarta+Sans:wght@500;600;700;800", "display");
+  // Nova and Orbit share the floating-glass styling
+  if (look.ui === "nova" || look.ui === "orbit") root.setAttribute("data-glass", "on");
+  else root.removeAttribute("data-glass");
+  // each design's own fonts (loaded only when it's on)
+  const designFont: Partial<Record<Design, string>> = {
+    nova: "Plus+Jakarta+Sans:wght@500;600;700;800",
+    orbit: "Plus+Jakarta+Sans:wght@500;600;700;800",
+    journal: "Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..700&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400",
+    terminal: "JetBrains+Mono:wght@400;600;700;800&family=VT323",
+    zen: "Instrument+Serif:ital@0;1",
+  };
+  if (designFont[look.ui]) ensureFont(designFont[look.ui], "display");
   set("theme", isLightPalette(palette) ? "light" : "dark");
   set("palette", palette);
   set("density", look.density);

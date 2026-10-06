@@ -37,7 +37,7 @@ import {
   DEFAULT_LOOK, LeaderboardModal, Look, OnlinePill, Palette, PollCards, SpinWheel, WhatsNew, applyLook, applyPollVote, usePresence,
 } from "./components/Community";
 import { ThemeEditor } from "./components/ThemeEditor";
-import { DEFAULT_ORDER, PALETTES, cleanLook, decodeTheme, greetingFor, holidayLogo } from "./components/look";
+import { DEFAULT_ORDER, DESIGNS, Design, PAGED_DESIGNS, PALETTES, cleanLook, decodeTheme, greetingFor, holidayLogo } from "./components/look";
 import {
   EasterEgg, HintMode, SitePet, Snow, confetti, funToast, randomLoadingLine, useLogoClicks, useNewYearFireworks, useSparkles, useUnlocked,
 } from "./components/Fun";
@@ -46,6 +46,7 @@ import { recordUndo, redoLast, undoLast } from "./components/undo";
 import { inQuietHours } from "@/lib/quiet";
 import { TOOL_LIST } from "./components/tools/list";
 import { NovaBanner, NovaHome, NovaSection, NovaSidebar } from "./components/Nova";
+import { DockButton, DockSite, JournalFront, JournalMast, JournalSectionHead, OrbitDock, OrbitHome, OrbitWindow, TermHome, TermPrompt, TermTree, ZenHero, termSlug } from "./components/Layouts";
 import { AddAnywhereModal, WeekChanges, downloadBookmarksHtml, downloadFolderCsv, embedCode } from "./components/DataViews";
 import { BottomNav, InstallModal, PullIndicator, buzz, usePullToRefresh } from "./components/Mobile";
 import { FeedbackModal, Tour, WhatsNewPopup, useFirstVisit, useLeaveWarning, useWhatsNewAfterUpdate } from "./components/Help";
@@ -1199,7 +1200,7 @@ export default function HomePage() {
   function openCard(linkId: string) {
     const target = data?.folders.find((f) => f.links.some((l) => l.id === linkId));
     if (!target) return;
-    if (lookRef.current.ui === "nova") { setNovaSection(`folder:${target.id}`); writeLocal("novaSection", `folder:${target.id}`); }
+    if (PAGED_DESIGNS.includes(lookRef.current.ui)) { setNovaSection(`folder:${target.id}`); writeLocal("novaSection", `folder:${target.id}`); }
     toggleCollapsed(target.id, false);
     setExpandedId(linkId);
     setFocusedId(linkId);
@@ -1315,7 +1316,7 @@ export default function HomePage() {
     if (await api(action, { ...payload, password: adminPassword })) showToast(done);
   }
   function jumpToFolder(id: string) {
-    if (lookRef.current.ui === "nova") {
+    if (PAGED_DESIGNS.includes(lookRef.current.ui)) {
       setNovaSection(`folder:${id}`);
       writeLocal("novaSection", `folder:${id}`);
       setNovaNav(false);
@@ -1947,7 +1948,7 @@ export default function HomePage() {
       cmd("extra", look.specialFolders ? "Hide Recently added / Popular folders" : "Show Recently added / Popular folders", "chart", () => changeLook({ ...look, specialFolders: !look.specialFolders })),
       cmd("empty", look.hideEmpty ? "Show empty folders" : "Hide empty folders", "folder", () => changeLook({ ...look, hideEmpty: !look.hideEmpty })),
       cmd("motion", look.motion ? "Turn animations off" : "Turn animations on", "settings", () => changeLook({ ...look, motion: !look.motion })),
-      cmd("design", look.ui === "nova" ? "Switch to the Classic design" : "✨ Switch to the new Nova design", "palette", () => changeLook({ ...look, ui: look.ui === "nova" ? "classic" : "nova" })),
+      ...DESIGNS.filter((d) => d.id !== look.ui).map((d) => cmd(`design-${d.id}`, `${d.emoji} Switch to the ${d.name} design`, "palette", () => changeLook({ ...look, ui: d.id }))),
       cmd("focusmode", look.focus ? "Leave focus mode" : "Focus mode — just the websites", "eye", () => changeLook({ ...look, focus: !look.focus })),
       cmd("sticky", look.stickyHeaders ? "Stop folder names sticking at the top" : "Keep folder names at the top while scrolling", "folder", () => changeLook({ ...look, stickyHeaders: !look.stickyHeaders })),
       cmd("newtab", look.newTab ? "Open websites in this tab" : "Open websites in a new tab", "external", () => changeLook({ ...look, newTab: !look.newTab })),
@@ -2219,15 +2220,16 @@ export default function HomePage() {
   );
   const bannersEl = (
     <>
-        {look.ui !== "nova" && novaInvite && (
+        {look.ui === "classic" && novaInvite && (
           <div className="nova-invite" role="status">
             <span className="nova-spark" aria-hidden="true">✨</span>
             <div>
-              <strong>Try the new design</strong>
-              <span>Nova: a sidebar with all your folders, a Home dashboard, and every folder on its own page with websites as big app tiles. Switch back any time in Customize.</span>
+              <strong>New designs are here</strong>
+              <span>Six brand-new layouts: ✨ Nova, 🪐 Orbit, 🗂️ Board, 📰 Journal, 💻 Terminal and 🍃 Zen. Switch back any time in Customize.</span>
             </div>
             <div className="nova-actions">
-              <button className="btn btn-primary btn-sm" onClick={() => { changeLook({ ...look, ui: "nova" }); setNovaInvite(false); writeLocal("novaInvite", "done"); showToast("✨ Welcome to Nova — switch back in Customize → Design", { label: "Undo", run: () => changeLook({ ...look, ui: "classic" }) }, 7000); }}>Try it</button>
+              <button className="btn btn-primary btn-sm" onClick={() => { changeLook({ ...look, ui: "nova" }); setNovaInvite(false); writeLocal("novaInvite", "done"); showToast("✨ Welcome to Nova — switch back in Customize → Design", { label: "Undo", run: () => changeLook({ ...look, ui: "classic" }) }, 7000); }}>Try Nova</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => { setNovaInvite(false); writeLocal("novaInvite", "done"); setModal({ type: "customize" }); }}>See them all</button>
               <button className="btn btn-secondary btn-sm" onClick={() => { setNovaInvite(false); writeLocal("novaInvite", "done"); }}>Not now</button>
             </div>
           </div>
@@ -2464,24 +2466,81 @@ export default function HomePage() {
     window.scrollTo({ top: 0 });
   };
   const novaFolderCount = novaFolder ? (novaFolder.rule ? (viewById.get(novaFolder.id)?.shortcuts.length || 0) : novaFolder.links.filter(shown).length) : 0;
-  const novaEl = (
+  const unreadOf = (f: Folder) => metaFor(f).unread;
+  const activeSection = novaFolder || !novaSection.startsWith("folder:") ? novaSection : "home";
+  const greetingText = `${greetingFor()}${user ? `, ${personal.profile.displayName || user}` : ""}`;
+  const statsEl = (
+    <>
+      <OnlinePill count={presence.count} users={presence.users} onClick={() => setModal({ type: "leaderboard" })} />
+      <span><strong>{allRefs.length}</strong> websites</span>
+      <span><strong>{data?.folders.length || 0}</strong> folders</span>
+      <span><strong>{totalClicks}</strong> visits</span>
+    </>
+  );
+  const startEl = showStart && startFolder ? (
+    <div className="announcement start-here">
+      <span>👋 New here? Start with <button className="link-btn" onClick={() => { novaGo(`folder:${startFolder.id}`); setStartDismissed(true); writeLocal("startDismissed", true); }}>{startFolder.emoji} {startFolder.name}</button></span>
+      <button className="announcement-x" title="Got it" onClick={() => { setStartDismissed(true); writeLocal("startDismissed", true); }}><Icon name="x" /></button>
+    </div>
+  ) : null;
+  const addHere = () => openAdd(novaFolder && !novaFolder.rule ? novaFolder.id : undefined);
+  const addLabel = addingLocked ? "Suggest a website" : "Add website";
+  const folderActions = (f: Folder) => (
+    <>
+      {(!addingLocked || editableFolders.has(f.id)) && !f.rule && (
+        <button className="btn btn-primary" onClick={() => openAdd(f.id)}><Icon name="plus" /> Add website</button>
+      )}
+      <div className="seg-toggle" role="group" aria-label="View">
+        <button className={view === "grid" ? "on" : ""} onClick={() => changeView("grid")} title="Tiles"><Icon name="grid" /></button>
+        <button className={view === "list" ? "on" : ""} onClick={() => changeView("list")} title="List"><Icon name="list" /></button>
+      </div>
+      <button className="btn btn-secondary" title="Share a link to this folder" onClick={() => shareFolder(f)}><Icon name="share" /></button>
+      <button className="btn btn-secondary" title="More: sort, open all, print, edit…" onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setFolderMenu({ folder: f, x: r.right, y: r.bottom + 6 }); }}><Icon name="more" /></button>
+    </>
+  );
+  /** What's open in the one-folder-at-a-time designs (null = Home). */
+  type SectionHead = { emoji: string; name: string; description?: string; color?: string; count: number; actions?: React.ReactNode; path: string };
+  const sectionHead: SectionHead | null = filtering
+    ? { emoji: "🔍", name: "Search", description: search.trim() ? `“${search.trim()}”` : undefined, count: matchCount, path: "~" }
+    : novaFolder
+      ? {
+          emoji: novaFolder.emoji, name: novaFolder.name, description: novaFolder.description, color: novaFolder.color, count: novaFolderCount, actions: folderActions(novaFolder),
+          path: `~/folders/${novaFolder.parentId && folderById.get(novaFolder.parentId) ? `${termSlug(folderById.get(novaFolder.parentId)!.name)}/` : ""}${termSlug(novaFolder.name)}`,
+        }
+      : novaSection === "starred" ? { emoji: "⭐", name: "Starred", color: "#ffb84d", count: favorites.length, path: "~/starred" }
+      : novaSection === "later" ? { emoji: "🕐", name: "Read later", color: "#4dabff", count: readLater.length, path: "~/read-later" }
+      : novaSection === "recent" ? { emoji: "📈", name: "Recently opened", color: "#3dd68c", count: recentOpened.length, path: "~/history" }
+      : novaSection === "mystuff" && user ? { emoji: "🔒", name: "My Stuff", description: "Private links only you can see", color: "#7c6cff", count: personal.myStuff.length, path: "~/my-stuff" }
+      : null;
+  function sectionBody() {
+    if (filtering) return <>{resultsEl}{renderMain()}</>;
+    if (novaFolder) return renderMain(novaFolder.id);
+    if (novaSection === "starred") return renderVirtual("__starred", "Starred", "⭐", favorites);
+    if (novaSection === "later") return renderVirtual("__later", "Read later", "🕐", readLater);
+    if (novaSection === "recent") return renderVirtual("__recent", "Recently opened", "📈", recentOpened);
+    return renderMain("__mystuff");
+  }
+  const closeSection = () => { if (filtering) { setSearch(""); setTagFilters([]); } else novaGo("home"); };
+
+  /* ✨ Nova: a sidebar app */
+  const novaLayout = () => (
     <div className="nv-layout">
       <NovaSidebar
         title={title}
         mark={look.seasonal ? logo.mark : "🔖"}
-        section={novaFolder || !novaSection.startsWith("folder:") ? novaSection : "home"}
+        section={activeSection}
         go={novaGo}
         folders={novaSideFolders}
         kids={novaKids}
         counts={{ starred: favorites.length, later: readLater.length, recent: recentOpened.length, mystuff: personal.myStuff.length }}
-        unread={(f) => metaFor(f).unread}
+        unread={unreadOf}
         user={user}
         profile={personal.profile as MiniProfile}
-        addLabel={addingLocked ? "Suggest a website" : "Add website"}
+        addLabel={addLabel}
         canNewFolder={!addingLocked}
         open={novaNav}
         onClose={() => setNovaNav(false)}
-        onAdd={() => { setNovaNav(false); openAdd(novaFolder && !novaFolder.rule ? novaFolder.id : undefined); }}
+        onAdd={() => { setNovaNav(false); addHere(); }}
         onNewFolder={() => { setNovaNav(false); openNewFolder(); }}
         onTools={betaOk("tools") ? () => { setNovaNav(false); openTools(); } : undefined}
         onChat={() => { setNovaNav(false); setChatOpen((o) => !o); }}
@@ -2495,71 +2554,26 @@ export default function HomePage() {
         {topbarEl}
         <div className="nv-content">
           {bannersEl}
-          {filtering ? (
-            <>
-              {resultsEl}
-              {renderMain()}
-            </>
-          ) : novaFolder ? (
+          {filtering ? sectionBody() : sectionHead ? (
             <div className="nv-folder-view">
-              <NovaBanner emoji={novaFolder.emoji} name={novaFolder.name} description={novaFolder.description} color={novaFolder.color} count={novaFolderCount}>
-                {(!addingLocked || editableFolders.has(novaFolder.id)) && !novaFolder.rule && (
-                  <button className="btn btn-primary" onClick={() => openAdd(novaFolder.id)}><Icon name="plus" /> Add website</button>
-                )}
-                <div className="seg-toggle" role="group" aria-label="View">
-                  <button className={view === "grid" ? "on" : ""} onClick={() => changeView("grid")} title="Tiles"><Icon name="grid" /></button>
-                  <button className={view === "list" ? "on" : ""} onClick={() => changeView("list")} title="List"><Icon name="list" /></button>
-                </div>
-                <button className="btn btn-secondary" title="Share a link to this folder" onClick={() => shareFolder(novaFolder)}><Icon name="share" /></button>
-                <button className="btn btn-secondary" title="More: sort, open all, print, edit…" onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setFolderMenu({ folder: novaFolder, x: r.right, y: r.bottom + 6 }); }}><Icon name="more" /></button>
+              <NovaBanner emoji={sectionHead.emoji} name={sectionHead.name} description={sectionHead.description} color={sectionHead.color} count={sectionHead.count}>
+                {sectionHead.actions}
               </NovaBanner>
-              {renderMain(novaFolder.id)}
-            </div>
-          ) : novaSection === "starred" ? (
-            <div className="nv-folder-view">
-              <NovaBanner emoji="⭐" name="Starred" color="#ffb84d" count={favorites.length} />
-              {renderVirtual("__starred", "Starred", "⭐", favorites)}
-            </div>
-          ) : novaSection === "later" ? (
-            <div className="nv-folder-view">
-              <NovaBanner emoji="🕐" name="Read later" color="#4dabff" count={readLater.length} />
-              {renderVirtual("__later", "Read later", "🕐", readLater)}
-            </div>
-          ) : novaSection === "recent" ? (
-            <div className="nv-folder-view">
-              <NovaBanner emoji="📈" name="Recently opened" color="#3dd68c" count={recentOpened.length} />
-              {renderVirtual("__recent", "Recently opened", "📈", recentOpened)}
-            </div>
-          ) : novaSection === "mystuff" && user ? (
-            <div className="nv-folder-view">
-              <NovaBanner emoji="🔒" name="My Stuff" description="Private links only you can see" color="#7c6cff" count={personal.myStuff.length} />
-              {renderMain("__mystuff")}
+              {sectionBody()}
             </div>
           ) : (
             <NovaHome
-              greeting={`${greetingFor()}${user ? `, ${personal.profile.displayName || user}` : ""} 👋`}
+              greeting={`${greetingText} 👋`}
               subtitle={data?.settings?.subtitle || DEFAULT_SUBTITLE}
-              stats={(
-                <>
-                  <OnlinePill count={presence.count} users={presence.users} onClick={() => setModal({ type: "leaderboard" })} />
-                  <span><strong>{allRefs.length}</strong> websites</span>
-                  <span><strong>{data?.folders.length || 0}</strong> folders</span>
-                  <span><strong>{totalClicks}</strong> visits</span>
-                </>
-              )}
-              extras={<>{showStart && startFolder && (
-                <div className="announcement start-here">
-                  <span>👋 New here? Start with <button className="link-btn" onClick={() => { novaGo(`folder:${startFolder.id}`); setStartDismissed(true); writeLocal("startDismissed", true); }}>{startFolder.emoji} {startFolder.name}</button></span>
-                  <button className="announcement-x" title="Got it" onClick={() => { setStartDismissed(true); writeLocal("startDismissed", true); }}><Icon name="x" /></button>
-                </div>
-              )}{todayBlock}{pollsBlock}</>}
+              stats={statsEl}
+              extras={<>{startEl}{todayBlock}{pollsBlock}</>}
               recent={recentOpened}
               folders={topFolders.filter(folderVisible)}
               kids={novaKids}
               onOpenFolder={(f) => novaGo(`folder:${f.id}`)}
               onOpenLink={trackAndOpen}
               newTab={look.newTab}
-              unread={(f) => metaFor(f).unread}
+              unread={unreadOf}
             />
           )}
           {footerEl}
@@ -2568,6 +2582,225 @@ export default function HomePage() {
       </div>
     </div>
   );
+
+  /* 🪐 Orbit: a home screen with a dock; folders open as windows */
+  const orbitLayout = () => (
+    <div className="ob-layout">
+      {topbarEl}
+      <div className="ob-stage">
+        {bannersEl}
+        {sectionHead ? (
+          <OrbitWindow key={filtering ? "search" : novaSection} emoji={sectionHead.emoji} name={sectionHead.name} color={sectionHead.color}
+            sub={filtering ? sectionHead.description : `${sectionHead.count} website${sectionHead.count === 1 ? "" : "s"}`}
+            actions={sectionHead.actions} onClose={closeSection} searching={filtering}>
+            {!filtering && sectionHead.description && <p className="ob-wdesc">{sectionHead.description}</p>}
+            {sectionBody()}
+          </OrbitWindow>
+        ) : (
+          <OrbitHome
+            greeting={greetingText}
+            subtitle={data?.settings?.subtitle || DEFAULT_SUBTITLE}
+            stats={statsEl}
+            folders={topFolders.filter(folderVisible)}
+            unread={unreadOf}
+            onOpenFolder={(f) => novaGo(`folder:${f.id}`)}
+            onNewFolder={!addingLocked ? () => openNewFolder() : undefined}
+            extras={startEl || todayBlock || pollsBlock ? <>{startEl}{todayBlock}{pollsBlock}</> : undefined}
+          />
+        )}
+        {footerEl}
+      </div>
+      <OrbitDock>
+        <DockButton label="Home" on={activeSection === "home" && !filtering} onClick={() => novaGo("home")}><Icon name="home" /></DockButton>
+        <DockButton label="Starred" on={activeSection === "starred"} onClick={() => novaGo("starred")} badge={0}><Icon name="star" /></DockButton>
+        <DockButton label="Read later" on={activeSection === "later"} onClick={() => novaGo("later")}><Icon name="clock" /></DockButton>
+        <DockButton label="Recently opened" on={activeSection === "recent"} onClick={() => novaGo("recent")}><Icon name="chart" /></DockButton>
+        {user && <DockButton label="My Stuff" on={activeSection === "mystuff"} onClick={() => novaGo("mystuff")}><Icon name="lock" /></DockButton>}
+        {favorites.length > 0 && <span className="ob-dock-sep" aria-hidden="true" />}
+        {favorites.slice(0, 6).map((r) => <DockSite key={r.link.id} refItem={r} newTab={look.newTab} onOpen={trackAndOpen} />)}
+        <span className="ob-dock-sep" aria-hidden="true" />
+        <DockButton label={addLabel} onClick={addHere}><Icon name="plus" /></DockButton>
+        <DockButton label="Chat (C)" on={chatOpen} onClick={() => setChatOpen((o) => !o)}><Icon name="chat" /></DockButton>
+        <DockButton label="Customize (P)" onClick={() => setModal({ type: "customize" })}><Icon name="palette" /></DockButton>
+      </OrbitDock>
+    </div>
+  );
+
+  /* 🗂️ Board: every folder as a column */
+  const boardLayout = () => (
+    <div className="bd-layout">
+      <div className="bd-wrap">
+        {bannersEl}
+        <header className="bd-head">
+          <div className="bd-title">
+            <h1>{title}</h1>
+            <p>{data?.settings?.subtitle || DEFAULT_SUBTITLE}</p>
+          </div>
+          <div className="bd-stats">{statsEl}</div>
+          <div className="bd-actions">
+            <button className="btn btn-primary" onClick={() => openAdd()}><Icon name="plus" /> {addLabel}</button>
+            {!addingLocked && <button className="btn btn-secondary" onClick={() => openNewFolder()}><Icon name="folder" /> New folder</button>}
+            <button className="btn btn-secondary" onClick={toggleAll} title="Fold every column up, or open them all (X)">
+              {sortedFolders.some((f) => !collapsed[f.id]) ? "Fold all" : "Unfold all"}
+            </button>
+          </div>
+        </header>
+        {startEl}
+        {filtering && resultsEl}
+      </div>
+      <div className="bd-board">
+        {renderMain()}
+        {!addingLocked && !filtering && (
+          <button className="bd-newcol" onClick={() => openNewFolder()}><Icon name="plus" /> New folder</button>
+        )}
+      </div>
+      <div className="bd-wrap">
+        {todayBlock}{pollsBlock}
+        {footerEl}
+      </div>
+    </div>
+  );
+
+  /* 📰 Journal: a newspaper */
+  const journalLayout = () => (
+    <div className="jr-layout">
+      {topbarEl}
+      <div className="jr-paper">
+        <JournalMast
+          title={title}
+          subtitle={data?.settings?.subtitle || DEFAULT_SUBTITLE}
+          edition={<>{allRefs.length} websites · {topFolders.length} sections · {presence.count} reading now</>}
+          nav={(
+            <>
+              <button className={activeSection === "home" && !filtering ? "on" : ""} onClick={() => novaGo("home")}>Front page</button>
+              {novaSideFolders.map((f) => (
+                <button key={f.id} className={activeSection === `folder:${f.id}` || novaFolder?.parentId === f.id ? "on" : ""} onClick={() => novaGo(`folder:${f.id}`)}>
+                  {f.name}{unreadOf(f) > 0 && <sup>{unreadOf(f)}</sup>}
+                </button>
+              ))}
+              <span className="jr-nav-sep" aria-hidden="true" />
+              <button className={activeSection === "starred" ? "on" : ""} onClick={() => novaGo("starred")}>★ Starred</button>
+              <button className={activeSection === "later" ? "on" : ""} onClick={() => novaGo("later")}>Read later</button>
+              {user && <button className={activeSection === "mystuff" ? "on" : ""} onClick={() => novaGo("mystuff")}>My Stuff</button>}
+            </>
+          )}
+        />
+        {bannersEl}
+        {sectionHead ? (
+          <div className={`nv-folder-view jr-page ${filtering ? "searching" : ""}`}>
+            <JournalSectionHead emoji={sectionHead.emoji} name={sectionHead.name} description={sectionHead.description} color={sectionHead.color} count={sectionHead.count}>
+              {sectionHead.actions}
+            </JournalSectionHead>
+            {novaFolder && (novaKids.get(novaFolder.id) || []).length > 0 && (
+              <nav className="jr-subnav" aria-label="Inside this section">
+                {(novaKids.get(novaFolder.id) || []).map((k) => <button key={k.id} onClick={() => novaGo(`folder:${k.id}`)}>{k.emoji} {k.name}</button>)}
+              </nav>
+            )}
+            {sectionBody()}
+          </div>
+        ) : (
+          <>
+            {startEl}
+            <JournalFront
+              refs={allRefs}
+              folders={novaSideFolders}
+              kids={novaKids}
+              onOpenFolder={(f) => novaGo(`folder:${f.id}`)}
+              onOpenLink={trackAndOpen}
+              newTab={look.newTab}
+              notices={todayBlock || pollsBlock ? <>{todayBlock}{pollsBlock}</> : undefined}
+              recent={recentOpened}
+            />
+          </>
+        )}
+        {footerEl}
+      </div>
+    </div>
+  );
+
+  /* 💻 Terminal: a folder tree and websites as files */
+  const termHost = termSlug(title).slice(0, 24);
+  const terminalLayout = () => (
+    <div className="tm-layout">
+      <TermTree
+        host={termHost}
+        user={user}
+        section={filtering ? "" : activeSection}
+        go={(s) => novaGo(s as NovaSection)}
+        folders={novaSideFolders}
+        kids={novaKids}
+        counts={{ starred: favorites.length, later: readLater.length, recent: recentOpened.length, mystuff: personal.myStuff.length }}
+        unread={unreadOf}
+        actions={(
+          <>
+            <button onClick={addHere}>[+ {addingLocked ? "suggest" : "add"}]</button>
+            {!addingLocked && <button onClick={() => openNewFolder()}>[mkdir]</button>}
+            {betaOk("tools") && <button onClick={() => openTools()}>[tools]</button>}
+            <button onClick={() => setChatOpen((o) => !o)}>[chat]</button>
+            <button onClick={() => setModal({ type: "customize" })}>[customize]</button>
+            <button onClick={() => changeTheme(theme === "dark" ? "light" : "dark")}>[{theme === "dark" ? "light" : "dark"}]</button>
+            {user ? <a href={`/u/${encodeURIComponent(user)}`}>[~{user}]</a> : <button onClick={() => openLogin()}>[login]</button>}
+          </>
+        )}
+      />
+      <div className="tm-main">
+        {topbarEl}
+        <div className="tm-screen">
+          {bannersEl}
+          {sectionHead ? (
+            <div className={`nv-folder-view tm-dirview ${filtering ? "searching" : ""}`}>
+              <TermPrompt host={termHost} user={user} path={sectionHead.path} cmd={filtering ? `grep -ri "${search.trim()}" ~` : `cd ${sectionHead.path} && ls -la`} />
+              <div className="tm-total">
+                <span>{filtering ? `${sectionHead.count} match${sectionHead.count === 1 ? "" : "es"}` : `total ${sectionHead.count}`}{!filtering && sectionHead.description ? `   # ${sectionHead.description}` : ""}</span>
+                {sectionHead.actions && <span className="tm-actions">{sectionHead.actions}</span>}
+                <button className="tm-up" onClick={closeSection}>{filtering ? "[clear]" : "[cd ..]"}</button>
+              </div>
+              {sectionBody()}
+              <TermPrompt host={termHost} user={user} path={sectionHead.path}><span className="tm-cursor" aria-hidden="true" /></TermPrompt>
+            </div>
+          ) : (
+            <>
+              {startEl}
+              <TermHome
+                host={termHost}
+                user={user}
+                title={title}
+                version={APP_VERSION}
+                stats={`${allRefs.length} websites · ${data?.folders.length || 0} folders · ${totalClicks} visits · ${presence.count} online`}
+                folders={novaSideFolders}
+                unread={unreadOf}
+                onOpenFolder={(f) => novaGo(`folder:${f.id}`)}
+                recent={recentOpened}
+                onOpenLink={trackAndOpen}
+                newTab={look.newTab}
+                extras={todayBlock || pollsBlock ? <>{todayBlock}{pollsBlock}</> : undefined}
+              />
+            </>
+          )}
+          {footerEl}
+        </div>
+      </div>
+    </div>
+  );
+
+  /* 🍃 Zen: a clock, one search box, plain lists */
+  const zenLayout = () => (
+    <div className="zn-layout">
+      <ZenHero greeting={greetingText} />
+      {topbarEl}
+      <div className="zn-wrap">
+        {bannersEl}
+        {filtering && resultsEl}
+        <div className="zn-cols">{renderMain()}</div>
+        {footerEl}
+      </div>
+    </div>
+  );
+
+  const LAYOUTS: Partial<Record<Design, () => React.ReactNode>> = { nova: novaLayout, orbit: orbitLayout, board: boardLayout, journal: journalLayout, terminal: terminalLayout, zen: zenLayout };
+  const designEl = LAYOUTS[look.ui]?.();
+  /** these place the top bar themselves */
+  const ownTopbar = look.ui !== "classic" && look.ui !== "board";
 
   return (
     <div className={`shell ${showAdmin ? "with-admin" : ""}`}>
@@ -2615,7 +2848,7 @@ export default function HomePage() {
           👀 You&apos;re seeing the site as {asMember === "guest" ? "someone who isn't logged in" : "a member"} does. <button className="link-btn" onClick={() => toggleAsMember()}>Back to admin view</button>
         </div>
       )}
-      {!nova && topbarEl}
+      {!ownTopbar && topbarEl}
 
       {look.focus && (
         <div className="focus-pill" role="status">
@@ -2624,8 +2857,8 @@ export default function HomePage() {
         </div>
       )}
       {dropHint && <div className="drop-overlay" aria-hidden="true"><div>🔗 Drop it on a folder, or anywhere to add it</div></div>}
-      {look.sideNav && <SideNav folders={topFolders} active={activeFolder} onJump={jumpToFolder} counts={(f) => f.links.length} />}
-      {nova ? novaEl : (
+      {look.sideNav && !PAGED_DESIGNS.includes(look.ui) && <SideNav folders={topFolders} active={activeFolder} onJump={jumpToFolder} counts={(f) => f.links.length} />}
+      {designEl ?? (
       <div className="app">
         <header className="hero">
           <h1>{aprilOn ? Array.from(title).reverse().join("") : title}</h1>

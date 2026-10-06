@@ -4,6 +4,23 @@ import { Folder } from "@/lib/types";
 import { Icon } from "./Icon";
 import { COLORS, readLocal } from "./ui";
 import { useSavedTick } from "./guard";
+import { DESIGNS, Design } from "./look";
+
+/** A tiny drawing of each design for the chooser. */
+function DesignThumb({ id }: { id: Design }) {
+  const boxes = (list: number[][], cls = "t-card") => list.map(([l, t, w, h], i) => <span key={i} className={cls} style={{ left: `${l}%`, top: t, width: `${w}%`, height: h }} />);
+  return (
+    <span className={`ui-thumb ${id}`} aria-hidden="true">
+      {id === "classic" && <><span className="t-bar" />{boxes([[8, 24, 40, 20], [52, 24, 40, 20], [8, 50, 40, 20], [52, 50, 40, 20]])}</>}
+      {id === "nova" && <><span className="t-side" /><span className="t-title" />{boxes([[34, 40, 28, 22], [66, 40, 28, 22], [34, 66, 28, 18], [66, 66, 28, 18]])}</>}
+      {id === "orbit" && <><span className="t-clock" />{boxes([[18, 40, 12, 12], [36, 40, 12, 12], [54, 40, 12, 12], [72, 40, 12, 12], [18, 58, 12, 12], [36, 58, 12, 12]], "t-app")}<span className="t-dock" /></>}
+      {id === "board" && <><span className="t-bar" />{boxes([[5, 22, 21, 62], [28, 22, 21, 48], [51, 22, 21, 56], [74, 22, 21, 30]], "t-col")}</>}
+      {id === "journal" && <><span className="t-mast" /><span className="t-rule" />{boxes([[6, 36, 54, 34], [64, 36, 30, 6], [64, 46, 30, 6], [64, 56, 30, 6], [6, 76, 26, 4], [36, 76, 26, 4], [66, 76, 28, 4]], "t-ink")}</>}
+      {id === "terminal" && <><span className="t-tree" />{boxes([[34, 14, 40, 5], [34, 26, 56, 5], [34, 36, 48, 5], [34, 46, 52, 5], [34, 56, 30, 5], [34, 70, 8, 6]], "t-line")}</>}
+      {id === "zen" && <><span className="t-big" />{boxes([[10, 58, 22, 4], [10, 66, 18, 4], [10, 74, 20, 4], [40, 58, 20, 4], [40, 66, 22, 4], [70, 58, 20, 4], [70, 66, 16, 4]], "t-text")}</>}
+    </span>
+  );
+}
 import {
   DEFAULT_LOOK, DEFAULT_ORDER, FONTS, HIDEABLE, Look, PALETTES, SECTIONS, Section, decodeTheme, encodeTheme,
 } from "./look";
@@ -97,24 +114,14 @@ export function ThemeEditor({ look, onChange, onClose, startView, onStartView, f
         <div className="form-group">
           <label>Design</label>
           <div className="ui-choice" role="radiogroup" aria-label="Design">
-            <button type="button" role="radio" aria-checked={look.ui === "classic"} className={`ui-option ${look.ui === "classic" ? "on" : ""}`} onClick={() => set({ ui: "classic" })}>
-              <span className="ui-thumb classic" aria-hidden="true">
-                <span className="t-bar" />
-                {[[8, 24], [52, 24], [8, 50], [52, 50]].map(([l, t], i) => <span key={i} className="t-card" style={{ left: `${l}%`, top: t, width: "40%" }} />)}
-              </span>
-              <strong>Classic</strong>
-              <em>Every folder on one long page — how the site has always looked.</em>
-            </button>
-            <button type="button" role="radio" aria-checked={look.ui === "nova"} className={`ui-option ${look.ui === "nova" ? "on" : ""}`} onClick={() => set({ ui: "nova" })}>
-              <span className="ui-new">New</span>
-              <span className="ui-thumb nova" aria-hidden="true">
-                <span className="t-bar" />
-                <span className="t-title" />
-                {[[8, 46], [52, 46], [8, 72], [52, 72]].map(([l, t], i) => <span key={i} className="t-card" style={{ left: `${l}%`, top: t, width: "40%" }} />)}
-              </span>
-              <strong>✨ Nova</strong>
-              <em>A sidebar app: Home dashboard, a page per folder, websites as big app tiles.</em>
-            </button>
+            {DESIGNS.map((d) => (
+              <button key={d.id} type="button" role="radio" aria-checked={look.ui === d.id} className={`ui-option ${look.ui === d.id ? "on" : ""}`} onClick={() => set({ ui: d.id })}>
+                {d.id !== "classic" && <span className="ui-new">New</span>}
+                <DesignThumb id={d.id} />
+                <strong>{d.emoji} {d.name}</strong>
+                <em>{d.blurb}</em>
+              </button>
+            ))}
           </div>
         </div>
         <Preview />
