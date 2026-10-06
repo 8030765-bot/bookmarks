@@ -94,6 +94,29 @@ export function ThemeEditor({ look, onChange, onClose, startView, onStartView, f
       <div className="modal wide theme-editor" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Customize the look">
         <h2>🎨 Customize{tick > 0 && <span key={tick} className="saved-tick" role="status">✓ Saved</span>}</h2>
         <p className="modal-text">Only changes how the site looks for you. Changes show straight away.</p>
+        <div className="form-group">
+          <label>Design</label>
+          <div className="ui-choice" role="radiogroup" aria-label="Design">
+            <button type="button" role="radio" aria-checked={look.ui === "classic"} className={`ui-option ${look.ui === "classic" ? "on" : ""}`} onClick={() => set({ ui: "classic" })}>
+              <span className="ui-thumb classic" aria-hidden="true">
+                <span className="t-bar" />
+                {[[8, 24], [52, 24], [8, 50], [52, 50]].map(([l, t], i) => <span key={i} className="t-card" style={{ left: `${l}%`, top: t, width: "40%" }} />)}
+              </span>
+              <strong>Classic</strong>
+              <em>Every folder on one long page — how the site has always looked.</em>
+            </button>
+            <button type="button" role="radio" aria-checked={look.ui === "nova"} className={`ui-option ${look.ui === "nova" ? "on" : ""}`} onClick={() => set({ ui: "nova" })}>
+              <span className="ui-new">New</span>
+              <span className="ui-thumb nova" aria-hidden="true">
+                <span className="t-bar" />
+                <span className="t-title" />
+                {[[8, 46], [52, 46], [8, 72], [52, 72]].map(([l, t], i) => <span key={i} className="t-card" style={{ left: `${l}%`, top: t, width: "40%" }} />)}
+              </span>
+              <strong>✨ Nova</strong>
+              <em>A sidebar app: Home dashboard, a page per folder, websites as big app tiles.</em>
+            </button>
+          </div>
+        </div>
         <Preview />
         <div className="seg te-tabs" role="tablist">
           {TABS.map((t) => (

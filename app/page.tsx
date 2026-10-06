@@ -45,6 +45,7 @@ import SideNav from "./components/SideNav";
 import { recordUndo, redoLast, undoLast } from "./components/undo";
 import { inQuietHours } from "@/lib/quiet";
 import { TOOL_LIST } from "./components/tools/list";
+import { NovaBanner, NovaHome, NovaSection, NovaSidebar } from "./components/Nova";
 import { AddAnywhereModal, WeekChanges, downloadBookmarksHtml, downloadFolderCsv, embedCode } from "./components/DataViews";
 import { BottomNav, InstallModal, PullIndicator, buzz, usePullToRefresh } from "./components/Mobile";
 import { FeedbackModal, Tour, WhatsNewPopup, useFirstVisit, useLeaveWarning, useWhatsNewAfterUpdate } from "./components/Help";
@@ -466,6 +467,13 @@ export default function HomePage() {
   // tools drawer (O), and the focus timer that rings even when it's closed
   const [toolsOpen, setToolsOpen] = useState(false);
   const [sendLink, setSendLink] = useState<Link | null>(null);
+  // Nova: which page is showing, and the phone menu
+  const [novaSection, setNovaSection] = useState<NovaSection>("home");
+  const [novaNav, setNovaNav] = useState(false);
+  const novaAllTop = useRef<Folder[]>([]);
+  useEffect(() => { setNovaSection(readLocal<NovaSection>("novaSection", "home")); }, []);
+  const [novaInvite, setNovaInvite] = useState(false);
+  useEffect(() => { setNovaInvite(readLocal<string>("novaInvite", "") !== "done"); }, []);
   const [toolsTool, setToolsTool] = useState<string | null>(null);
   const openTools = (tool: string | null = null) => { setToolsTool(tool); setToolsOpen(true); };
   useTimerAlarm(useCallback((m: string) => showToast(m, undefined, 6000), [showToast]));
@@ -1191,6 +1199,7 @@ export default function HomePage() {
   function openCard(linkId: string) {
     const target = data?.folders.find((f) => f.links.some((l) => l.id === linkId));
     if (!target) return;
+    if (lookRef.current.ui === "nova") { setNovaSection(`folder:${target.id}`); writeLocal("novaSection", `folder:${target.id}`); }
     toggleCollapsed(target.id, false);
     setExpandedId(linkId);
     setFocusedId(linkId);
@@ -1306,6 +1315,13 @@ export default function HomePage() {
     if (await api(action, { ...payload, password: adminPassword })) showToast(done);
   }
   function jumpToFolder(id: string) {
+    if (lookRef.current.ui === "nova") {
+      setNovaSection(`folder:${id}`);
+      writeLocal("novaSection", `folder:${id}`);
+      setNovaNav(false);
+      window.scrollTo({ top: 0 });
+      return;
+    }
     toggleCollapsed(id, false);
     requestAnimationFrame(() => {
       const el = document.getElementById(`folder-${id}`);
@@ -1931,6 +1947,7 @@ export default function HomePage() {
       cmd("extra", look.specialFolders ? "Hide Recently added / Popular folders" : "Show Recently added / Popular folders", "chart", () => changeLook({ ...look, specialFolders: !look.specialFolders })),
       cmd("empty", look.hideEmpty ? "Show empty folders" : "Hide empty folders", "folder", () => changeLook({ ...look, hideEmpty: !look.hideEmpty })),
       cmd("motion", look.motion ? "Turn animations off" : "Turn animations on", "settings", () => changeLook({ ...look, motion: !look.motion })),
+      cmd("design", look.ui === "nova" ? "Switch to the Classic design" : "✨ Switch to the new Nova design", "palette", () => changeLook({ ...look, ui: look.ui === "nova" ? "classic" : "nova" })),
       cmd("focusmode", look.focus ? "Leave focus mode" : "Focus mode — just the websites", "eye", () => changeLook({ ...look, focus: !look.focus })),
       cmd("sticky", look.stickyHeaders ? "Stop folder names sticking at the top" : "Keep folder names at the top while scrolling", "folder", () => changeLook({ ...look, stickyHeaders: !look.stickyHeaders })),
       cmd("newtab", look.newTab ? "Open websites in this tab" : "Open websites in a new tab", "external", () => changeLook({ ...look, newTab: !look.newTab })),
@@ -2075,54 +2092,12 @@ export default function HomePage() {
             />
   );
 
-  return (
-    <div className={`shell ${showAdmin ? "with-admin" : ""}`}>
-      {showAdmin && (
-        <AdminPanel
-          data={data!}
-          password={adminPassword}
-          role={role}
-          api={async (action, payload) => !!(await api(action, payload))}
-          submitting={submitting}
-          onClose={() => setAdminOpen(false)}
-          onLock={lockAdmin}
-          showToast={showToast}
-          applyData={setSafeData}
-        />
-      )}
-
-      {syncStatus === "quota" ? (
-        <div className="offline-bar" role="status">
-          <span className="offline-dot" /> The site&apos;s free database limit is used up — you&apos;re seeing the last saved copy and changes are paused until it resets.
-        </div>
-      ) : offline && (
-        <div className="offline-bar" role="status">
-          <span className="offline-dot" />
-          <span>
-            You&apos;re offline — showing the copy saved on this device.{" "}
-            <span className="offline-more">You can still open websites, search, and use My Stuff and the tools; adding websites is saved here and sent when you&apos;re back. Chat and likes wait for the connection.</span>{" "}
-            <button className="link-btn" onClick={() => { load(); }}>Try again</button>
-          </span>
-        </div>
-      )}
-      {data?.settings?.maintenance && (
-        <div className="offline-bar maint-bar" role="status">
-          🛠️ The site is read-only for maintenance{data.settings.maintenanceMessage ? ` — ${data.settings.maintenanceMessage}` : ""}.{role === "owner" || role === "admin" ? " (Admins can still make changes.)" : ""}
-        </div>
-      )}
-      {user && sessionLeft !== null && sessionLeft < (rememberMeNow ? 3 * 86400 : 3600) && (
-        <div className="offline-bar session-bar" role="status">
-          ⏳ You&apos;ll be logged out {sessionLeft < 3600 ? `in ${Math.max(1, Math.round(sessionLeft / 60))} minutes` : sessionLeft < 86400 ? `in ${Math.round(sessionLeft / 3600)} hours` : `in ${Math.round(sessionLeft / 86400)} days`}.
-          <button className="link-btn" onClick={stayLoggedIn}>Stay logged in</button>
-        </div>
-      )}
-      {asMember && (
-        <div className="offline-bar member-bar" role="status">
-          👀 You&apos;re seeing the site as {asMember === "guest" ? "someone who isn't logged in" : "a member"} does. <button className="link-btn" onClick={() => toggleAsMember()}>Back to admin view</button>
-        </div>
-      )}
+  /* ---------- pieces shared by the Classic page and the Nova layout ---------- */
+  const nova = look.ui === "nova";
+  const topbarEl = (
       <div className="topbar" ref={topbarRef}>
         <div className="topbar-inner">
+          {nova && <button className="icon-btn nv-burger" onClick={() => setNovaNav(true)} title="Folders and menu" aria-label="Open the menu"><Icon name="list" /></button>}
           <button className="brand" onClick={() => { if (!logoClick()) window.scrollTo({ top: 0, behavior: look.motion ? "smooth" : "auto" }); }} title={look.seasonal ? logo.label : "Back to top"}>
             <span className="brand-mark">{look.seasonal ? logo.mark : "🔖"}</span>
             <span className="brand-name">{title}</span>
@@ -2241,28 +2216,22 @@ export default function HomePage() {
           </div>
         </div>
       </div>
-
-      {look.focus && (
-        <div className="focus-pill" role="status">
-          🎯 Focus mode
-          <button className="btn btn-secondary btn-sm" onClick={() => changeLook({ ...look, focus: false })}>Show everything</button>
-        </div>
-      )}
-      {dropHint && <div className="drop-overlay" aria-hidden="true"><div>🔗 Drop it on a folder, or anywhere to add it</div></div>}
-      {look.sideNav && <SideNav folders={topFolders} active={activeFolder} onJump={jumpToFolder} counts={(f) => f.links.length} />}
-      <div className="app">
-        <header className="hero">
-          <h1>{aprilOn ? Array.from(title).reverse().join("") : title}</h1>
-          {look.greeting && <p className="greeting">{greetingFor()}{user ? `, ${user}` : ""} 👋</p>}
-          <p>{data?.settings?.subtitle || DEFAULT_SUBTITLE}</p>
-          <div className="hero-stats">
-            <OnlinePill count={presence.count} users={presence.users} onClick={() => setModal({ type: "leaderboard" })} />
-            <span><strong>{allRefs.length}</strong> websites</span>
-            <span><strong>{data?.folders.length || 0}</strong> folders</span>
-            <span><strong>{totalClicks}</strong> visits</span>
+  );
+  const bannersEl = (
+    <>
+        {look.ui !== "nova" && novaInvite && (
+          <div className="nova-invite" role="status">
+            <span className="nova-spark" aria-hidden="true">✨</span>
+            <div>
+              <strong>Try the new design</strong>
+              <span>Nova: a sidebar with all your folders, a Home dashboard, and every folder on its own page with websites as big app tiles. Switch back any time in Customize.</span>
+            </div>
+            <div className="nova-actions">
+              <button className="btn btn-primary btn-sm" onClick={() => { changeLook({ ...look, ui: "nova" }); setNovaInvite(false); writeLocal("novaInvite", "done"); showToast("✨ Welcome to Nova — switch back in Customize → Design", { label: "Undo", run: () => changeLook({ ...look, ui: "classic" }) }, 7000); }}>Try it</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => { setNovaInvite(false); writeLocal("novaInvite", "done"); }}>Not now</button>
+            </div>
           </div>
-        </header>
-
+        )}
         {data?.settings?.announcement && announceLive && dismissed !== data.settings.announcement && (
           <div className="announcement">
             <Icon name="bulb" /> <span>{data.settings.announcement}</span>
@@ -2279,6 +2248,398 @@ export default function HomePage() {
             <button className="link-btn" onClick={() => { setAprilOff(true); writeLocal("aprilOff", new Date().toDateString()); }}>Turn it off for me</button>
           </div>
         )}
+
+    </>
+  );
+  const resultsEl = (
+          <>
+          <div className="results-bar">
+            <span>
+              <strong>{matchCount}</strong> {matchCount === 1 ? "website" : "websites"}
+              {q && <> matching “{search.trim()}”</>}
+              {tagFilters.length > 0 && <> tagged <strong>{tagFilters.map((t) => `#${t}`).join(tagMode === "all" ? " and " : " or ")}</strong></>}
+              {useFuzzy && matchCount > 0 && <span className="fuzzy-note"> · no exact matches, showing close ones</span>}
+              {q && matchCount > 0 && <span className="enter-hint"> · press <span className="kbd">Enter</span> to open the first, <span className="kbd">↓</span> to move into the results</span>}
+            </span>
+            <span className="results-tools">
+              <select value={resultSort} onChange={(e) => setResultSort(e.target.value as typeof resultSort)} aria-label="Sort results">
+                <option value="best">Best match</option>
+                <option value="newest">Newest</option>
+                <option value="rating">Top rated</option>
+                <option value="folder">Folder order</option>
+              </select>
+              {q && (
+                <label className="check-inline" title="Also look inside descriptions, tips and your private notes">
+                  <input type="checkbox" checked={searchNotes} onChange={(e) => { setSearchNotes(e.target.checked); writeLocal("searchNotes", e.target.checked); }} /> Descriptions &amp; notes
+                </label>
+              )}
+              <button className="btn-icon" title="Copy a link to this search" onClick={copySearchLink}><Icon name="share" /></button>
+              <button className="btn btn-secondary btn-sm" onClick={() => { setSearch(""); setTagFilters([]); }}>Clear</button>
+            </span>
+          </div>
+          {chatHits.length > 0 && (
+            <div className="chat-hits">
+              <span className="nav-label">In chat</span>
+              {chatHits.slice(0, 3).map((m) => (
+                <button key={m.id} className="chat-hit" onClick={() => setChatOpen(true)} title="Open chat">
+                  <strong>{m.user}:</strong> {m.text.length > 80 ? `${m.text.slice(0, 80)}…` : m.text}
+                </button>
+              ))}
+            </div>
+          )}
+          </>
+  );
+  const footerEl = (
+        <footer className="footer">
+          {title} · Shared with the whole class ·{" "}
+          <button className="link-btn" onClick={() => setModal({ type: "shortcuts" })}>Keyboard shortcuts (?)</button>
+          {" · "}<a className="link-btn" href="/changelog">What&apos;s changed</a>
+          {" · "}<a className="link-btn" href="/help">Help</a>
+          {" · "}<a className="link-btn" href="/rules">Rules</a>
+          {" · "}<a className="link-btn" href="/privacy">Privacy</a>
+          {" · "}<a className="link-btn footer-version" href="/changelog" title="Version">v{APP_VERSION}</a>
+          <EasterEgg id="footer" />
+        </footer>
+  );
+  function renderMain(only?: string) {
+    return (
+        <main id="main" tabIndex={-1} className={`folders ${allRefs.length > 150 ? "big-list" : ""}`}>
+          {!only && sortedFolders.length === 0 && (
+            <div className="empty-state">
+              <div className="empty-emoji">📂</div>
+              <h3>No folders yet</h3>
+              <p>Folders keep websites organised. Make the first one to get started.</p>
+              <button className="btn btn-primary" onClick={() => openNewFolder()}><Icon name="plus" /> Create a folder</button>
+            </div>
+          )}
+          {!only && filtering && matchCount === 0 && sortedFolders.length > 0 && (
+            <div className="empty-state">
+              <div className="empty-emoji">🔍</div>
+              <h3>Nothing found</h3>
+              {didYouMean && (
+                <p>Did you mean <button className="link-btn" onClick={() => setSearch(didYouMean)}><strong>{didYouMean}</strong></button>?</p>
+              )}
+              <p>No websites match that search. Try fewer words, a tag like <code>#maths</code>, or <code>in:folder</code>. Know a good one?</p>
+              <button className="btn btn-secondary" onClick={() => setSuggest({ kind: "addLink" })}><Icon name="bulb" /> Suggest a website</button>
+            </div>
+          )}
+          {user && personal.loaded && (only === "__mystuff" || (!only && !filtering && (personal.myStuff.length > 0 || myStuffOpen))) && (
+            <MyStuff
+              items={personal.myStuff}
+              collapsed={only !== "__mystuff" && !!collapsed["__mystuff"]}
+              newTab={look.newTab}
+              onToggle={() => toggleCollapsed("__mystuff")}
+              act={personal.myStuffAction}
+              toast={showToast}
+              user={user}
+              publicLists={personal.publicLists}
+              onPublish={async (list, on) => {
+                const j = await personal.myStuffAction({ action: "publishList", list, on });
+                if (j.error) { showToast(j.error); return; }
+                personal.reload();
+                if (on) {
+                  const url = `${location.origin}/u/${encodeURIComponent(user!)}/list/${encodeURIComponent(list)}`;
+                  navigator.clipboard.writeText(url).then(() => showToast(`“${list}” is shared with everyone who's logged in — link copied`)).catch(() => showToast(url));
+                } else showToast(`“${list}” is private again`);
+              }}
+            />
+          )}
+          <CardContext.Provider value={cardEnv}>
+            {!only && specialViews.map((v) => (
+              <FolderSection
+                key={v.folder.id}
+                folder={v.folder}
+                links={[]}
+                shortcuts={v.shortcuts}
+                totalLinks={v.shortcuts.length}
+                collapsed={!!collapsed[v.folder.id]}
+                view={folderViewPrefs[v.folder.id] || view}
+                canAdd={false}
+                editor={false}
+                virtual
+                dragEnabled={false}
+                drag={drag}
+                setDrag={setDrag}
+                dropTarget={dropTarget}
+                setDropTarget={setDropTarget}
+                meta={{ updatedAt: 0, unread: 0, done: 0 }}
+                onToggle={() => toggleCollapsed(v.folder.id)}
+                onAddHere={() => {}}
+                onOpenAll={() => openAllIn(v.shortcuts.map((r) => r.link))}
+                onEditFolder={() => {}}
+                onDeleteFolder={() => {}}
+                onShareFolder={() => {}}
+                onMoveLink={moveLink}
+                onMoveFolder={moveFolder}
+                onDropUrl={() => {}}
+                onMenu={() => {}}
+              />
+            ))}
+            {(only ? (data?.folders || []).filter((f) => f.id === only) : topFolders.filter(folderVisible)).map((top) => {
+              const section = (folder: Folder, sub: boolean, children?: React.ReactNode) => {
+                const { links, shortcuts } = viewById.get(folder.id) || { links: [], shortcuts: [] };
+                return (
+                  <FolderSection
+                    key={folder.id}
+                    folder={folder}
+                    links={links}
+                    shortcuts={shortcuts}
+                    totalLinks={folder.rule ? shortcuts.length : folder.links.filter(shown).length}
+                    collapsed={!only && !filtering && !!collapsed[folder.id]}
+                    view={folderViewPrefs[folder.id] || view}
+                    canAdd={!addingLocked || editableFolders.has(folder.id)}
+                    editor={canEditFolder(folder)}
+                    sub={sub}
+                    meta={metaFor(folder)}
+                    dragEnabled={dragEnabled}
+                    drag={drag}
+                    setDrag={setDrag}
+                    dropTarget={dropTarget}
+                    setDropTarget={setDropTarget}
+                    onToggle={() => toggleCollapsed(folder.id)}
+                    onAddHere={() => openAdd(folder.id)}
+                    onOpenAll={() => openAllIn([...links, ...shortcuts.map((r) => r.link)])}
+                    onEditFolder={() => setModal({ type: "folder", folder })}
+                    onDeleteFolder={() => setModal({ type: "deleteFolder", folder })}
+                    onShareFolder={() => shareFolder(folder)}
+                    onMoveLink={moveLink}
+                    onMoveFolder={moveFolder}
+                    onDropUrl={(folderId, url) => openAdd(folderId, url)}
+                    onMenu={(at) => setFolderMenu({ folder, ...at })}
+                    onSplit={adminUnlocked ? () => setPick({ kind: "split", folder }) : undefined}
+                  >
+                    {children}
+                  </FolderSection>
+                );
+              };
+              const kids = (childrenOf.get(top.id) || []).filter((k) => !filtering || hasContent(viewById.get(k.id)));
+              return section(top, false, kids.length ? kids.map((k) => section(k, true)) : undefined);
+            })}
+            {cardMenu && <CardMenu state={cardMenu} onClose={() => setCardMenu(null)} />}
+          </CardContext.Provider>
+          {dragEnabled && sortedFolders.length > 0 && (
+            <p className="drag-hint"><Icon name="grip" /> Admin tip: drag websites between folders, or drag a folder header to reorder.</p>
+          )}
+        </main>
+    );
+  }
+  /** A list that isn't a real folder (Starred, Read later…) drawn like one. */
+  function renderVirtual(id: string, name: string, emoji: string, refs: LinkRef[]) {
+    const folder = { id, name, emoji, links: [] } as unknown as Folder;
+    return (
+      <main id="main" tabIndex={-1} className="folders">
+        <CardContext.Provider value={cardEnv}>
+          {refs.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-emoji">{emoji}</div>
+              <h3>Nothing here yet</h3>
+              <p>{id === "__starred" ? "Press ☆ on a website to keep it here." : id === "__later" ? "Press 🕐 on a website to save it for later." : "Websites you open show up here."}</p>
+            </div>
+          ) : (
+            <FolderSection
+              folder={folder} links={[]} shortcuts={refs} totalLinks={refs.length} collapsed={false}
+              view={view} canAdd={false} editor={false} virtual dragEnabled={false}
+              drag={drag} setDrag={setDrag} dropTarget={dropTarget} setDropTarget={setDropTarget}
+              meta={{ updatedAt: 0, unread: 0, done: 0 }}
+              onToggle={() => {}} onAddHere={() => {}} onOpenAll={() => openAllIn(refs.map((r) => r.link))}
+              onEditFolder={() => {}} onDeleteFolder={() => {}} onShareFolder={() => {}}
+              onMoveLink={moveLink} onMoveFolder={moveFolder} onDropUrl={() => {}} onMenu={() => {}}
+            />
+          )}
+          {cardMenu && <CardMenu state={cardMenu} onClose={() => setCardMenu(null)} />}
+        </CardContext.Provider>
+      </main>
+    );
+  }
+  // the sidebar keeps every folder while you search
+  if (!filtering) novaAllTop.current = topFolders.filter(folderVisible);
+  const novaSideFolders = filtering && novaAllTop.current.length ? novaAllTop.current : topFolders.filter(folderVisible);
+  const novaFolder = novaSection.startsWith("folder:") ? folderById.get(novaSection.slice(7)) : undefined;
+  const novaKids = new Map((data?.folders || []).filter((f) => !f.parentId).map((f) => [f.id, (childrenOf.get(f.id) || []).filter(folderVisible)]));
+  const novaGo = (s: NovaSection) => {
+    setNovaSection(s);
+    writeLocal("novaSection", s);
+    setNovaNav(false);
+    if (filtering) { setSearch(""); setTagFilters([]); }
+    window.scrollTo({ top: 0 });
+  };
+  const novaFolderCount = novaFolder ? (novaFolder.rule ? (viewById.get(novaFolder.id)?.shortcuts.length || 0) : novaFolder.links.filter(shown).length) : 0;
+  const novaEl = (
+    <div className="nv-layout">
+      <NovaSidebar
+        title={title}
+        mark={look.seasonal ? logo.mark : "🔖"}
+        section={novaFolder || !novaSection.startsWith("folder:") ? novaSection : "home"}
+        go={novaGo}
+        folders={novaSideFolders}
+        kids={novaKids}
+        counts={{ starred: favorites.length, later: readLater.length, recent: recentOpened.length, mystuff: personal.myStuff.length }}
+        unread={(f) => metaFor(f).unread}
+        user={user}
+        profile={personal.profile as MiniProfile}
+        addLabel={addingLocked ? "Suggest a website" : "Add website"}
+        canNewFolder={!addingLocked}
+        open={novaNav}
+        onClose={() => setNovaNav(false)}
+        onAdd={() => { setNovaNav(false); openAdd(novaFolder && !novaFolder.rule ? novaFolder.id : undefined); }}
+        onNewFolder={() => { setNovaNav(false); openNewFolder(); }}
+        onTools={betaOk("tools") ? () => { setNovaNav(false); openTools(); } : undefined}
+        onChat={() => { setNovaNav(false); setChatOpen((o) => !o); }}
+        onCustomize={() => { setNovaNav(false); setModal({ type: "customize" }); }}
+        onTheme={() => changeTheme(theme === "dark" ? "light" : "dark")}
+        theme={theme}
+        onProfile={() => { if (user) location.href = `/u/${encodeURIComponent(user)}`; }}
+        onLogin={() => { setNovaNav(false); openLogin(); }}
+      />
+      <div className="nv-main">
+        {topbarEl}
+        <div className="nv-content">
+          {bannersEl}
+          {filtering ? (
+            <>
+              {resultsEl}
+              {renderMain()}
+            </>
+          ) : novaFolder ? (
+            <div className="nv-folder-view">
+              <NovaBanner emoji={novaFolder.emoji} name={novaFolder.name} description={novaFolder.description} color={novaFolder.color} count={novaFolderCount}>
+                {(!addingLocked || editableFolders.has(novaFolder.id)) && !novaFolder.rule && (
+                  <button className="btn btn-primary" onClick={() => openAdd(novaFolder.id)}><Icon name="plus" /> Add website</button>
+                )}
+                <div className="seg-toggle" role="group" aria-label="View">
+                  <button className={view === "grid" ? "on" : ""} onClick={() => changeView("grid")} title="Tiles"><Icon name="grid" /></button>
+                  <button className={view === "list" ? "on" : ""} onClick={() => changeView("list")} title="List"><Icon name="list" /></button>
+                </div>
+                <button className="btn btn-secondary" title="Share a link to this folder" onClick={() => shareFolder(novaFolder)}><Icon name="share" /></button>
+                <button className="btn btn-secondary" title="More: sort, open all, print, edit…" onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setFolderMenu({ folder: novaFolder, x: r.right, y: r.bottom + 6 }); }}><Icon name="more" /></button>
+              </NovaBanner>
+              {renderMain(novaFolder.id)}
+            </div>
+          ) : novaSection === "starred" ? (
+            <div className="nv-folder-view">
+              <NovaBanner emoji="⭐" name="Starred" color="#ffb84d" count={favorites.length} />
+              {renderVirtual("__starred", "Starred", "⭐", favorites)}
+            </div>
+          ) : novaSection === "later" ? (
+            <div className="nv-folder-view">
+              <NovaBanner emoji="🕐" name="Read later" color="#4dabff" count={readLater.length} />
+              {renderVirtual("__later", "Read later", "🕐", readLater)}
+            </div>
+          ) : novaSection === "recent" ? (
+            <div className="nv-folder-view">
+              <NovaBanner emoji="📈" name="Recently opened" color="#3dd68c" count={recentOpened.length} />
+              {renderVirtual("__recent", "Recently opened", "📈", recentOpened)}
+            </div>
+          ) : novaSection === "mystuff" && user ? (
+            <div className="nv-folder-view">
+              <NovaBanner emoji="🔒" name="My Stuff" description="Private links only you can see" color="#7c6cff" count={personal.myStuff.length} />
+              {renderMain("__mystuff")}
+            </div>
+          ) : (
+            <NovaHome
+              greeting={`${greetingFor()}${user ? `, ${personal.profile.displayName || user}` : ""} 👋`}
+              subtitle={data?.settings?.subtitle || DEFAULT_SUBTITLE}
+              stats={(
+                <>
+                  <OnlinePill count={presence.count} users={presence.users} onClick={() => setModal({ type: "leaderboard" })} />
+                  <span><strong>{allRefs.length}</strong> websites</span>
+                  <span><strong>{data?.folders.length || 0}</strong> folders</span>
+                  <span><strong>{totalClicks}</strong> visits</span>
+                </>
+              )}
+              extras={<>{showStart && startFolder && (
+                <div className="announcement start-here">
+                  <span>👋 New here? Start with <button className="link-btn" onClick={() => { novaGo(`folder:${startFolder.id}`); setStartDismissed(true); writeLocal("startDismissed", true); }}>{startFolder.emoji} {startFolder.name}</button></span>
+                  <button className="announcement-x" title="Got it" onClick={() => { setStartDismissed(true); writeLocal("startDismissed", true); }}><Icon name="x" /></button>
+                </div>
+              )}{todayBlock}{pollsBlock}</>}
+              recent={recentOpened}
+              folders={topFolders.filter(folderVisible)}
+              kids={novaKids}
+              onOpenFolder={(f) => novaGo(`folder:${f.id}`)}
+              onOpenLink={trackAndOpen}
+              newTab={look.newTab}
+              unread={(f) => metaFor(f).unread}
+            />
+          )}
+          {footerEl}
+          <SitePet links={allRefs.length} />
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className={`shell ${showAdmin ? "with-admin" : ""}`}>
+      {showAdmin && (
+        <AdminPanel
+          data={data!}
+          password={adminPassword}
+          role={role}
+          api={async (action, payload) => !!(await api(action, payload))}
+          submitting={submitting}
+          onClose={() => setAdminOpen(false)}
+          onLock={lockAdmin}
+          showToast={showToast}
+          applyData={setSafeData}
+        />
+      )}
+
+      {syncStatus === "quota" ? (
+        <div className="offline-bar" role="status">
+          <span className="offline-dot" /> The site&apos;s free database limit is used up — you&apos;re seeing the last saved copy and changes are paused until it resets.
+        </div>
+      ) : offline && (
+        <div className="offline-bar" role="status">
+          <span className="offline-dot" />
+          <span>
+            You&apos;re offline — showing the copy saved on this device.{" "}
+            <span className="offline-more">You can still open websites, search, and use My Stuff and the tools; adding websites is saved here and sent when you&apos;re back. Chat and likes wait for the connection.</span>{" "}
+            <button className="link-btn" onClick={() => { load(); }}>Try again</button>
+          </span>
+        </div>
+      )}
+      {data?.settings?.maintenance && (
+        <div className="offline-bar maint-bar" role="status">
+          🛠️ The site is read-only for maintenance{data.settings.maintenanceMessage ? ` — ${data.settings.maintenanceMessage}` : ""}.{role === "owner" || role === "admin" ? " (Admins can still make changes.)" : ""}
+        </div>
+      )}
+      {user && sessionLeft !== null && sessionLeft < (rememberMeNow ? 3 * 86400 : 3600) && (
+        <div className="offline-bar session-bar" role="status">
+          ⏳ You&apos;ll be logged out {sessionLeft < 3600 ? `in ${Math.max(1, Math.round(sessionLeft / 60))} minutes` : sessionLeft < 86400 ? `in ${Math.round(sessionLeft / 3600)} hours` : `in ${Math.round(sessionLeft / 86400)} days`}.
+          <button className="link-btn" onClick={stayLoggedIn}>Stay logged in</button>
+        </div>
+      )}
+      {asMember && (
+        <div className="offline-bar member-bar" role="status">
+          👀 You&apos;re seeing the site as {asMember === "guest" ? "someone who isn't logged in" : "a member"} does. <button className="link-btn" onClick={() => toggleAsMember()}>Back to admin view</button>
+        </div>
+      )}
+      {!nova && topbarEl}
+
+      {look.focus && (
+        <div className="focus-pill" role="status">
+          🎯 Focus mode
+          <button className="btn btn-secondary btn-sm" onClick={() => changeLook({ ...look, focus: false })}>Show everything</button>
+        </div>
+      )}
+      {dropHint && <div className="drop-overlay" aria-hidden="true"><div>🔗 Drop it on a folder, or anywhere to add it</div></div>}
+      {look.sideNav && <SideNav folders={topFolders} active={activeFolder} onJump={jumpToFolder} counts={(f) => f.links.length} />}
+      {nova ? novaEl : (
+      <div className="app">
+        <header className="hero">
+          <h1>{aprilOn ? Array.from(title).reverse().join("") : title}</h1>
+          {look.greeting && <p className="greeting">{greetingFor()}{user ? `, ${user}` : ""} 👋</p>}
+          <p>{data?.settings?.subtitle || DEFAULT_SUBTITLE}</p>
+          <div className="hero-stats">
+            <OnlinePill count={presence.count} users={presence.users} onClick={() => setModal({ type: "leaderboard" })} />
+            <span><strong>{allRefs.length}</strong> websites</span>
+            <span><strong>{data?.folders.length || 0}</strong> folders</span>
+            <span><strong>{totalClicks}</strong> visits</span>
+          </div>
+        </header>
+
+        {bannersEl}
 
         {customOrder
           ? look.order.map((sec) => <Fragment key={sec}>{sec === "today" ? todayBlock : sec === "polls" ? pollsBlock : !filtering && quickBlock}</Fragment>)
@@ -2402,179 +2763,16 @@ export default function HomePage() {
           </div>
         )}
 
-        {filtering ? (
-          <>
-          <div className="results-bar">
-            <span>
-              <strong>{matchCount}</strong> {matchCount === 1 ? "website" : "websites"}
-              {q && <> matching “{search.trim()}”</>}
-              {tagFilters.length > 0 && <> tagged <strong>{tagFilters.map((t) => `#${t}`).join(tagMode === "all" ? " and " : " or ")}</strong></>}
-              {useFuzzy && matchCount > 0 && <span className="fuzzy-note"> · no exact matches, showing close ones</span>}
-              {q && matchCount > 0 && <span className="enter-hint"> · press <span className="kbd">Enter</span> to open the first, <span className="kbd">↓</span> to move into the results</span>}
-            </span>
-            <span className="results-tools">
-              <select value={resultSort} onChange={(e) => setResultSort(e.target.value as typeof resultSort)} aria-label="Sort results">
-                <option value="best">Best match</option>
-                <option value="newest">Newest</option>
-                <option value="rating">Top rated</option>
-                <option value="folder">Folder order</option>
-              </select>
-              {q && (
-                <label className="check-inline" title="Also look inside descriptions, tips and your private notes">
-                  <input type="checkbox" checked={searchNotes} onChange={(e) => { setSearchNotes(e.target.checked); writeLocal("searchNotes", e.target.checked); }} /> Descriptions &amp; notes
-                </label>
-              )}
-              <button className="btn-icon" title="Copy a link to this search" onClick={copySearchLink}><Icon name="share" /></button>
-              <button className="btn btn-secondary btn-sm" onClick={() => { setSearch(""); setTagFilters([]); }}>Clear</button>
-            </span>
-          </div>
-          {chatHits.length > 0 && (
-            <div className="chat-hits">
-              <span className="nav-label">In chat</span>
-              {chatHits.slice(0, 3).map((m) => (
-                <button key={m.id} className="chat-hit" onClick={() => setChatOpen(true)} title="Open chat">
-                  <strong>{m.user}:</strong> {m.text.length > 80 ? `${m.text.slice(0, 80)}…` : m.text}
-                </button>
-              ))}
-            </div>
-          )}
-          </>
-        ) : (
-          !customOrder && quickBlock
-        )}
+        {filtering ? resultsEl : !customOrder && quickBlock}
+
 
         {!filtering && <ScrollMap deps={`${topFolders.map((f) => f.id).join()}|${Object.keys(collapsed).length}`} onJump={jumpToFolder} />}
-        <main id="main" tabIndex={-1} className={`folders ${allRefs.length > 150 ? "big-list" : ""}`}>
-          {sortedFolders.length === 0 && (
-            <div className="empty-state">
-              <div className="empty-emoji">📂</div>
-              <h3>No folders yet</h3>
-              <p>Folders keep websites organised. Make the first one to get started.</p>
-              <button className="btn btn-primary" onClick={() => openNewFolder()}><Icon name="plus" /> Create a folder</button>
-            </div>
-          )}
-          {filtering && matchCount === 0 && sortedFolders.length > 0 && (
-            <div className="empty-state">
-              <div className="empty-emoji">🔍</div>
-              <h3>Nothing found</h3>
-              {didYouMean && (
-                <p>Did you mean <button className="link-btn" onClick={() => setSearch(didYouMean)}><strong>{didYouMean}</strong></button>?</p>
-              )}
-              <p>No websites match that search. Try fewer words, a tag like <code>#maths</code>, or <code>in:folder</code>. Know a good one?</p>
-              <button className="btn btn-secondary" onClick={() => setSuggest({ kind: "addLink" })}><Icon name="bulb" /> Suggest a website</button>
-            </div>
-          )}
-          {user && !filtering && (personal.myStuff.length > 0 || myStuffOpen) && personal.loaded && (
-            <MyStuff
-              items={personal.myStuff}
-              collapsed={!!collapsed["__mystuff"]}
-              newTab={look.newTab}
-              onToggle={() => toggleCollapsed("__mystuff")}
-              act={personal.myStuffAction}
-              toast={showToast}
-              user={user}
-              publicLists={personal.publicLists}
-              onPublish={async (list, on) => {
-                const j = await personal.myStuffAction({ action: "publishList", list, on });
-                if (j.error) { showToast(j.error); return; }
-                personal.reload();
-                if (on) {
-                  const url = `${location.origin}/u/${encodeURIComponent(user!)}/list/${encodeURIComponent(list)}`;
-                  navigator.clipboard.writeText(url).then(() => showToast(`“${list}” is shared with everyone who's logged in — link copied`)).catch(() => showToast(url));
-                } else showToast(`“${list}” is private again`);
-              }}
-            />
-          )}
-          <CardContext.Provider value={cardEnv}>
-            {specialViews.map((v) => (
-              <FolderSection
-                key={v.folder.id}
-                folder={v.folder}
-                links={[]}
-                shortcuts={v.shortcuts}
-                totalLinks={v.shortcuts.length}
-                collapsed={!!collapsed[v.folder.id]}
-                view={folderViewPrefs[v.folder.id] || view}
-                canAdd={false}
-                editor={false}
-                virtual
-                dragEnabled={false}
-                drag={drag}
-                setDrag={setDrag}
-                dropTarget={dropTarget}
-                setDropTarget={setDropTarget}
-                meta={{ updatedAt: 0, unread: 0, done: 0 }}
-                onToggle={() => toggleCollapsed(v.folder.id)}
-                onAddHere={() => {}}
-                onOpenAll={() => openAllIn(v.shortcuts.map((r) => r.link))}
-                onEditFolder={() => {}}
-                onDeleteFolder={() => {}}
-                onShareFolder={() => {}}
-                onMoveLink={moveLink}
-                onMoveFolder={moveFolder}
-                onDropUrl={() => {}}
-                onMenu={() => {}}
-              />
-            ))}
-            {topFolders.filter(folderVisible).map((top) => {
-              const section = (folder: Folder, sub: boolean, children?: React.ReactNode) => {
-                const { links, shortcuts } = viewById.get(folder.id) || { links: [], shortcuts: [] };
-                return (
-                  <FolderSection
-                    key={folder.id}
-                    folder={folder}
-                    links={links}
-                    shortcuts={shortcuts}
-                    totalLinks={folder.rule ? shortcuts.length : folder.links.filter(shown).length}
-                    collapsed={!filtering && !!collapsed[folder.id]}
-                    view={folderViewPrefs[folder.id] || view}
-                    canAdd={!addingLocked || editableFolders.has(folder.id)}
-                    editor={canEditFolder(folder)}
-                    sub={sub}
-                    meta={metaFor(folder)}
-                    dragEnabled={dragEnabled}
-                    drag={drag}
-                    setDrag={setDrag}
-                    dropTarget={dropTarget}
-                    setDropTarget={setDropTarget}
-                    onToggle={() => toggleCollapsed(folder.id)}
-                    onAddHere={() => openAdd(folder.id)}
-                    onOpenAll={() => openAllIn([...links, ...shortcuts.map((r) => r.link)])}
-                    onEditFolder={() => setModal({ type: "folder", folder })}
-                    onDeleteFolder={() => setModal({ type: "deleteFolder", folder })}
-                    onShareFolder={() => shareFolder(folder)}
-                    onMoveLink={moveLink}
-                    onMoveFolder={moveFolder}
-                    onDropUrl={(folderId, url) => openAdd(folderId, url)}
-                    onMenu={(at) => setFolderMenu({ folder, ...at })}
-                    onSplit={adminUnlocked ? () => setPick({ kind: "split", folder }) : undefined}
-                  >
-                    {children}
-                  </FolderSection>
-                );
-              };
-              const kids = (childrenOf.get(top.id) || []).filter((k) => !filtering || hasContent(viewById.get(k.id)));
-              return section(top, false, kids.length ? kids.map((k) => section(k, true)) : undefined);
-            })}
-            {cardMenu && <CardMenu state={cardMenu} onClose={() => setCardMenu(null)} />}
-          </CardContext.Provider>
-          {dragEnabled && sortedFolders.length > 0 && (
-            <p className="drag-hint"><Icon name="grip" /> Admin tip: drag websites between folders, or drag a folder header to reorder.</p>
-          )}
-        </main>
+        {renderMain()}
 
-        <footer className="footer">
-          {title} · Shared with the whole class ·{" "}
-          <button className="link-btn" onClick={() => setModal({ type: "shortcuts" })}>Keyboard shortcuts (?)</button>
-          {" · "}<a className="link-btn" href="/changelog">What&apos;s changed</a>
-          {" · "}<a className="link-btn" href="/help">Help</a>
-          {" · "}<a className="link-btn" href="/rules">Rules</a>
-          {" · "}<a className="link-btn" href="/privacy">Privacy</a>
-          {" · "}<a className="link-btn footer-version" href="/changelog" title="Version">v{APP_VERSION}</a>
-          <EasterEgg id="footer" />
-        </footer>
+        {footerEl}
         <SitePet links={allRefs.length} />
       </div>
+      )}
 
       {modal?.type === "link" && data && (
         <LinkModal

@@ -56,6 +56,8 @@ export const HIDEABLE: { id: string; label: string }[] = [
 ];
 
 export interface Look {
+  /** the overall design: "classic", or the new "nova" */
+  ui: "classic" | "nova";
   palette: Palette;
   accent: string;
   density: "comfy" | "compact" | "large";
@@ -122,6 +124,7 @@ export interface Look {
 }
 export const DEFAULT_ORDER: Section[] = ["today", "polls", "quick"];
 export const DEFAULT_LOOK: Look = {
+  ui: "classic",
   palette: "black", accent: "", density: "comfy", motion: true, newTab: true, descriptions: false, iconTint: false, specialFolders: false, hideEmpty: false,
   font: "inter", fontScale: 1, weight: "normal", lineHeight: 1.5,
   radius: 14, cardStyle: "outlined", hover: "none", iconGrid: false, folderHeader: "plain", folderBorders: false, width: "normal", smallHeader: false, sideNav: false,
@@ -140,6 +143,7 @@ export function cleanLook(raw: Partial<Look> | null | undefined): Look {
   const oneOf = (list: readonly unknown[]) => (v: unknown) => list.includes(v);
   const bool = (v: unknown) => typeof v === "boolean";
   const num = (min: number, max: number) => (v: unknown) => typeof v === "number" && v >= min && v <= max;
+  pick("ui", oneOf(["classic", "nova"]));
   pick("palette", oneOf(PALETTES.map((p) => p.id)));
   pick("accent", (v) => typeof v === "string" && (v === "" || /^#[0-9a-f]{6}$/i.test(v)));
   pick("density", oneOf(["comfy", "compact", "large"]));
@@ -171,7 +175,7 @@ export function cleanLook(raw: Partial<Look> | null | undefined): Look {
 }
 
 /* ---------- share a theme as a code ---------- */
-const SHARE_KEYS: (keyof Look)[] = ["palette", "accent", "font", "fontScale", "weight", "lineHeight", "radius", "cardStyle", "hover", "folderHeader",
+const SHARE_KEYS: (keyof Look)[] = ["ui", "palette", "accent", "font", "fontScale", "weight", "lineHeight", "radius", "cardStyle", "hover", "folderHeader",
   "folderBorders", "bg", "animatedBg", "gradientTitle", "glow", "minimal", "iconStyle", "width", "density"];
 export function encodeTheme(look: Look): string {
   const o: Record<string, unknown> = {};
@@ -265,6 +269,9 @@ export function applyLook(look: Look, ctx: LookContext = { prefersDark: true, re
   const palette = effectivePalette(look, ctx.prefersDark);
   const season = look.seasonal ? seasonFor() : "";
   const set = (k: string, v: string | boolean) => root.setAttribute(`data-${k}`, typeof v === "boolean" ? (v ? "on" : "off") : v);
+  set("ui", look.ui);
+  // Nova's headings use Plus Jakarta Sans (loaded only when Nova is on)
+  if (look.ui === "nova") ensureFont("Plus+Jakarta+Sans:wght@500;600;700;800", "display");
   set("theme", isLightPalette(palette) ? "light" : "dark");
   set("palette", palette);
   set("density", look.density);
