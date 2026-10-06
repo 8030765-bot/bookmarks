@@ -2,6 +2,7 @@ import { Redis } from "@upstash/redis";
 import { v4 as uuid } from "uuid";
 import { REV_KEYS, bumpRev, userRevKey } from "./revs";
 import { sendPush } from "./push";
+import { QuietHours, cleanQuietHours, inQuietHours } from "./quiet";
 
 // Per-account data that isn't shared with the class: profile, personal
 // favourites, star ratings, private "My stuff" links, and the notifications
@@ -65,6 +66,8 @@ export interface Notification {
   from?: string;
   /** where clicking it should take you, e.g. "/#link-abc" */
   link?: string;
+  /** hidden until then, when it comes back as unread (ISO) */
+  snoozeUntil?: string;
 }
 export type NotifyKind = Notification["kind"];
 /** Which kinds of notification you want (missing = yes). */
@@ -117,6 +120,8 @@ export interface UserData {
   savedMessages: SavedMessage[];
   /** when you agreed to the site rules */
   rulesAcceptedAt?: string;
+  /** every day, no pop-ups, sounds or phone alerts between these times */
+  quietHours?: QuietHours;
 }
 export interface SavedMessage { id: string; channel: string; user: string; text: string; at: string; savedAt: string }
 
@@ -505,6 +510,22 @@ export async function setNotifyPrefs(username: string, patch: Record<string, unk
   await save(username, data);
   return data.notifyPrefs;
 }
+export async function setQuietHours(username: string, q: unknown) {
+  const data = await getUserData(username);
+  data.quietHours = cleanQuietHours(q);
+  await save(username, data);
+  return data.quietHours || null;
+}
+/** "Remind me later": hide a notification until then; it comes back unread. */
+export async function snoozeNotification(username: string, id: string, until: string) {
+  const t = Date.parse(until);
+  if (!Number.isFinite(t) || t <= Date.now() || t > Date.now() + 7 * 86400_000) throw new Error("Pick a time in the next week");
+  const data = await getUserData(username);
+  if (!data.notifications.some((n) => n.id === id)) throw new Error("That notification is gone");
+  data.notifications = data.notifications.map((n) => (n.id === id ? { ...n, snoozeUntil: new Date(t).toISOString(), read: false } : n));
+  await save(username, data);
+  return data.notifications;
+}
 export async function setDnd(username: string, until: string | null) {
   const data = await getUserData(username);
   const t = until ? Date.parse(until) : NaN;
@@ -529,7 +550,7 @@ export async function notify(toUsername: string, n: Omit<Notification, "id" | "a
   data.notifications = [entry, ...data.notifications.filter(keep)].slice(0, MAX_NOTIFS);
   await save(toUsername, data);
   // "busy" on your profile keeps things quiet too
-  const quiet = (data.dndUntil && Date.parse(data.dndUntil) > Date.now()) || data.profile.availability === "busy";
+  const quiet = (data.dndUntil && Date.parse(data.dndUntil) > Date.now()) || data.profile.availability === "busy" || inQuietHours(data.quietHours);
   if (!quiet) {
     await sendPush(toUsername, { title: PUSH_TITLES[n.kind] || "Theo's Bookmarks", body: n.text.slice(0, 160), url: n.link || "/", tag: n.kind }).catch(() => {});
   }

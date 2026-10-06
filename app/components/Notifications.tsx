@@ -23,12 +23,47 @@ export const NOTIFY_KINDS: [string, string][] = [
 export interface NotifySettings {
   prefs: Record<string, boolean>;
   dndUntil: string | null;
+  quietHours: { from: string; to: string; tz: string } | null;
   sound: boolean;
   /** which ping */
   soundName: string;
   push: boolean;
   /** push is set up on this site */
   pushAvailable: boolean;
+}
+
+/** When "remind me later" can bring a notification back. */
+function snoozeTimes(): [string, string][] {
+  const now = new Date();
+  const at = (h: number, dayOffset = 0) => { const d = new Date(); d.setDate(d.getDate() + dayOffset); d.setHours(h, 0, 0, 0); return d.toISOString(); };
+  const out: [string, string][] = [["In 1 hour", new Date(Date.now() + 3600_000).toISOString()], ["In 3 hours", new Date(Date.now() + 3 * 3600_000).toISOString()]];
+  if (now.getHours() < 17) out.push(["This evening", at(18)]);
+  out.push(["Tomorrow morning", at(8, 1)]);
+  return out;
+}
+
+/**
+ * "kai liked your link" + "ben liked your link" → "kai and ben liked your
+ * link": same kind, same place and the same words apart from the name.
+ */
+export function groupNotifications(list: Notification[]): { items: Notification[]; text: string }[] {
+  const out: { key: string; items: Notification[]; tpl: string | null }[] = [];
+  const byKey = new Map<string, (typeof out)[number]>();
+  for (const n of list) {
+    const tpl = n.from && n.text.includes(n.from) && ["like", "follow", "comment"].includes(n.kind) ? n.text.split(n.from).join("\u0000") : null;
+    const key = tpl ? `${n.kind}|${n.link || ""}|${tpl}` : n.id;
+    const g = byKey.get(key);
+    if (g && Date.parse(g.items[0].at) - Date.parse(n.at) < 3 * 86400_000) { g.items.push(n); continue; }
+    const fresh = { key, items: [n], tpl };
+    byKey.set(key, fresh);
+    out.push(fresh);
+  }
+  return out.map(({ items, tpl }) => {
+    if (items.length === 1 || !tpl) return { items, text: items[0].text };
+    const names = Array.from(new Set(items.map((x) => x.from!)));
+    const who = names.length <= 2 ? names.join(" and ") : `${names.slice(0, 2).join(", ")} and ${names.length - 2} other${names.length - 2 === 1 ? "" : "s"}`;
+    return { items, text: tpl.split("\u0000").join(who) };
+  });
 }
 
 /** The notifications drawer. */
@@ -46,6 +81,8 @@ export function NotificationPanel({
   onPush,
   onDigest,
   onClose,
+  onSnooze,
+  onQuietHours,
 }: {
   notifications: Notification[];
   toasts: { msg: string; at: number }[];
@@ -61,7 +98,13 @@ export function NotificationPanel({
   onPush: (on: boolean) => void;
   onDigest: () => void;
   onClose: () => void;
+  onSnooze: (id: string, until: string) => void;
+  onQuietHours: (q: { from: string; to: string } | null) => void;
 }) {
+  const [snoozing, setSnoozing] = useState<string | null>(null);
+  const now = Date.now();
+  const snoozed = notifications.filter((n) => n.snoozeUntil && Date.parse(n.snoozeUntil) > now);
+  notifications = notifications.filter((n) => !n.snoozeUntil || Date.parse(n.snoozeUntil) <= now);
   const [filter, setFilter] = useState("all");
   const [replying, setReplying] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
@@ -84,6 +127,7 @@ export function NotificationPanel({
   const [tab, setTab] = useState<"inbox" | "toasts" | "settings">("inbox");
   const kinds = FILTERS.find((f) => f.id === filter)?.kinds || [];
   const list = kinds.length ? notifications.filter((n) => kinds.includes(n.kind)) : notifications;
+  const groups = useMemo(() => groupNotifications(list), [list]);
   const dnd = !!settings.dndUntil && Date.parse(settings.dndUntil) > Date.now();
   const until = (hours: number) => new Date(Date.now() + hours * 3600_000).toISOString();
   const tomorrow = () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(7, 0, 0, 0); return d.toISOString(); };
@@ -116,19 +160,31 @@ export function NotificationPanel({
               </div>
               {list.length === 0 && <div className="admin-empty">Nothing here. Likes, replies, @mentions and new links in things you follow show up here.</div>}
               <div className="notif-list">
-                {list.map((n) => (
-                  <div key={n.id} className={`notif ${n.read ? "" : "unread"}`}>
-                    <button className="notif-main" onClick={() => { onReadOne(n.id); onOpen(n); }}>
-                      <span className="notif-icon"><Icon name={KIND_ICON[n.kind] || "bell"} /></span>
-                      <span className="notif-text">{n.text}<span className="notif-time">{timeAgo(n.at)}</span></span>
+                {groups.map(({ items, text }) => {
+                  const n = items[0];
+                  const unread = items.some((x) => !x.read);
+                  return (
+                  <div key={n.id} className={`notif ${unread ? "unread" : ""} ${items.length > 1 ? "grouped" : ""}`}>
+                    <button className="notif-main" onClick={() => { items.forEach((x) => !x.read && onReadOne(x.id)); onOpen(n); }}>
+                      <span className="notif-icon"><Icon name={KIND_ICON[n.kind] || "bell"} />{items.length > 1 && <em className="notif-count">{items.length}</em>}</span>
+                      <span className="notif-text">{text}<span className="notif-time">{timeAgo(n.at)}{items.length > 1 ? ` · ${items.length} notifications` : ""}</span></span>
                     </button>
                     <span className="notif-tools">
+                      <button className="btn-icon sm" title="Remind me later" onClick={() => setSnoozing(snoozing === n.id ? null : n.id)}><Icon name="clock" /></button>
                       {(n.kind === "mention" || n.kind === "reply") && n.link?.includes("msg=") && (
                         <button className="btn-icon sm" title="Reply" onClick={() => { setReplying(replying === n.id ? null : n.id); setReplyMsg(""); }}><Icon name="reply" /></button>
                       )}
-                      {!n.read && <button className="btn-icon sm" title="Mark as read" onClick={() => onReadOne(n.id)}><Icon name="check" /></button>}
-                      <button className="btn-icon sm" title="Remove" onClick={() => onRemove(n.id)}><Icon name="x" /></button>
+                      {unread && <button className="btn-icon sm" title="Mark as read" onClick={() => items.forEach((x) => !x.read && onReadOne(x.id))}><Icon name="check" /></button>}
+                      <button className="btn-icon sm" title={items.length > 1 ? "Remove these" : "Remove"} onClick={() => items.forEach((x) => onRemove(x.id))}><Icon name="x" /></button>
                     </span>
+                    {snoozing === n.id && (
+                      <div className="notif-snooze">
+                        <span className="muted-inline">Remind me:</span>
+                        {snoozeTimes().map(([label, at]) => (
+                          <button key={label} className="pick" onClick={() => { items.forEach((x) => onSnooze(x.id, at)); setSnoozing(null); }}>{label}</button>
+                        ))}
+                      </div>
+                    )}
                     {replying === n.id && (
                       <form className="notif-reply" onSubmit={(e) => { e.preventDefault(); if (replyText.trim()) sendReply(n); }}>
                         <input value={replyText} onChange={(e) => setReplyText(e.target.value)} placeholder={`Reply to ${n.from || "them"}…`} autoFocus maxLength={500} />
@@ -137,8 +193,20 @@ export function NotificationPanel({
                       </form>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
+              {snoozed.length > 0 && (
+                <details className="notif-snoozed">
+                  <summary>💤 Snoozed ({snoozed.length})</summary>
+                  {snoozed.map((n) => (
+                    <div key={n.id} className="notif read">
+                      <span className="notif-text">{n.text}<span className="notif-time">back {new Date(n.snoozeUntil!).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}</span></span>
+                      <span className="notif-tools"><button className="btn-icon sm" title="Show it now" onClick={() => onSnooze(n.id, new Date(Date.now() + 1000).toISOString())}><Icon name="bell" /></button></span>
+                    </div>
+                  ))}
+                </details>
+              )}
               {notifications.length > 0 && (
                 <div className="notif-bulk">
                   {notifications.some((n) => !n.read) && <button className="btn btn-secondary btn-sm" onClick={() => onReadOne("")}>Mark all read</button>}
@@ -167,6 +235,18 @@ export function NotificationPanel({
                     <button className="pick" onClick={() => onDnd(until(1))}>1 hour</button>
                     <button className="pick" onClick={() => onDnd(until(4))}>4 hours</button>
                     <button className="pick" onClick={() => onDnd(tomorrow())}>Until tomorrow</button>
+                  </>
+                )}
+              </div>
+              <div className="admin-h">Quiet hours</div>
+              <p className="modal-text">Every day, no pop-ups, sounds or phone alerts between these times (notifications still arrive).</p>
+              <div className="quiet-row">
+                <label className="check-inline"><input type="checkbox" checked={!!settings.quietHours} onChange={(e) => onQuietHours(e.target.checked ? { from: "21:00", to: "07:00" } : null)} /> Quiet hours</label>
+                {settings.quietHours && (
+                  <>
+                    <input type="time" value={settings.quietHours.from} onChange={(e) => e.target.value && onQuietHours({ from: e.target.value, to: settings.quietHours!.to })} aria-label="Quiet from" />
+                    <span>to</span>
+                    <input type="time" value={settings.quietHours.to} onChange={(e) => e.target.value && onQuietHours({ from: settings.quietHours!.from, to: e.target.value })} aria-label="Quiet until" />
                   </>
                 )}
               </div>

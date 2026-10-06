@@ -12,7 +12,7 @@ import { removePicture, uploadPicture } from "@/lib/pictures";
 import { saveImage } from "@/lib/images";
 import { addPushSub, hasPush, pushConfigured, pushPublicKey, removePushSub } from "@/lib/push";
 import {
-  clearNotifications, restoreNotifications, setDnd, setNotifyPrefs,
+  clearNotifications, restoreNotifications, setDnd, setNotifyPrefs, setQuietHours, snoozeNotification,
   addMyStuff, getUserData, importMyStuff, markNotificationsRead, moveMyStuff, recordAggregateRating, removeMyStuff, renameMyStuffFolder,
   deleteView, importPersonal, saveMessage, saveSettings, saveView, setBlocked, setFolderOrder, setFolderPref, setLinkPref, setProfile, setRating, toggleFavorite,
 } from "@/lib/userdata";
@@ -147,6 +147,10 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ links: await setLinkPref(user, String(body.linkId || ""), (body.patch || {}) as Record<string, unknown>) });
       case "readNotifications":
         return NextResponse.json({ ok: true, notifications: await markNotificationsRead(user, typeof body.id === "string" ? body.id : undefined) });
+      case "quietHours":
+        return NextResponse.json({ quietHours: await setQuietHours(user, body.quietHours) });
+      case "snoozeNotification":
+        return NextResponse.json({ notifications: await snoozeNotification(user, String(body.id || ""), String(body.until || "")) });
       case "restoreNotifications":
         return NextResponse.json({ notifications: await restoreNotifications(user, body.notifications) });
       case "clearNotifications":

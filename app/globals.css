@@ -1856,3 +1856,13 @@ main:focus{outline:none}
 .link-menu button{display:flex;gap:.35rem;align-items:center;text-align:left}
 .link-menu strong{font-weight:600}
 .emoji-toggle:disabled{opacity:.5}
+
+/* ---------- QoL batch E: notifications ---------- */
+.notif-icon{position:relative}
+.notif-count{position:absolute;right:-6px;bottom:-5px;font-style:normal;font-size:.6rem;font-weight:700;min-width:15px;height:15px;padding:0 3px;border-radius:999px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center}
+.notif-snooze{display:flex;flex-wrap:wrap;gap:.3rem;align-items:center;padding:.3rem .5rem .5rem 2.4rem;width:100%}
+.notif-snooze .pick{font-size:.74rem}
+.notif-snoozed{margin-top:.6rem;font-size:.82rem}
+.notif-snoozed summary{cursor:pointer;color:var(--text-muted);padding:.3rem 0}
+.quiet-row{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin-bottom:.6rem}
+.quiet-row input[type=time]{width:auto}

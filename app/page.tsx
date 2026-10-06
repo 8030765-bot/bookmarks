@@ -43,6 +43,7 @@ import {
 } from "./components/Fun";
 import SideNav from "./components/SideNav";
 import { recordUndo, redoLast, undoLast } from "./components/undo";
+import { inQuietHours } from "@/lib/quiet";
 import { TOOL_LIST } from "./components/tools/list";
 import { AddAnywhereModal, WeekChanges, downloadBookmarksHtml, downloadFolderCsv, embedCode } from "./components/DataViews";
 import { BottomNav, InstallModal, PullIndicator, buzz, usePullToRefresh } from "./components/Mobile";
@@ -609,7 +610,14 @@ export default function HomePage() {
   useEffect(() => { setLoadingLine(randomLoadingLine()); }, []);
 
   // unread count in the tab title and on the installed app's icon
-  const unreadCount = personal.notifications.filter((n) => !n.read).length;
+  // snoozed notifications stay out of the count until they come back (checked every minute)
+  const [minuteTick, setMinuteTick] = useState(0);
+  useEffect(() => { const id = setInterval(() => setMinuteTick((t) => t + 1), 60_000); return () => clearInterval(id); }, []);
+  const liveNotifications = useMemo(
+    () => personal.notifications.filter((n) => !n.snoozeUntil || Date.parse(n.snoozeUntil) <= Date.now()),
+    [personal.notifications, minuteTick], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const unreadCount = liveNotifications.filter((n) => !n.read).length;
   useEffect(() => {
     const base = document.title.replace(/^\(\d+\+?\) /, "");
     document.title = unreadCount ? `(${unreadCount > 99 ? "99+" : unreadCount}) ${base}` : base;
@@ -618,7 +626,7 @@ export default function HomePage() {
     else nav.clearAppBadge?.().catch(() => {});
   }, [unreadCount]);
   useEffect(() => { setPingOn(readLocal("pingSound", true)); setPingName(readLocal("pingName", "classic")); }, []);
-  const quietNow = !!personal.dndUntil && Date.parse(personal.dndUntil) > Date.now();
+  const quietNow = (!!personal.dndUntil && Date.parse(personal.dndUntil) > Date.now()) || inQuietHours(personal.quietHours);
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get("chat") !== "open") return;
@@ -2084,7 +2092,7 @@ export default function HomePage() {
             {betaOk("tools") && <button className="icon-btn" title="Tools (O)" onClick={() => openTools()}><Icon name="tools" /></button>}
             <button className="icon-btn" title="Spin the wheel (S)" onClick={() => setModal({ type: "spin" })}><Icon name="shuffle" /></button>
             <button className="icon-btn" title="Community (L)" onClick={() => setModal({ type: "leaderboard" })}><Icon name="trophy" /></button>
-            {user && <NotificationBell notifications={personal.notifications} open={notifOpen} onOpen={() => setNotifOpen(true)} />}
+            {user && <NotificationBell notifications={liveNotifications} open={notifOpen} onOpen={() => setNotifOpen(true)} />}
             <div className="user-menu">
               <button className={`icon-btn ${moreMenu ? "on" : ""}`} title="More" aria-expanded={moreMenu} onClick={() => setMoreMenu((o) => !o)}>
                 <Icon name="more" />
@@ -2856,7 +2864,9 @@ export default function HomePage() {
         <NotificationPanel
           notifications={personal.notifications}
           toasts={toastLog}
-          settings={{ prefs: personal.notifyPrefs, dndUntil: personal.dndUntil, sound: pingOn, soundName: pingName, push: personal.push, pushAvailable: !!personal.pushKey }}
+          settings={{ prefs: personal.notifyPrefs, dndUntil: personal.dndUntil, quietHours: personal.quietHours, sound: pingOn, soundName: pingName, push: personal.push, pushAvailable: !!personal.pushKey }}
+          onSnooze={(id, until) => { personal.snooze(id, until); }}
+          onQuietHours={(q) => { personal.setQuietHours(q); showToast(q ? `Quiet hours: ${q.from}–${q.to} every day` : "Quiet hours off"); }}
           onOpen={(n) => {
             setNotifOpen(false);
             if (["mention", "reply", "dm"].includes(n.kind) || n.link?.includes("chat=open")) {

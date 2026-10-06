@@ -8,7 +8,7 @@ import { ImageCropper } from "./ImageCropper";
 import { Avatar } from "./People";
 import { badgeById } from "@/lib/badges";
 
-export interface Notification { id: string; kind: string; text: string; at: string; read?: boolean; from?: string; link?: string }
+export interface Notification { id: string; kind: string; text: string; at: string; read?: boolean; from?: string; link?: string; snoozeUntil?: string }
 export interface Profile {
   avatar?: string; color?: string; bio?: string; displayName?: string; status?: string; statusEmoji?: string; statusUntil?: string;
   banner?: string; border?: string; themeCode?: string; into?: string[]; showcase?: string[]; visibility?: "everyone" | "members" | "private"; hideOnline?: boolean;
@@ -42,6 +42,7 @@ export interface Personal {
   myStuff: PrivateLink[];
   notifyPrefs: Record<string, boolean>;
   dndUntil: string | null;
+  quietHours: { from: string; to: string; tz: string } | null;
   savedMessages: { id: string; channel: string; user: string; text: string; at: string; savedAt: string }[];
   /** this account has push turned on somewhere */
   push: boolean;
@@ -52,7 +53,7 @@ export interface Personal {
 }
 const EMPTY: Personal = {
   user: null, favorites: [], ratings: {}, notifications: [], profile: {}, links: {}, folders: {}, folderOrder: [], views: [],
-  following: [], blocked: [], settings: {}, myStuff: [], notifyPrefs: {}, dndUntil: null, savedMessages: [], push: false, pushKey: null, loaded: false,
+  following: [], blocked: [], settings: {}, myStuff: [], notifyPrefs: {}, dndUntil: null, quietHours: null, savedMessages: [], push: false, pushKey: null, loaded: false,
 };
 const GUEST_KEY = "guestLinkPrefs";
 const GUEST_FOLDERS = "guestFolderPrefs";
@@ -94,7 +95,7 @@ export function usePersonal(user: string | null) {
           user: json.user, favorites: json.favorites || [], ratings: json.ratings || {}, notifications: json.notifications || [],
           profile: json.profile || {}, links: json.links || {}, folders: json.folders || {}, folderOrder: json.folderOrder || [],
           views: json.views || [], following: json.following || [], blocked: json.blocked || [], settings: json.settings || {},
-          myStuff: json.myStuff || [], notifyPrefs: json.notifyPrefs || {}, dndUntil: json.dndUntil || null, savedMessages: json.savedMessages || [],
+          myStuff: json.myStuff || [], notifyPrefs: json.notifyPrefs || {}, dndUntil: json.dndUntil || null, quietHours: json.quietHours || null, savedMessages: json.savedMessages || [],
           push: !!json.push, pushKey: json.pushKey || null, loaded: true,
         });
       }
@@ -171,6 +172,15 @@ export function usePersonal(user: string | null) {
     setData((d) => ({ ...d, dndUntil: until }));
     post({ action: "dnd", until }).then((j) => setData((d) => ({ ...d, dndUntil: j.dndUntil ?? null }))).catch(() => {});
   }, [post]);
+  const setQuietHours = useCallback((q: { from: string; to: string } | null) => {
+    const value = q ? { ...q, tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" } : null;
+    setData((d) => ({ ...d, quietHours: value }));
+    post({ action: "quietHours", quietHours: value }).then((j) => setData((d) => ({ ...d, quietHours: j.quietHours ?? null }))).catch(() => {});
+  }, [post]);
+  const snooze = useCallback((id: string, until: string) => {
+    setData((d) => ({ ...d, notifications: d.notifications.map((n) => (n.id === id ? { ...n, snoozeUntil: until, read: false } : n)) }));
+    post({ action: "snoozeNotification", id, until }).then((j) => j.notifications && setData((d) => ({ ...d, notifications: j.notifications }))).catch(() => {});
+  }, [post]);
   const setPushOn = useCallback((on: boolean) => setData((d) => ({ ...d, push: on })), []);
   const saveMessage = useCallback((message: { id: string; channel?: string; user: string; text: string; at: string }, on: boolean) => {
     post({ action: "saveMessage", message, on }).then((j) => j.savedMessages && setData((d) => ({ ...d, savedMessages: j.savedMessages }))).catch(() => {});
@@ -241,7 +251,7 @@ export function usePersonal(user: string | null) {
 
   return {
     ...data, reload: load, toggleFavorite, rate, saveProfile, uploadPicture, removePicture, markRead, setLinkPref, setFolderPref, setFolderOrder, saveView, deleteView,
-    follow, block, saveSettings, myStuffAction, removeNotification, setNotifyPrefs, setDnd, setPushOn, saveMessage,
+    follow, block, saveSettings, myStuffAction, removeNotification, setNotifyPrefs, setDnd, setQuietHours, snooze, setPushOn, saveMessage,
   };
 }
 
