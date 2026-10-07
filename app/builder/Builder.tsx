@@ -12,8 +12,9 @@ import { Rects, canvasRows, canvasStyle } from "../components/CustomCanvas";
  *   middle — an endless canvas you pan and zoom, with your real home page as the frame
  *   bottom — the toolbar: move, hand, frame (auto layout), shapes, text, assets, AI
  *   right  — Design (looks), Prototype (what buttons do) and ✨ AI
- * Pieces snap to the grid; hold Ctrl (⌘) to place them freely with red
- * guides. Shift A puts the picked pieces in an auto layout frame.
+ * Pieces move freely, like in Figma, with red guides when edges line up;
+ * turn on Snap to grid (Shift G) to lock them to the 24 columns. Holding
+ * Ctrl (⌘) while dragging flips between the two. Shift A puts the picked pieces in an auto layout frame.
  */
 
 type Draft = Omit<BuiltDesign, "id" | "owner" | "createdAt" | "updatedAt"> & { id?: string; owner?: string; createdAt?: string; updatedAt?: string };
@@ -207,6 +208,10 @@ export default function Builder() {
   const [drawBox, setDrawBox] = useState<Box | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [showGrid, setShowGrid] = useState(true);
+  // free movement is the default; snapping to the columns is opt-in (remembered on this device)
+  const [snap, setSnapState] = useState(false);
+  useEffect(() => { try { setSnapState(localStorage.getItem("builder:snap") === "1"); } catch {} }, []);
+  const setSnap = (on: boolean) => { setSnapState(on); try { localStorage.setItem("builder:snap", on ? "1" : "0"); } catch {} };
   const [previewState, setPreviewState] = useState<"home" | "folder" | "search">("home");
   const [keys, setKeys] = useState({ ctrl: false, space: false, alt: false });
   const [hoverId, setHoverId] = useState<string | null>(null);
@@ -708,7 +713,8 @@ export default function Builder() {
   function onPointerMove(e: RPointerEvent) {
     const g = drag.current;
     if (!g) return;
-    const free = e.ctrlKey || e.metaKey;
+    // Ctrl (⌘) flips whatever Snap to grid is set to
+    const free = snap === (e.ctrlKey || e.metaKey);
     if (g.kind === "pan") { moveCam({ ...cam, x: g.cam!.x + (e.clientX - g.sx), y: g.cam!.y + (e.clientY - g.sy) }); return; }
     const { px, py } = toWorld(e.clientX, e.clientY);
     if (g.kind === "draw") {
@@ -779,7 +785,7 @@ export default function Builder() {
         if (dir.includes("n")) { const ny = Math.round(y); h += y - ny; y = ny; }
         setGuides({ v: [], h: [] });
       }
-      const minW = free ? 0.25 : 1, minH = free ? 0.5 : 1;
+      const minW = free ? 0.5 : 1, minH = free ? 0.5 : 1;
       if (w < minW) { if (dir.includes("w")) x -= minW - w; w = minW; }
       if (h < minH) { if (dir.includes("n")) y -= minH - h; h = minH; }
       if (x < 0) { w += x; x = 0; }
@@ -812,7 +818,7 @@ export default function Builder() {
       const b = drawBox;
       setDrawBox(null);
       const partId = ({ frame: "stack", rect: "box", ellipse: "circle", line: "line", text: "heading" } as Record<string, string>)[tool] || "box";
-      if (b && b.w > 4 && b.h > 4) addPart(partId, { x: b.x / colW, y: b.y / ROW }, { w: round2(Math.max(0.25, b.w / colW)), h: round2(Math.max(0.5, b.h / ROW)) });
+      if (b && b.w > 4 && b.h > 4) addPart(partId, { x: b.x / colW, y: b.y / ROW }, { w: round2(Math.max(0.5, b.w / colW)), h: round2(Math.max(0.5, b.h / ROW)) });
       else if (b) { const part = PART_BY_ID.get(partId)!; addPart(partId, { x: b.x / colW + part.w / 2, y: b.y / ROW + part.h / 2 }); }
       setTool("move");
       return;
@@ -895,14 +901,17 @@ export default function Builder() {
       if (mod) return;
       const toolKeys: Record<string, Tool> = { v: "move", h: "hand", f: "frame", r: "rect", o: "ellipse", l: "line", t: "text" };
       if (toolKeys[k] && !e.shiftKey && !e.altKey) { setTool(toolKeys[k]); setMode("edit"); return; }
+      if (k === "g" && e.shiftKey) { setSnap(!snap); say(snap ? "Moving freely" : "Snapping to the grid"); return; }
       if (k === "g") { setShowGrid((s) => !s); return; }
       if (k === "p") { setMode((m) => (m === "edit" ? "try" : "edit")); setSel([]); return; }
       if (k === "?") { setModal("help"); return; }
       if (k.startsWith("arrow") && selected.length) {
         e.preventDefault();
-        const step = e.altKey ? 0.25 : e.shiftKey ? 4 : 1;
-        const dx = k === "arrowleft" ? -step : k === "arrowright" ? step : 0;
-        const dy = k === "arrowup" ? -step : k === "arrowdown" ? step : 0;
+        // free: 1px (Shift = 10px), like Figma; snapping: a column (Shift = 4, Alt = a quarter)
+        const px = e.shiftKey ? 10 : 1;
+        const sx = snap ? (e.altKey ? 0.25 : e.shiftKey ? 4 : 1) : px / colW, sy = snap ? sx : px / ROW;
+        const dx = k === "arrowleft" ? -sx : k === "arrowright" ? sx : 0;
+        const dy = k === "arrowup" ? -sy : k === "arrowdown" ? sy : 0;
         updatePieces(selected.filter((p) => !p.locked && !p.parent).map((p) => p.id), (p) => ({ ...p, x: round2(clamp(p.x + dx, 0, COLS - p.w)), y: round2(Math.max(0, p.y + dy)) }));
       }
     };
@@ -1443,8 +1452,9 @@ export default function Builder() {
     return { x, y, w: Math.max(...bs.map((b) => b.x + b.w)) - x, h: Math.max(...bs.map((b) => b.y + b.h)) - y };
   })() : null;
 
+  const freeNow = snap === keys.ctrl;
   return (
-    <div className={`fg-app ${keys.ctrl ? "free" : ""}`} onPointerUp={() => onPointerUp()}
+    <div className={`fg-app ${freeNow ? "free" : ""}`} onPointerUp={() => onPointerUp()}
       onContextMenu={(e) => { if (!(e.target as HTMLElement).closest("input,textarea")) e.preventDefault(); }}>
       {/* ---------------- left panel ---------------- */}
       <aside className="fg-left">
@@ -1472,6 +1482,7 @@ export default function Builder() {
             <button disabled={!selected.length} onClick={() => { setMenu(""); duplicateSel(); }}>Duplicate <kbd>Ctrl D</kbd></button>
             <button disabled={!doc} onClick={() => { setMenu(""); addAutoLayout(); }}>Add auto layout <kbd>Shift A</kbd></button>
             <hr />
+            <button onClick={() => { setMenu(""); setSnap(!snap); }}>{snap ? "✓ " : ""}Snap to grid <kbd>Shift G</kbd></button>
             <button onClick={() => { setMenu(""); setShowGrid((g) => !g); }}>{showGrid ? "✓ " : ""}Grid lines <kbd>G</kbd></button>
             <button onClick={() => { setMenu(""); fit(); }}>Zoom to fit <kbd>Shift 1</kbd></button>
             <hr />
@@ -1516,7 +1527,7 @@ export default function Builder() {
             <div className="fg-frame" style={{ width: deviceW, height: frameH }}>
               <iframe ref={iframeRef} className="fg-iframe" src="/?builder=preview" title="Your design" style={{ width: deviceW, height: frameH }} tabIndex={mode === "try" ? 0 : -1} />
               {editing && (
-                <div ref={overlayRef} className={`fg-overlay ${showGrid && !keys.ctrl ? "grid" : ""}`} style={{ "--colw": `${colW}px`, "--z": 1 / cam.z } as CSSProperties}
+                <div ref={overlayRef} className={`fg-overlay ${showGrid && !freeNow ? "grid" : ""}`} style={{ "--colw": `${colW}px`, "--z": 1 / cam.z } as CSSProperties}
                   onDragOver={(e) => { if (e.dataTransfer.types.includes("application/x-part")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
                   onDrop={(e) => {
                     const id = e.dataTransfer.getData("application/x-part");
@@ -1608,6 +1619,9 @@ export default function Builder() {
               )}
             </div>
             {toolBtn("text", <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6V4.5h14V6M12 4.5v15M9 19.5h6" /></svg>, "Text", "T")}
+            <button className={snap ? "on" : ""} title={snap ? "Snapping to the grid (Shift G to move freely)" : "Moving freely (Shift G to snap to the grid)"} aria-pressed={snap} onClick={() => { setSnap(!snap); say(snap ? "Moving freely" : "Snapping to the grid"); }}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v8a6 6 0 0012 0V4h-4v8a2 2 0 01-4 0V4zM6 8h4M14 8h4" /></svg>
+            </button>
             <span className="fg-tsep" />
             <button title="Assets  Shift I" className={leftTab === "assets" ? "soft" : ""} onClick={() => setLeftTab("assets")}><svg viewBox="0 0 24 24"><path d="M12 3l3 3-3 3-3-3zM6 9l3 3-3 3-3-3zM18 9l3 3-3 3-3-3zM12 15l3 3-3 3-3-3z" /></svg></button>
             <button title="✨ AI" className={`fg-tai ${rightTab === "ai" ? "on" : ""}`} onClick={() => setRightTab(rightTab === "ai" ? "design" : "ai")}>✨</button>
@@ -1620,9 +1634,10 @@ export default function Builder() {
             {device === "phone" ? "📲 On phones pieces stack top to bottom — pick a bigger page to move things."
               : mode === "try" ? "▶ Trying it out — click around like it's your real page. Press P to edit again."
               : tool !== "move" && tool !== "hand" ? "Drag on the page to draw · Esc to cancel"
-              : keys.ctrl ? "Free placement — red lines show when edges line up"
+              : keys.ctrl ? (snap ? "Moving freely while you hold Ctrl" : "Snapping to the grid while you hold Ctrl")
               : keys.alt && one ? "Point at another piece to see the distance"
-              : "Scroll to move · Ctrl + scroll to zoom · Space + drag to pan · hold Ctrl to place freely · Shift A for auto layout"}
+              : snap ? "Snapping to the grid · hold Ctrl to move freely · Shift G turns snapping off · Space + drag to pan"
+              : "Drag anything anywhere · red lines show when edges line up · Shift G snaps to a grid · Space + drag to pan"}
           </div>
         )}
         {doc && (
@@ -1784,7 +1799,7 @@ export default function Builder() {
               {([
                 ["Tools", [["V", "Move"], ["H / Space", "Hand (pan)"], ["F", "Frame (auto layout)"], ["R", "Rectangle"], ["O", "Ellipse"], ["L", "Line"], ["T", "Text"], ["Shift I", "Assets"], ["P", "Try it"]]],
                 ["Edit", [["Ctrl Z / Ctrl Shift Z", "Undo / redo"], ["Ctrl C / V / X", "Copy / paste / cut"], ["Ctrl D", "Duplicate"], ["Del", "Delete"], ["Ctrl A", "Select all"], ["Esc", "Select the frame, then nothing"], ["Enter", "Select inside a frame"], ["Ctrl Shift L / H", "Lock / hide"]]],
-                ["Arrange", [["Shift A", "Add auto layout"], ["Alt Shift A", "Remove auto layout"], ["[ ]", "Backward / forward"], ["Ctrl [ ]", "To back / front"], ["Arrows", "Nudge (Shift = 4, Alt = tiny)"], ["Ctrl + drag", "Place freely"], ["Alt + point", "Measure distance"]]],
+                ["Arrange", [["Shift A", "Add auto layout"], ["Alt Shift A", "Remove auto layout"], ["[ ]", "Backward / forward"], ["Ctrl [ ]", "To back / front"], ["Arrows", "Nudge 1px (Shift = 10px)"], ["Shift G", "Snap to grid on / off"], ["Ctrl + drag", "Flip snapping while dragging"], ["Alt + point", "Measure distance"]]],
                 ["View", [["Scroll", "Move around"], ["Ctrl + scroll", "Zoom"], ["Shift 1", "Zoom to fit"], ["Shift 2", "Zoom to selection"], ["Shift 0", "100%"], ["G", "Grid lines"]]],
               ] as [string, string[][]][]).map(([title, list]) => (
                 <div key={title}>
