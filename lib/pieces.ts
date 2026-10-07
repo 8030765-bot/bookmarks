@@ -31,6 +31,8 @@ export interface PieceStyle {
   accent?: string;
   glass?: boolean;
   opacity?: number;
+  /** turned, in degrees (-180 to 180) */
+  rotate?: number;
   radius?: number;
   borderWidth?: number;
   borderColor?: string;
@@ -476,6 +478,7 @@ export function cleanStyle(raw: unknown): PieceStyle | undefined {
   if (r.keep === true) s.keep = true;
   if (r.opacity !== undefined) s.opacity = num(r.opacity, 0.05, 1);
   if (r.radius !== undefined) s.radius = num(r.radius, 0, 999);
+  if (r.rotate !== undefined) { const d = num(r.rotate, -180, 180, 0)!; if (d) s.rotate = Math.round(d * 10) / 10; }
   if (r.borderWidth !== undefined) s.borderWidth = num(r.borderWidth, 0, 12);
   if (r.pad !== undefined) s.pad = num(r.pad, 0, 80);
   if (r.size !== undefined) s.size = num(r.size, 50, 250);

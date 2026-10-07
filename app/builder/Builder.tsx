@@ -12,8 +12,9 @@ import { Rects, canvasRows, canvasStyle } from "../components/CustomCanvas";
  *   middle — an endless canvas you pan and zoom, with your real home page as the frame
  *   bottom — the toolbar: move, hand, frame (auto layout), shapes, text, assets, AI
  *   right  — Design (looks), Prototype (what buttons do) and ✨ AI
- * Pieces snap to the grid; hold Ctrl (⌘) to place them freely with red
- * guides. Shift A puts the picked pieces in an auto layout frame.
+ * Pieces move freely, like in Figma, with red guides when edges line up;
+ * turn on Snap to grid (Shift G) to lock them to the 24 columns. Holding
+ * Ctrl (⌘) while dragging flips between the two. Shift A puts the picked pieces in an auto layout frame.
  */
 
 type Draft = Omit<BuiltDesign, "id" | "owner" | "createdAt" | "updatedAt"> & { id?: string; owner?: string; createdAt?: string; updatedAt?: string };
@@ -171,6 +172,41 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   return <div className="fg-row"><span>{label}</span><div>{children}</div></div>;
 }
 
+/* ---------- Quick actions (Ctrl K): find any command or part by typing ---------- */
+type Action = { id: string; label: string; icon?: string; kbd?: string; group: string; run: () => void; off?: boolean };
+function QuickActions({ items, onClose }: { items: Action[]; onClose: () => void }) {
+  const [text, setText] = useState("");
+  const [at, setAt] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
+  const words = text.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = items.filter((a) => !a.off && words.every((w) => `${a.label} ${a.group}`.toLowerCase().includes(w))).slice(0, 60);
+  useEffect(() => setAt(0), [text]);
+  useEffect(() => { listRef.current?.querySelector(".on")?.scrollIntoView({ block: "nearest" }); }, [at]);
+  const go = (a?: Action) => { if (!a) return; onClose(); a.run(); };
+  return (
+    <div className="fg-modal-bg fg-qa-bg" onPointerDown={onClose}>
+      <div className="fg-qa" onPointerDown={(e) => e.stopPropagation()}>
+        <input autoFocus className="fg-qa-input" placeholder="Search actions and parts…  (try “align”, “clock”, “snap”)" value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") { e.preventDefault(); setAt((i) => Math.min(shown.length - 1, i + 1)); }
+            else if (e.key === "ArrowUp") { e.preventDefault(); setAt((i) => Math.max(0, i - 1)); }
+            else if (e.key === "Enter") { e.preventDefault(); go(shown[at]); }
+            else if (e.key === "Escape") { e.preventDefault(); onClose(); }
+          }} />
+        <div className="fg-qa-list" ref={listRef}>
+          {shown.length === 0 && <p className="fg-muted pad small">Nothing matches.</p>}
+          {shown.map((a, i) => (
+            <button key={a.id} className={i === at ? "on" : ""} onPointerEnter={() => setAt(i)} onClick={() => go(a)}>
+              <span className="fg-qa-icon">{a.icon || "›"}</span>{a.label}<em>{a.group}</em>{a.kbd && <kbd>{a.kbd}</kbd>}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ====================================================================== */
 export default function Builder() {
   const [me, setMe] = useState<Me | null>(null);
@@ -181,7 +217,9 @@ export default function Builder() {
   const [past, setPast] = useState<Draft[]>([]);
   const [future, setFuture] = useState<Draft[]>([]);
   const [sel, setSel] = useState<string[]>([]);
-  const [device, setDevice] = useState<Device>("laptop");
+  const [device, setDeviceState] = useState<Device>("laptop");
+  const setDevice = (d: Device) => { setDeviceState(d); try { localStorage.setItem("builder:device", d); } catch {} };
+  useEffect(() => { try { const d = localStorage.getItem("builder:device"); if (d && DEVICES.some((x) => x.id === d)) setDeviceState(d as Device); } catch {} }, []);
   const [cam, setCam] = useState({ x: 0, y: 0, z: 0.6 });
   const [animate, setAnimate] = useState(false);
   const [tool, setTool] = useState<Tool>("move");
@@ -205,8 +243,15 @@ export default function Builder() {
   const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] });
   const [marquee, setMarquee] = useState<Box | null>(null);
   const [drawBox, setDrawBox] = useState<Box | null>(null);
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; empty?: boolean; wx?: number; wy?: number } | null>(null);
+  const [dragging, setDragging] = useState<"" | "move" | "resize" | "rotate">("");
+  const [palette, setPalette] = useState(false);
+  const [layerQ, setLayerQ] = useState("");
   const [showGrid, setShowGrid] = useState(true);
+  // free movement is the default; snapping to the columns is opt-in (remembered on this device)
+  const [snap, setSnapState] = useState(false);
+  useEffect(() => { try { setSnapState(localStorage.getItem("builder:snap") === "1"); } catch {} }, []);
+  const setSnap = (on: boolean) => { setSnapState(on); try { localStorage.setItem("builder:snap", on ? "1" : "0"); } catch {} };
   const [previewState, setPreviewState] = useState<"home" | "folder" | "search">("home");
   const [keys, setKeys] = useState({ ctrl: false, space: false, alt: false });
   const [hoverId, setHoverId] = useState<string | null>(null);
@@ -221,6 +266,9 @@ export default function Builder() {
   const overlayRef = useRef<HTMLDivElement>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
   const clipboard = useRef<DesignPiece[]>([]);
+  const styleClip = useRef<PieceStyle | null>(null);
+  /** where the mouse is on the page (for pasting there), or null when it's off the canvas */
+  const mouseAt = useRef<{ px: number; py: number } | null>(null);
   const layerDrag = useRef("");
   const toastTimer = useRef<number>();
   const say = useCallback((m: string) => { setToast(m); window.clearTimeout(toastTimer.current); toastTimer.current = window.setTimeout(() => setToast(""), 2800); }, []);
@@ -484,9 +532,19 @@ export default function Builder() {
     });
     setSel(rootIds);
   };
-  const paste = () => {
-    if (!clipboard.current.length) return;
-    const { copies, rootIds } = cloneSet(clipboard.current, 0, 2);
+  /** Ctrl V pastes where the mouse is (or just below the original); Ctrl Shift V pastes in place */
+  const paste = (where: "mouse" | "inplace" | { px: number; py: number } = "mouse") => {
+    const list = clipboard.current;
+    if (!list.length) return;
+    let dx = 0, dy = where === "inplace" ? 0 : 2;
+    const at = typeof where === "object" ? where : where === "mouse" ? mouseAt.current : null;
+    const tops = list.filter((p) => !p.parent);
+    if (at && tops.length) {
+      const minX = Math.min(...tops.map((p) => p.x)), maxR = Math.max(...tops.map((p) => p.x + p.w));
+      const minY = Math.min(...tops.map((p) => p.y)), maxB = Math.max(...tops.map((p) => p.y + p.h));
+      dx = round2(at.px / colW - (minX + maxR) / 2); dy = round2(Math.max(-minY, at.py / ROW - (minY + maxB) / 2));
+    }
+    const { copies, rootIds } = cloneSet(list, dx, dy);
     change((d) => ({ ...d, pieces: [...d.pieces, ...copies] }));
     setSel(rootIds);
   };
@@ -537,6 +595,73 @@ export default function Builder() {
         default: return p;
       }
     });
+  };
+
+  const copyStyle = () => {
+    if (!one) return;
+    styleClip.current = { ...(one.style || {}) };
+    say("🎨 Style copied — Ctrl Alt V pastes it onto other pieces");
+  };
+  const pasteStyle = () => {
+    const st = styleClip.current;
+    if (!st || !selected.length) return;
+    // phone visibility and turning stay as they were: they aren't part of its look
+    const { phone: _p, rotate: _r, ...look } = st;
+    void _p; void _r;
+    updatePieces(sel, (p) => {
+      const keep = { ...(p.style?.phone ? { phone: p.style.phone } : {}), ...(p.style?.rotate ? { rotate: p.style.rotate } : {}) };
+      const next = { ...look, ...keep };
+      return { ...p, style: Object.keys(next).length ? next : undefined };
+    });
+    say("🎨 Style pasted");
+  };
+  const selectMatching = () => {
+    if (!one) return;
+    const same = pieces.filter((p) => p.part === one.part && !p.hidden).map((p) => p.id);
+    setSel(same);
+    say(`Picked ${same.length} like this`);
+  };
+  /** turn the picked pieces (to an angle, or by some degrees) */
+  const rotateSel = (by: number | null) => updatePieces(sel, (p) => {
+    let d = by === null ? 0 : (p.style?.rotate || 0) + by;
+    d = ((((d + 180) % 360) + 360) % 360) - 180;
+    if (d === -180) d = 180;
+    return { ...p, style: { ...(p.style || {}), rotate: d ? round2(d) : undefined } };
+  });
+  /** Tidy up: line the picked pieces up in a neat grid, in reading order */
+  const tidyUp = () => {
+    const list = selected.filter((p) => !p.parent && !p.locked);
+    if (list.length < 2) { say("Pick two or more pieces to tidy up"); return; }
+    // group into rows: pieces whose middles are near each other's height share a row
+    const sorted = [...list].sort((a, b) => a.y + a.h / 2 - (b.y + b.h / 2));
+    const rowsOf: DesignPiece[][] = [];
+    for (const p of sorted) {
+      const last = rowsOf[rowsOf.length - 1];
+      if (last && Math.abs(p.y + p.h / 2 - (last[0].y + last[0].h / 2)) < Math.max(p.h, last[0].h) / 2) last.push(p);
+      else rowsOf.push([p]);
+    }
+    rowsOf.forEach((r) => r.sort((a, b) => a.x - b.x));
+    const gapX = round2(16 / colW), gapY = 1;
+    const minX = Math.min(...list.map((p) => p.x));
+    let y = Math.min(...list.map((p) => p.y));
+    const pos = new Map<string, { x: number; y: number }>();
+    for (const r of rowsOf) {
+      let x = minX;
+      for (const p of r) { pos.set(p.id, { x: round2(clamp(x, 0, COLS - p.w)), y: round2(y) }); x += p.w + gapX; }
+      y += Math.max(...r.map((p) => p.h)) + gapY;
+    }
+    updatePieces(list.map((p) => p.id), (p) => ({ ...p, ...pos.get(p.id)! }));
+    say("✨ Tidied up");
+  };
+  /** Tab / Shift Tab: pick the next piece (in reading order, among its neighbours) */
+  const cycle = (back: boolean) => {
+    const parent = one?.parent;
+    const sibs = pieces.filter((p) => !p.hidden && (parent ? p.parent === parent : !p.parent || !byId.has(p.parent)));
+    if (!sibs.length) return;
+    const ordered = parent ? sibs : [...sibs].sort((a, b) => a.y - b.y || a.x - b.x);
+    const i = one ? ordered.findIndex((p) => p.id === one.id) : -1;
+    const next = ordered[(i + (back ? -1 : 1) + ordered.length) % ordered.length];
+    setSel([next.id]);
   };
 
   /* ---------- auto layout (Shift A) ---------- */
@@ -600,9 +725,13 @@ export default function Builder() {
 
   /* ---------- the canvas: drag, resize, draw, box-select, pan ---------- */
   type Drag = {
-    kind: "move" | "resize" | "marquee" | "pan" | "draw" | "child";
+    kind: "move" | "resize" | "marquee" | "pan" | "draw" | "child" | "rotate";
     dir?: string; sx: number; sy: number; start: Map<string, DesignPiece>; before: Draft; moved: boolean; additive?: boolean;
     cam?: { x: number; y: number }; startBox?: Box;
+    /** Alt-drag made copies: undo goes back to before they existed */
+    undoTo?: Draft; dupOf?: string[];
+    /** turning: the middle of the piece, the angle it started at and where the mouse started */
+    cx?: number; cy?: number; rot0?: number; a0?: number;
   };
   const drag = useRef<Drag | null>(null);
   const toWorld = (clientX: number, clientY: number) => {
@@ -660,7 +789,27 @@ export default function Builder() {
     }
     const movable = pieces.filter((x) => ids.includes(x.id) && !x.locked && !x.parent);
     if (!movable.length) return;
+    if (e.altKey) {
+      // Alt-drag: leave the originals and drag copies, like Figma
+      const before = docRef.current!;
+      const { copies, rootIds } = cloneSet(movable, 0, 0);
+      const next = { ...before, pieces: [...before.pieces, ...copies] };
+      setDoc(next, { history: false });
+      setSel(rootIds);
+      drag.current = { kind: "move", sx: e.clientX, sy: e.clientY, start: new Map(copies.filter((c) => rootIds.includes(c.id)).map((c) => [c.id, c])), before: next, moved: false, undoTo: before, dupOf: movable.map((x) => x.id) };
+      return;
+    }
     drag.current = { kind: "move", sx: e.clientX, sy: e.clientY, start: new Map(movable.map((x) => [x.id, x])), before: docRef.current!, moved: false };
+  }
+  function startRotate(e: RPointerEvent, p: DesignPiece) {
+    if (mode !== "edit" || p.locked) return;
+    e.stopPropagation();
+    capture(e);
+    const r = rectOf(p);
+    if (!r) return;
+    const { px, py } = toWorld(e.clientX, e.clientY);
+    const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+    drag.current = { kind: "rotate", sx: e.clientX, sy: e.clientY, start: new Map([[p.id, p]]), before: docRef.current!, moved: false, cx, cy, rot0: p.style?.rotate || 0, a0: Math.atan2(py - cy, px - cx) };
   }
   function startResize(e: RPointerEvent, p: DesignPiece, dir: string) {
     if (mode !== "edit" || p.locked) return;
@@ -706,14 +855,30 @@ export default function Builder() {
     return { dx, dy, gv: Array.from(new Set(gv)), gh: Array.from(new Set(gh)) };
   }
   function onPointerMove(e: RPointerEvent) {
+    if (overlayRef.current) mouseAt.current = toWorld(e.clientX, e.clientY);
     const g = drag.current;
     if (!g) return;
-    const free = e.ctrlKey || e.metaKey;
+    // Ctrl (⌘) flips whatever Snap to grid is set to
+    const free = snap === (e.ctrlKey || e.metaKey);
     if (g.kind === "pan") { moveCam({ ...cam, x: g.cam!.x + (e.clientX - g.sx), y: g.cam!.y + (e.clientY - g.sy) }); return; }
     const { px, py } = toWorld(e.clientX, e.clientY);
+    if (g.kind === "rotate") {
+      g.moved = true;
+      setDragging("rotate");
+      let deg = g.rot0! + ((Math.atan2(py - g.cy!, px - g.cx!) - g.a0!) * 180) / Math.PI;
+      deg = ((((deg + 180) % 360) + 360) % 360) - 180;
+      // Shift: steps of 15°; otherwise it still clicks onto straight angles
+      deg = e.shiftKey ? Math.round(deg / 15) * 15 : Math.abs(deg - Math.round(deg / 90) * 90) < 3 ? Math.round(deg / 90) * 90 : Math.round(deg);
+      if (deg === -180) deg = 180;
+      const id = Array.from(g.start.keys())[0];
+      setDoc({ ...g.before, pieces: g.before.pieces.map((p) => (p.id !== id ? p : { ...p, style: { ...(p.style || {}), rotate: deg || undefined } })) }, { history: false });
+      return;
+    }
     if (g.kind === "draw") {
       g.moved = true;
       let x = Math.min(px, g.sx), y = Math.min(py, g.sy), w = Math.abs(px - g.sx), h = Math.abs(py - g.sy);
+      // Shift: a perfect square (or circle)
+      if (e.shiftKey) { const n = Math.max(w, h); w = n; h = n; x = px < g.sx ? g.sx - n : g.sx; y = py < g.sy ? g.sy - n : g.sy; }
       if (!free) { const x2 = Math.round((x + w) / colW) * colW, y2 = Math.round((y + h) / ROW) * ROW; x = Math.round(x / colW) * colW; y = Math.round(y / ROW) * ROW; w = x2 - x; h = y2 - y; }
       setDrawBox({ x, y, w, h });
       return;
@@ -727,9 +892,12 @@ export default function Builder() {
       }
       return;
     }
-    const dxPx = (e.clientX - g.sx) / cam.z, dyPx = (e.clientY - g.sy) / cam.z;
+    let dxPx = (e.clientX - g.sx) / cam.z, dyPx = (e.clientY - g.sy) / cam.z;
     if (!g.moved && Math.abs(dxPx) < 3 && Math.abs(dyPx) < 3) return;
+    if (!g.moved && (g.kind === "move" || g.kind === "resize")) setDragging(g.kind);
     g.moved = true;
+    // Shift while moving: only across or only up and down
+    if (g.kind === "move" && e.shiftKey) { if (Math.abs(dxPx) > Math.abs(dyPx)) dyPx = 0; else dxPx = 0; }
     const base = g.before;
     if (g.kind === "child") {
       // a piece inside a frame: slide it to a new place in the frame, into another frame, or out onto the page
@@ -765,6 +933,18 @@ export default function Builder() {
       if (dir.includes("s")) h = p0.h + dr;
       if (dir.includes("w")) { x = p0.x + dc; w = p0.w - dc; }
       if (dir.includes("n")) { y = p0.y + dr; h = p0.h - dr; }
+      // Shift on a corner: keep its shape
+      if (e.shiftKey && dir.length === 2 && p0.w > 0 && p0.h > 0) {
+        const ratio = (p0.w * colW) / (p0.h * ROW);
+        if ((w * colW) / ratio >= h * ROW) h = (w * colW) / ratio / ROW; else w = (h * ROW * ratio) / colW;
+        x = dir.includes("w") ? p0.x + p0.w - w : p0.x;
+        y = dir.includes("n") ? p0.y + p0.h - h : p0.y;
+      }
+      // Alt: grow from the middle
+      if (e.altKey) {
+        if (/[ew]/.test(dir)) { const gw = w - p0.w; w = p0.w + 2 * gw; x = p0.x - gw; }
+        if (/[ns]/.test(dir)) { const gh = h - p0.h; h = p0.h + 2 * gh; y = p0.y - gh; }
+      }
       if (free) {
         const s = snapToGuides({ x: x * colW, y: y * ROW, w: w * colW, h: h * ROW }, new Set([p0.id]));
         if (dir.includes("e")) w += s.dx / colW;
@@ -779,7 +959,7 @@ export default function Builder() {
         if (dir.includes("n")) { const ny = Math.round(y); h += y - ny; y = ny; }
         setGuides({ v: [], h: [] });
       }
-      const minW = free ? 0.25 : 1, minH = free ? 0.5 : 1;
+      const minW = free ? 0.5 : 1, minH = free ? 0.5 : 1;
       if (w < minW) { if (dir.includes("w")) x -= minW - w; w = minW; }
       if (h < minH) { if (dir.includes("n")) y -= minH - h; h = minH; }
       if (x < 0) { w += x; x = 0; }
@@ -802,6 +982,13 @@ export default function Builder() {
   function onPointerUp(e?: RPointerEvent) {
     const g = drag.current;
     drag.current = null;
+    setDragging("");
+    if (g?.undoTo && !g.moved) {
+      // Alt-click without dragging: no copies after all
+      setDoc(g.undoTo, { history: false });
+      setSel(g.dupOf || []);
+      return;
+    }
     setGuides({ v: [], h: [] });
     setMarquee(null);
     const target = dropInto;
@@ -812,7 +999,7 @@ export default function Builder() {
       const b = drawBox;
       setDrawBox(null);
       const partId = ({ frame: "stack", rect: "box", ellipse: "circle", line: "line", text: "heading" } as Record<string, string>)[tool] || "box";
-      if (b && b.w > 4 && b.h > 4) addPart(partId, { x: b.x / colW, y: b.y / ROW }, { w: round2(Math.max(0.25, b.w / colW)), h: round2(Math.max(0.5, b.h / ROW)) });
+      if (b && b.w > 4 && b.h > 4) addPart(partId, { x: b.x / colW, y: b.y / ROW }, { w: round2(Math.max(0.5, b.w / colW)), h: round2(Math.max(0.5, b.h / ROW)) });
       else if (b) { const part = PART_BY_ID.get(partId)!; addPart(partId, { x: b.x / colW + part.w / 2, y: b.y / ROW + part.h / 2 }); }
       setTool("move");
       return;
@@ -834,12 +1021,12 @@ export default function Builder() {
     if (g.kind === "move" && g.moved && target && g.start.size === 1) {
       const id = Array.from(g.start.keys())[0];
       change((d) => insertInto(d, d.pieces.find((x) => x.id === id)!, target.stack, target.index), false);
-      setPast((p) => [...p.slice(-99), g.before]); setFuture([]);
+      setPast((p) => [...p.slice(-99), g.undoTo || g.before]); setFuture([]);
       return;
     }
     if (g.kind === "marquee" || g.kind === "pan" || !g.moved) return;
     // one undo step for the whole drag
-    setPast((p) => [...p.slice(-99), g.before]);
+    setPast((p) => [...p.slice(-99), g.undoTo || g.before]);
     setFuture([]);
     setDirty(true);
   }
@@ -859,9 +1046,24 @@ export default function Builder() {
       if (e.key === "Control" || e.key === "Meta") setKeys((k) => ({ ...k, ctrl: true }));
       if (e.key === "Alt") setKeys((k) => ({ ...k, alt: true }));
       if (isTyping(e.target)) return;
+      if (palette) return;
+      // Esc while dragging puts everything back
+      if (e.key === "Escape" && drag.current && drag.current.moved && ["move", "resize", "rotate", "child"].includes(drag.current.kind)) {
+        const g = drag.current;
+        drag.current = null;
+        setDoc(g.undoTo || g.before, { history: false });
+        if (g.dupOf) setSel(g.dupOf);
+        setDragging(""); setGuides({ v: [], h: [] }); setDropInto(null); setGhost(null);
+        return;
+      }
       if (e.key === " " && !e.repeat) { e.preventDefault(); setKeys((k) => ({ ...k, space: true })); return; }
       const mod = e.ctrlKey || e.metaKey;
       const k = e.key.toLowerCase();
+      if (mod && (k === "k" || k === "/")) { e.preventDefault(); setPalette(true); return; }
+      if (mod && e.altKey && e.code === "KeyC") { e.preventDefault(); copyStyle(); return; }
+      if (mod && e.altKey && e.code === "KeyV") { e.preventDefault(); pasteStyle(); return; }
+      if (mod && e.altKey && e.code === "KeyT") { e.preventDefault(); tidyUp(); return; }
+      if (mod && e.shiftKey && k === "v") { e.preventDefault(); paste("inplace"); return; }
       if (mod && k === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if (mod && k === "y") { e.preventDefault(); redo(); return; }
       if (mod && k === "s") { e.preventDefault(); setDirty(false); save().then((id) => id && say("Saved ✓")); return; }
@@ -875,7 +1077,7 @@ export default function Builder() {
       if (mod && k === "d") { e.preventDefault(); duplicateSel(); return; }
       if (mod && k === "c") { clipboard.current = selected.map((p) => ({ ...p })); if (selected.length) say(`Copied ${selected.length}`); return; }
       if (mod && k === "x") { clipboard.current = selected.map((p) => ({ ...p })); removeSel(); return; }
-      if (mod && k === "v") { e.preventDefault(); paste(); return; }
+      if (mod && k === "v") { e.preventDefault(); paste("mouse"); return; }
       if (e.shiftKey && e.altKey && e.code === "KeyA") { e.preventDefault(); const st = selected.find((p) => p.part === "stack"); if (st) removeAutoLayout(st.id); return; }
       if (e.shiftKey && !mod && k === "a") { e.preventDefault(); addAutoLayout(); return; }
       if (e.shiftKey && k === "i") { e.preventDefault(); setLeftTab("assets"); return; }
@@ -887,6 +1089,8 @@ export default function Builder() {
         if (modal && (modal !== "start" || docRef.current)) setModal("");
         return;
       }
+      if (k === "tab" && !mod && !e.altKey) { e.preventDefault(); cycle(e.shiftKey); return; }
+      if (e.shiftKey && !mod && e.code === "KeyR" && selected.length) { e.preventDefault(); rotateSel(e.altKey ? -90 : 90); return; }
       if (k === "enter" && one?.part === "stack") { const kids = childrenOf(one.id); if (kids.length) setSel(kids.map((c) => c.id)); return; }
       if (k === "]") { layer(mod ? "front" : "up"); return; }
       if (k === "[") { layer(mod ? "back" : "down"); return; }
@@ -895,14 +1099,17 @@ export default function Builder() {
       if (mod) return;
       const toolKeys: Record<string, Tool> = { v: "move", h: "hand", f: "frame", r: "rect", o: "ellipse", l: "line", t: "text" };
       if (toolKeys[k] && !e.shiftKey && !e.altKey) { setTool(toolKeys[k]); setMode("edit"); return; }
+      if (k === "g" && e.shiftKey) { setSnap(!snap); say(snap ? "Moving freely" : "Snapping to the grid"); return; }
       if (k === "g") { setShowGrid((s) => !s); return; }
       if (k === "p") { setMode((m) => (m === "edit" ? "try" : "edit")); setSel([]); return; }
       if (k === "?") { setModal("help"); return; }
       if (k.startsWith("arrow") && selected.length) {
         e.preventDefault();
-        const step = e.altKey ? 0.25 : e.shiftKey ? 4 : 1;
-        const dx = k === "arrowleft" ? -step : k === "arrowright" ? step : 0;
-        const dy = k === "arrowup" ? -step : k === "arrowdown" ? step : 0;
+        // free: 1px (Shift = 10px), like Figma; snapping: a column (Shift = 4, Alt = a quarter)
+        const px = e.shiftKey ? 10 : 1;
+        const sx = snap ? (e.altKey ? 0.25 : e.shiftKey ? 4 : 1) : px / colW, sy = snap ? sx : px / ROW;
+        const dx = k === "arrowleft" ? -sx : k === "arrowright" ? sx : 0;
+        const dy = k === "arrowup" ? -sy : k === "arrowdown" ? sy : 0;
         updatePieces(selected.filter((p) => !p.locked && !p.parent).map((p) => p.id), (p) => ({ ...p, x: round2(clamp(p.x + dx, 0, COLS - p.w)), y: round2(Math.max(0, p.y + dy)) }));
       }
     };
@@ -1059,9 +1266,9 @@ export default function Builder() {
         : assetGroup(f, f, PARTS.filter((p) => p.folder === f)))}
     </>
   );
-  const layerRow = (p: DesignPiece, depth: number): ReactNode => {
+  const layerRow = (p: DesignPiece, depth: number, flat = false): ReactNode => {
     const part = PART_BY_ID.get(p.part);
-    const kids = pieces.filter((c) => c.parent === p.id);
+    const kids = flat ? [] : pieces.filter((c) => c.parent === p.id);
     const folded = collapsedLayers.has(p.id);
     return (
       <div key={p.id}>
@@ -1151,6 +1358,7 @@ export default function Builder() {
       ))}
       <button title="Space evenly across" disabled={selected.length < 3} onClick={() => align("hdist")}>⋯</button>
       <button title="Space evenly down" disabled={selected.length < 3} onClick={() => align("vdist")}>⋮</button>
+      <button title="Tidy up into a neat grid  Ctrl Alt T" disabled={selected.length < 2} onClick={tidyUp}>▦</button>
     </div>
   );
   const sizing = (axis: "W" | "H") => {
@@ -1255,6 +1463,14 @@ export default function Builder() {
             <Field icon="Y" value={Math.round(one.y * ROW)} onChange={(v) => updatePieces([one.id], (p) => ({ ...p, y: round2(Math.max(0, v / ROW)) }))} />
           </div>
         )}
+        <div className="fg-grid2 fg-rotrow">
+          <Field icon="↻" title="Rotation (drag the round handle above a piece; Shift for 15° steps)" value={st1.rotate || 0} min={-180} max={180} suffix="°" onChange={(v) => rotateSel(v - (st1.rotate || 0))} />
+          <div className="fg-rotbtns">
+            <button className="fg-icon-btn" title="Turn left 90°  Alt Shift R" onClick={() => rotateSel(-90)}>⟲</button>
+            <button className="fg-icon-btn" title="Turn right 90°  Shift R" onClick={() => rotateSel(90)}>⟳</button>
+            {!!st1.rotate && <button className="fg-icon-btn" title="Straighten" onClick={() => rotateSel(null)}>0°</button>}
+          </div>
+        </div>
       </Panel>
       <Panel title="Layout" action={one.part !== "stack" ? <button className="fg-icon-btn" title="Add auto layout (Shift A)" onClick={addAutoLayout}>+</button> : undefined}>
         <div className="fg-grid2">
@@ -1443,8 +1659,48 @@ export default function Builder() {
     return { x, y, w: Math.max(...bs.map((b) => b.x + b.w)) - x, h: Math.max(...bs.map((b) => b.y + b.h)) - y };
   })() : null;
 
+  const freeNow = snap === keys.ctrl;
+  const actions: Action[] = !palette || !doc ? [] : [
+    { id: "dup", group: "Edit", icon: "⧉", label: "Duplicate", kbd: "Ctrl D", run: duplicateSel, off: !selected.length },
+    { id: "del", group: "Edit", icon: "🗑", label: "Delete", kbd: "Del", run: removeSel, off: !selected.length },
+    { id: "copy", group: "Edit", icon: "📋", label: "Copy", kbd: "Ctrl C", run: () => { clipboard.current = selected.map((p) => ({ ...p })); say("Copied"); }, off: !selected.length },
+    { id: "paste", group: "Edit", icon: "📋", label: "Paste in place", kbd: "Ctrl Shift V", run: () => paste("inplace"), off: !clipboard.current.length },
+    { id: "cstyle", group: "Edit", icon: "🖌", label: "Copy style", kbd: "Ctrl Alt C", run: copyStyle, off: !one },
+    { id: "pstyle", group: "Edit", icon: "🎨", label: "Paste style", kbd: "Ctrl Alt V", run: pasteStyle, off: !styleClip.current || !selected.length },
+    { id: "all", group: "Select", icon: "⬚", label: "Select all", kbd: "Ctrl A", run: () => setSel(pieces.filter((p) => !p.hidden && !p.parent).map((p) => p.id)) },
+    { id: "match", group: "Select", icon: "⬚", label: "Select all like this", run: selectMatching, off: !one },
+    { id: "none", group: "Select", icon: "⬚", label: "Select nothing", kbd: "Esc", run: () => setSel([]), off: !selected.length },
+    ...(["left", "center", "right", "top", "middle", "bottom"] as const).map((k) => ({ id: `al-${k}`, group: "Arrange", icon: "⇹", label: `Align ${k === "center" ? "centres" : k === "middle" ? "middles" : k}`, run: () => align(k), off: !selected.length || (selected.length === 1 && ["top", "middle", "bottom"].includes(k)) })),
+    { id: "hd", group: "Arrange", icon: "⋯", label: "Space evenly across", run: () => align("hdist"), off: selected.length < 3 },
+    { id: "vd", group: "Arrange", icon: "⋮", label: "Space evenly down", run: () => align("vdist"), off: selected.length < 3 },
+    { id: "tidy", group: "Arrange", icon: "▦", label: "Tidy up into a grid", kbd: "Ctrl Alt T", run: tidyUp, off: selected.length < 2 },
+    { id: "front", group: "Arrange", icon: "⇡", label: "Bring to front", kbd: "Ctrl ]", run: () => layer("front"), off: !selected.length },
+    { id: "back", group: "Arrange", icon: "⇣", label: "Send to back", kbd: "Ctrl [", run: () => layer("back"), off: !selected.length },
+    { id: "rotr", group: "Arrange", icon: "⟳", label: "Turn right 90°", kbd: "Shift R", run: () => rotateSel(90), off: !selected.length },
+    { id: "rotl", group: "Arrange", icon: "⟲", label: "Turn left 90°", kbd: "Alt Shift R", run: () => rotateSel(-90), off: !selected.length },
+    { id: "rot0", group: "Arrange", icon: "0°", label: "Straighten", run: () => rotateSel(null), off: !selected.some((p) => p.style?.rotate) },
+    { id: "full", group: "Arrange", icon: "⟷", label: "Make full width", run: () => updatePieces(sel, (p) => (p.parent ? p : { ...p, x: 0, w: COLS })), off: !selected.length },
+    { id: "al", group: "Arrange", icon: "⬚", label: "Add auto layout", kbd: "Shift A", run: addAutoLayout },
+    { id: "lock", group: "Arrange", icon: "🔒", label: "Lock / unlock", kbd: "Ctrl Shift L", run: () => updatePieces(sel, (p) => ({ ...p, locked: !p.locked || undefined })), off: !selected.length },
+    { id: "hide", group: "Arrange", icon: "👁", label: "Show / hide", kbd: "Ctrl Shift H", run: () => updatePieces(sel, (p) => ({ ...p, hidden: !p.hidden || undefined })), off: !selected.length },
+    { id: "snap", group: "View", icon: "🧲", label: snap ? "Turn snapping off (move freely)" : "Turn on snap to grid", kbd: "Shift G", run: () => setSnap(!snap) },
+    { id: "grid", group: "View", icon: "#", label: showGrid ? "Hide grid lines" : "Show grid lines", kbd: "G", run: () => setShowGrid((g) => !g) },
+    { id: "fit", group: "View", icon: "⤢", label: "Zoom to fit", kbd: "Shift 1", run: () => fit() },
+    { id: "zsel", group: "View", icon: "⤢", label: "Zoom to selection", kbd: "Shift 2", run: zoomToSelection, off: !selected.length },
+    { id: "z100", group: "View", icon: "⤢", label: "Zoom to 100%", kbd: "Shift 0", run: () => zoomAt(1 / cam.z, undefined, undefined, true) },
+    ...DEVICES.map((d) => ({ id: `dev-${d.id}`, group: "View", icon: d.icon, label: `Show on ${d.label.toLowerCase()} (${d.w})`, run: () => setDevice(d.id), off: device === d.id })),
+    { id: "try", group: "View", icon: "▶", label: mode === "try" ? "Back to editing" : "Try it out", kbd: "P", run: () => { setMode(mode === "try" ? "edit" : "try"); setSel([]); } },
+    { id: "undo", group: "Edit", icon: "↶", label: "Undo", kbd: "Ctrl Z", run: undo, off: !past.length },
+    { id: "redo", group: "Edit", icon: "↷", label: "Redo", kbd: "Ctrl Shift Z", run: redo, off: !future.length },
+    { id: "save", group: "File", icon: "💾", label: "Save now", kbd: "Ctrl S", run: () => { setDirty(false); save().then((id) => id && say("Saved ✓")); } },
+    { id: "use", group: "File", icon: "✅", label: "Use as my home page", run: applyDesign },
+    { id: "ai", group: "File", icon: "✨", label: "Ask the AI", run: () => setRightTab("ai") },
+    { id: "keys", group: "Help", icon: "⌨", label: "Keyboard shortcuts", kbd: "?", run: () => setModal("help") },
+    ...PARTS.map((pt) => ({ id: `part-${pt.id}`, group: pt.folder.replace("Design pieces/", "◈ "), icon: pt.emoji, label: `Add ${pt.name}`, run: () => { if (mouseAt.current) addPart(pt.id, { x: mouseAt.current.px / colW, y: mouseAt.current.py / ROW }); else addPart(pt.id); } })),
+  ];
+  const quickBox = mode === "edit" && tool === "move" ? (selBounds || (one ? rectOf(one) : null)) : null;
   return (
-    <div className={`fg-app ${keys.ctrl ? "free" : ""}`} onPointerUp={() => onPointerUp()}
+    <div className={`fg-app ${freeNow ? "free" : ""}`} onPointerUp={() => onPointerUp()}
       onContextMenu={(e) => { if (!(e.target as HTMLElement).closest("input,textarea")) e.preventDefault(); }}>
       {/* ---------------- left panel ---------------- */}
       <aside className="fg-left">
@@ -1472,6 +1728,7 @@ export default function Builder() {
             <button disabled={!selected.length} onClick={() => { setMenu(""); duplicateSel(); }}>Duplicate <kbd>Ctrl D</kbd></button>
             <button disabled={!doc} onClick={() => { setMenu(""); addAutoLayout(); }}>Add auto layout <kbd>Shift A</kbd></button>
             <hr />
+            <button onClick={() => { setMenu(""); setSnap(!snap); }}>{snap ? "✓ " : ""}Snap to grid <kbd>Shift G</kbd></button>
             <button onClick={() => { setMenu(""); setShowGrid((g) => !g); }}>{showGrid ? "✓ " : ""}Grid lines <kbd>G</kbd></button>
             <button onClick={() => { setMenu(""); fit(); }}>Zoom to fit <kbd>Shift 1</kbd></button>
             <hr />
@@ -1492,10 +1749,15 @@ export default function Builder() {
                 </button>
               ))}
             </div>
-            <div className="fg-small-head">Layers</div>
+            <div className="fg-small-head fg-layerhead">Layers <em>{pieces.length}</em></div>
+            {pieces.length > 0 && <input className="fg-input fg-layersearch" placeholder="Find a layer…" value={layerQ} onChange={(e) => setLayerQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") setLayerQ(""); }} />}
             <div className="fg-layers" onDragOver={(e) => e.preventDefault()}>
               {topLayers.length === 0 && <p className="fg-muted pad small">Nothing here yet. Open Assets (Shift I) and drag parts onto the page, or ask ✨ AI.</p>}
-              {topLayers.map((p) => layerRow(p, 0))}
+              {layerQ.trim() ? (() => {
+                const qq = layerQ.trim().toLowerCase();
+                const hits = [...pieces].sort((a, b) => b.z - a.z).filter((p) => `${p.name || ""} ${PART_BY_ID.get(p.part)?.name || p.part}`.toLowerCase().includes(qq));
+                return hits.length ? hits.map((p) => layerRow(p, 0, true)) : <p className="fg-muted pad small">No layer called that.</p>;
+              })() : topLayers.map((p) => layerRow(p, 0))}
             </div>
           </div>
         ) : (
@@ -1507,7 +1769,16 @@ export default function Builder() {
       </aside>
 
       {/* ---------------- the canvas ---------------- */}
-      <main className={`fg-stage ${mode}`} ref={stageRef} style={{ cursor }} onPointerDown={onStageDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
+      <main className={`fg-stage ${mode}`} ref={stageRef} style={{ cursor }} onPointerDown={onStageDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
+        onPointerLeave={() => { mouseAt.current = null; }}
+        onContextMenu={(e) => {
+          if (!doc || mode !== "edit" || (e.target as HTMLElement).closest(".fg-box,.fg-toolbar,.fg-menu,.fg-qbar,.fg-previewsel")) return;
+          e.preventDefault();
+          setSel([]);
+          const sr = stageRef.current!.getBoundingClientRect();
+          const w = overlayRef.current ? toWorld(e.clientX, e.clientY) : null;
+          setCtxMenu({ x: e.clientX - sr.left, y: e.clientY - sr.top, empty: true, wx: w?.px, wy: w?.py });
+        }}>
         {doc ? (
           <div className={`fg-world ${animate ? "anim" : ""}`} style={{ transform: `translate(${cam.x}px, ${cam.y}px) scale(${cam.z})` }}>
             <div className="fg-framelabel" style={{ transform: `scale(${1 / cam.z})` }} onPointerDown={(e) => { e.stopPropagation(); setSel([]); }}>
@@ -1516,7 +1787,7 @@ export default function Builder() {
             <div className="fg-frame" style={{ width: deviceW, height: frameH }}>
               <iframe ref={iframeRef} className="fg-iframe" src="/?builder=preview" title="Your design" style={{ width: deviceW, height: frameH }} tabIndex={mode === "try" ? 0 : -1} />
               {editing && (
-                <div ref={overlayRef} className={`fg-overlay ${showGrid && !keys.ctrl ? "grid" : ""}`} style={{ "--colw": `${colW}px`, "--z": 1 / cam.z } as CSSProperties}
+                <div ref={overlayRef} className={`fg-overlay ${showGrid && !freeNow ? "grid" : ""}`} style={{ "--colw": `${colW}px`, "--z": 1 / cam.z } as CSSProperties}
                   onDragOver={(e) => { if (e.dataTransfer.types.includes("application/x-part")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
                   onDrop={(e) => {
                     const id = e.dataTransfer.getData("application/x-part");
@@ -1536,20 +1807,36 @@ export default function Builder() {
                     const isStack = p.part === "stack";
                     return (
                       <div key={p.id} className={`fg-box ${on ? "on" : ""} ${hoverId === p.id ? "hover" : ""} ${p.locked ? "locked" : ""} ${p.hidden ? "hidden" : ""} ${part?.design ? "comp" : ""} ${popup ? "popup" : ""} ${isStack ? "stack" : ""} ${p.parent ? "child" : ""} ${ghost && drag.current?.start.has(p.id) ? "lifting" : ""}`}
-                        style={{ left: r.x, top: r.y, width: r.w, height: r.h }}
+                        style={{ left: r.x, top: r.y, width: r.w, height: r.h, transform: p.style?.rotate ? `rotate(${p.style.rotate}deg)` : undefined }}
                         onPointerEnter={() => setHoverId(p.id)} onPointerLeave={() => setHoverId((h) => (h === p.id ? null : h))}
                         onPointerDown={(e) => startMove(e, p)}
                         onDoubleClick={() => { if (isStack) { const kids = childrenOf(p.id); if (kids.length) setSel([kids[0].id]); } else { setLeftTab("file"); setRenaming(p.id); } }}
-                        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (!sel.includes(p.id)) setSel([p.id]); const sr = stageRef.current!.getBoundingClientRect(); setCtxMenu({ x: e.clientX - sr.left, y: e.clientY - sr.top }); }}>
+                        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (!sel.includes(p.id)) setSel([p.id]); const sr = stageRef.current!.getBoundingClientRect(); const w = toWorld(e.clientX, e.clientY); setCtxMenu({ x: e.clientX - sr.left, y: e.clientY - sr.top, wx: w.px, wy: w.py }); }}>
                         {(on || hoverId === p.id || popup || (isStack && !p.parent)) && (
-                          <span className="fg-box-tag" onPointerDown={popup ? (e) => startMove(e, p) : undefined}>{p.locked ? "🔒 " : ""}{isStack ? "⬚ " : part?.design ? "◈ " : ""}{p.name || part?.name}{popup ? " · pop-up" : ""}</span>
+                          <span className="fg-box-tag" style={p.style?.rotate ? { transform: `rotate(${-p.style.rotate}deg)`, transformOrigin: "0 100%" } : undefined} onPointerDown={popup ? (e) => startMove(e, p) : undefined}>{p.locked ? "🔒 " : ""}{isStack ? "⬚ " : part?.design ? "◈ " : ""}{p.name || part?.name}{popup ? " · pop-up" : ""}</span>
                         )}
                         {on && sel.length === 1 && !p.locked && handles.map((h) => <span key={h} className={`fg-handle ${h}`} onPointerDown={(e) => startResize(e, p, h)} />)}
-                        {on && sel.length === 1 && <span className="fg-size">{Math.round(r.w)} × {Math.round(r.h)}{p.sizeW === "fill" ? " · Fill" : p.sizeW === "hug" ? " · Hug" : ""}</span>}
+                        {on && sel.length === 1 && !p.locked && !p.parent && <span className="fg-rotate" title="Drag to turn (Shift: 15° steps)" onPointerDown={(e) => startRotate(e, p)} />}
+                        {on && sel.length === 1 && <span className="fg-size" style={p.style?.rotate ? { transform: `translateX(-50%) rotate(${-p.style.rotate}deg)` } : undefined}>{dragging === "move" ? `X ${Math.round(r.x)}  Y ${Math.round(r.y)}` : dragging === "rotate" ? `${p.style?.rotate || 0}°` : `${Math.round(r.w)} × ${Math.round(r.h)}`}{!dragging && (p.sizeW === "fill" ? " · Fill" : p.sizeW === "hug" ? " · Hug" : "")}{!dragging && p.style?.rotate ? ` · ${p.style.rotate}°` : ""}</span>}
                       </div>
                     );
                   })}
                   {selBounds && <div className="fg-groupbox" style={{ left: selBounds.x, top: selBounds.y, width: selBounds.w, height: selBounds.h }} />}
+                  {quickBox && !dragging && !marquee && (
+                    <div className="fg-qbar" style={{ left: quickBox.x + quickBox.w / 2, top: Math.max(quickBox.y, 0) }} onPointerDown={(e) => e.stopPropagation()}>
+                      <button title="Duplicate  Ctrl D (or Alt + drag)" onClick={duplicateSel}>⧉</button>
+                      <button title="Bring to front  Ctrl ]" onClick={() => layer("front")}>⇡</button>
+                      <button title="Send to back  Ctrl [" onClick={() => layer("back")}>⇣</button>
+                      <button title="Turn 90°  Shift R" onClick={() => rotateSel(90)}>⟳</button>
+                      {selected.length > 1 && <><i /><button title="Align left" onClick={() => align("left")}>⇤</button><button title="Align centres" onClick={() => align("center")}>⇹</button><button title="Align top" onClick={() => align("top")}>⤒</button><button title="Tidy up  Ctrl Alt T" onClick={tidyUp}>▦</button></>}
+                      <i />
+                      <button title="Copy style  Ctrl Alt C" disabled={!one} onClick={copyStyle}>🖌</button>
+                      <button title="Paste style  Ctrl Alt V" disabled={!styleClip.current} onClick={pasteStyle}>🎨</button>
+                      <button title={selected.every((p) => p.locked) ? "Unlock  Ctrl Shift L" : "Lock  Ctrl Shift L"} onClick={() => updatePieces(sel, (p) => ({ ...p, locked: !p.locked || undefined }))}>{selected.every((p) => p.locked) ? "🔒" : "🔓"}</button>
+                      <button title="✨ Ask AI about this" onClick={() => setRightTab("ai")}>✨</button>
+                      <button className="danger" title="Delete  Del" onClick={removeSel}>🗑</button>
+                    </div>
+                  )}
                   {guides.v.map((x) => <span key={`v${x}`} className="fg-guide v" style={{ left: x }} />)}
                   {guides.h.map((y) => <span key={`h${y}`} className="fg-guide h" style={{ top: y }} />)}
                   {measure?.map((l, i) => (
@@ -1568,10 +1855,26 @@ export default function Builder() {
           </div>
         ) : <div className="fg-empty-stage"><button className="fg-btn primary" onClick={() => setModal("start")}>Start a design</button></div>}
 
-        {ctxMenu && (
+        {ctxMenu?.empty && (
+          <div className="fg-menu fg-ctx" style={{ left: ctxMenu.x, top: ctxMenu.y }} onPointerDown={(e) => e.stopPropagation()}>
+            <button disabled={!clipboard.current.length} onClick={() => { paste(ctxMenu.wx !== undefined ? { px: ctxMenu.wx, py: ctxMenu.wy! } : "mouse"); setCtxMenu(null); }}>Paste here <kbd>Ctrl V</kbd></button>
+            <button disabled={!clipboard.current.length} onClick={() => { paste("inplace"); setCtxMenu(null); }}>Paste in place <kbd>Ctrl Shift V</kbd></button>
+            <button onClick={() => { setSel(pieces.filter((p) => !p.hidden && !p.parent).map((p) => p.id)); setCtxMenu(null); }}>Select all <kbd>Ctrl A</kbd></button>
+            <hr />
+            <button onClick={() => { setCtxMenu(null); setPalette(true); }}>Quick actions… <kbd>Ctrl K</kbd></button>
+            <button onClick={() => { setCtxMenu(null); setLeftTab("assets"); }}>Add a part… <kbd>Shift I</kbd></button>
+            <hr />
+            <button onClick={() => { setSnap(!snap); setCtxMenu(null); }}>{snap ? "✓ " : ""}Snap to grid <kbd>Shift G</kbd></button>
+            <button onClick={() => { setShowGrid((g) => !g); setCtxMenu(null); }}>{showGrid ? "✓ " : ""}Grid lines <kbd>G</kbd></button>
+            <button onClick={() => { fit(); setCtxMenu(null); }}>Zoom to fit <kbd>Shift 1</kbd></button>
+          </div>
+        )}
+        {ctxMenu && !ctxMenu.empty && (
           <div className="fg-menu fg-ctx" style={{ left: ctxMenu.x, top: ctxMenu.y }} onPointerDown={(e) => e.stopPropagation()}>
             <button onClick={() => { clipboard.current = selected.map((p) => ({ ...p })); setCtxMenu(null); say("Copied"); }}>Copy <kbd>Ctrl C</kbd></button>
-            <button disabled={!clipboard.current.length} onClick={() => { paste(); setCtxMenu(null); }}>Paste <kbd>Ctrl V</kbd></button>
+            <button disabled={!clipboard.current.length} onClick={() => { paste(ctxMenu.wx !== undefined ? { px: ctxMenu.wx, py: ctxMenu.wy! } : "mouse"); setCtxMenu(null); }}>Paste here <kbd>Ctrl V</kbd></button>
+            <button disabled={!one} onClick={() => { copyStyle(); setCtxMenu(null); }}>Copy style <kbd>Ctrl Alt C</kbd></button>
+            <button disabled={!styleClip.current} onClick={() => { pasteStyle(); setCtxMenu(null); }}>Paste style <kbd>Ctrl Alt V</kbd></button>
             <button onClick={() => { duplicateSel(); setCtxMenu(null); }}>Duplicate <kbd>Ctrl D</kbd></button>
             <button className="danger" onClick={() => { removeSel(); setCtxMenu(null); }}>Delete <kbd>Del</kbd></button>
             <hr />
@@ -1581,7 +1884,12 @@ export default function Builder() {
             <button onClick={() => { addAutoLayout(); setCtxMenu(null); }}>Add auto layout <kbd>Shift A</kbd></button>
             {one?.part === "stack" && <button onClick={() => { removeAutoLayout(one.id); setCtxMenu(null); }}>Remove auto layout <kbd>Alt Shift A</kbd></button>}
             <button onClick={() => { zoomToSelection(); setCtxMenu(null); }}>Zoom to selection <kbd>Shift 2</kbd></button>
+            <button onClick={() => { rotateSel(90); setCtxMenu(null); }}>Turn 90° <kbd>Shift R</kbd></button>
+            {selected.some((p) => p.style?.rotate) && <button onClick={() => { rotateSel(null); setCtxMenu(null); }}>Straighten</button>}
+            {selected.length > 1 && <button onClick={() => { tidyUp(); setCtxMenu(null); }}>Tidy up <kbd>Ctrl Alt T</kbd></button>}
             <hr />
+            {one && <button onClick={() => { selectMatching(); setCtxMenu(null); }}>Select all like this</button>}
+            {one && <button onClick={() => { setLeftTab("file"); setLayerQ(""); setRenaming(one.id); setCtxMenu(null); }}>Rename</button>}
             <button onClick={() => { updatePieces(sel, (p) => ({ ...p, hidden: !p.hidden || undefined })); setCtxMenu(null); }}>Show / hide <kbd>Ctrl Shift H</kbd></button>
             <button onClick={() => { updatePieces(sel, (p) => ({ ...p, locked: !p.locked || undefined })); setCtxMenu(null); }}>Lock / unlock <kbd>Ctrl Shift L</kbd></button>
             <button onClick={() => { setRightTab("ai"); setCtxMenu(null); }}>✨ Ask AI about this</button>
@@ -1608,6 +1916,9 @@ export default function Builder() {
               )}
             </div>
             {toolBtn("text", <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6V4.5h14V6M12 4.5v15M9 19.5h6" /></svg>, "Text", "T")}
+            <button className={snap ? "on" : ""} title={snap ? "Snapping to the grid (Shift G to move freely)" : "Moving freely (Shift G to snap to the grid)"} aria-pressed={snap} onClick={() => { setSnap(!snap); say(snap ? "Moving freely" : "Snapping to the grid"); }}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v8a6 6 0 0012 0V4h-4v8a2 2 0 01-4 0V4zM6 8h4M14 8h4" /></svg>
+            </button>
             <span className="fg-tsep" />
             <button title="Assets  Shift I" className={leftTab === "assets" ? "soft" : ""} onClick={() => setLeftTab("assets")}><svg viewBox="0 0 24 24"><path d="M12 3l3 3-3 3-3-3zM6 9l3 3-3 3-3-3zM18 9l3 3-3 3-3-3zM12 15l3 3-3 3-3-3z" /></svg></button>
             <button title="✨ AI" className={`fg-tai ${rightTab === "ai" ? "on" : ""}`} onClick={() => setRightTab(rightTab === "ai" ? "design" : "ai")}>✨</button>
@@ -1620,9 +1931,10 @@ export default function Builder() {
             {device === "phone" ? "📲 On phones pieces stack top to bottom — pick a bigger page to move things."
               : mode === "try" ? "▶ Trying it out — click around like it's your real page. Press P to edit again."
               : tool !== "move" && tool !== "hand" ? "Drag on the page to draw · Esc to cancel"
-              : keys.ctrl ? "Free placement — red lines show when edges line up"
+              : keys.ctrl ? (snap ? "Moving freely while you hold Ctrl" : "Snapping to the grid while you hold Ctrl")
               : keys.alt && one ? "Point at another piece to see the distance"
-              : "Scroll to move · Ctrl + scroll to zoom · Space + drag to pan · hold Ctrl to place freely · Shift A for auto layout"}
+              : snap ? "Snapping to the grid · hold Ctrl to move freely · Shift G turns snapping off · Space + drag to pan"
+              : "Drag anything anywhere · red lines show when edges line up · Shift G snaps to a grid · Space + drag to pan"}
           </div>
         )}
         {doc && (
@@ -1668,6 +1980,8 @@ export default function Builder() {
       </aside>
 
       {toast && <div className="fg-toast" role="status">{toast}</div>}
+
+      {palette && <QuickActions items={actions} onClose={() => setPalette(false)} />}
 
       {/* ---------------- new design / designs / share / shortcuts ---------------- */}
       {modal === "start" && (
@@ -1783,8 +2097,8 @@ export default function Builder() {
             <div className="fg-keys">
               {([
                 ["Tools", [["V", "Move"], ["H / Space", "Hand (pan)"], ["F", "Frame (auto layout)"], ["R", "Rectangle"], ["O", "Ellipse"], ["L", "Line"], ["T", "Text"], ["Shift I", "Assets"], ["P", "Try it"]]],
-                ["Edit", [["Ctrl Z / Ctrl Shift Z", "Undo / redo"], ["Ctrl C / V / X", "Copy / paste / cut"], ["Ctrl D", "Duplicate"], ["Del", "Delete"], ["Ctrl A", "Select all"], ["Esc", "Select the frame, then nothing"], ["Enter", "Select inside a frame"], ["Ctrl Shift L / H", "Lock / hide"]]],
-                ["Arrange", [["Shift A", "Add auto layout"], ["Alt Shift A", "Remove auto layout"], ["[ ]", "Backward / forward"], ["Ctrl [ ]", "To back / front"], ["Arrows", "Nudge (Shift = 4, Alt = tiny)"], ["Ctrl + drag", "Place freely"], ["Alt + point", "Measure distance"]]],
+                ["Edit", [["Ctrl Z / Ctrl Shift Z", "Undo / redo"], ["Ctrl C / V / X", "Copy / paste / cut"], ["Ctrl D", "Duplicate"], ["Del", "Delete"], ["Ctrl A", "Select all"], ["Esc", "Select the frame, then nothing"], ["Enter", "Select inside a frame"], ["Ctrl Shift L / H", "Lock / hide"], ["Ctrl K", "Quick actions (find anything)"], ["Ctrl Shift V", "Paste in place"], ["Ctrl Alt C / V", "Copy / paste style"], ["Tab", "Pick the next piece"]]],
+                ["Arrange", [["Shift A", "Add auto layout"], ["Alt Shift A", "Remove auto layout"], ["[ ]", "Backward / forward"], ["Ctrl [ ]", "To back / front"], ["Arrows", "Nudge 1px (Shift = 10px)"], ["Shift G", "Snap to grid on / off"], ["Ctrl + drag", "Flip snapping while dragging"], ["Alt + drag", "Drag a copy"], ["Shift + drag", "Move straight across or down"], ["Shift + corner", "Resize keeping its shape"], ["Alt + resize", "Resize from the middle"], ["Shift R / Alt Shift R", "Turn 90° right / left"], ["Ctrl Alt T", "Tidy up"], ["Esc (while dragging)", "Cancel the drag"], ["Alt + point", "Measure distance"]]],
                 ["View", [["Scroll", "Move around"], ["Ctrl + scroll", "Zoom"], ["Shift 1", "Zoom to fit"], ["Shift 2", "Zoom to selection"], ["Shift 0", "100%"], ["G", "Grid lines"]]],
               ] as [string, string[][]][]).map(([title, list]) => (
                 <div key={title}>

@@ -361,3 +361,32 @@ textarea.fg-input{height:auto;padding:6px 8px;resize:vertical;line-height:16px}
   .fg-right{max-height:36vh;border-left:0;border-top:1px solid var(--f-line2)}
   .fg-hint{display:none}
 }
+
+/* ---------- turning, quick bar, quick actions, layer search ---------- */
+.fg-box{transform-origin:50% 50%}
+.fg-rotate{position:absolute;left:calc(50% - 6px * var(--z,1));top:calc(-28px * var(--z,1));width:calc(12px * var(--z,1));height:calc(12px * var(--z,1));border-radius:50%;background:#fff;border:calc(1.5px * var(--z,1)) solid var(--f-blue);cursor:grab;z-index:3}
+.fg-rotate::after{content:"";position:absolute;left:50%;top:100%;width:calc(1px * var(--z,1));height:calc(16px * var(--z,1));background:var(--f-blue);transform:translateX(-50%);pointer-events:none}
+.fg-rotate:active{cursor:grabbing;background:var(--f-blue)}
+.fg-box.comp .fg-rotate{border-color:var(--f-purple)}
+.fg-box.comp .fg-rotate::after{background:var(--f-purple)}
+.fg-qbar{position:absolute;z-index:30;display:flex;align-items:center;gap:calc(2px * var(--z,1));padding:calc(4px * var(--z,1));transform:translate(-50%,calc(-100% - 46px * var(--z,1)));background:#1e1e1e;border-radius:calc(10px * var(--z,1));box-shadow:0 0 0 calc(1px * var(--z,1)) rgba(255,255,255,.1),0 calc(8px * var(--z,1)) calc(28px * var(--z,1)) rgba(0,0,0,.55);animation:fgFade .12s;white-space:nowrap}
+.fg-qbar button{width:calc(28px * var(--z,1));height:calc(28px * var(--z,1));border-radius:calc(6px * var(--z,1));font-size:calc(14px * var(--z,1));line-height:1;color:#fff;cursor:pointer;display:grid;place-items:center}
+.fg-qbar button:hover:not(:disabled){background:var(--f-bg3)}
+.fg-qbar button.danger:hover{background:var(--f-red)}
+.fg-qbar button:disabled{opacity:.35;cursor:default}
+.fg-qbar i{width:calc(1px * var(--z,1));height:calc(18px * var(--z,1));background:rgba(255,255,255,.14);margin:0 calc(3px * var(--z,1))}
+.fg-qa-bg{padding-top:14vh}
+.fg-qa{width:min(560px,100%);background:#1e1e1e;border-radius:14px;box-shadow:0 0 0 1px rgba(255,255,255,.1),0 24px 70px rgba(0,0,0,.65);overflow:hidden;animation:fgPop .14s var(--f-ease)}
+.fg-qa-input{width:100%;height:48px;padding:0 18px;background:transparent;border:0;border-bottom:1px solid rgba(255,255,255,.08);outline:none;color:#fff;font-size:15px}
+.fg-qa-list{max-height:min(420px,55vh);overflow:auto;padding:6px}
+.fg-qa-list button{display:flex;align-items:center;gap:10px;width:100%;height:34px;padding:0 10px;border-radius:7px;color:#fff;cursor:pointer;text-align:left;white-space:nowrap}
+.fg-qa-list button.on{background:var(--f-blue)}
+.fg-qa-list em{font-style:normal;color:var(--f-text3);font-size:11px;margin-left:auto;overflow:hidden;text-overflow:ellipsis}
+.fg-qa-list button.on em,.fg-qa-list button.on kbd{color:rgba(255,255,255,.8)}
+.fg-qa-list kbd{color:var(--f-text3);font-size:11px;font-family:inherit}
+.fg-qa-icon{width:20px;text-align:center;flex:none}
+.fg-layerhead{display:flex;align-items:center;gap:6px}
+.fg-layerhead em{font-style:normal;font-weight:400;color:var(--f-text3);font-size:11px}
+.fg-layersearch{display:block;width:calc(100% - 24px);margin:0 12px 6px;height:26px}
+.fg-rotrow{margin-top:6px;align-items:center}
+.fg-rotbtns{display:flex;gap:2px}
