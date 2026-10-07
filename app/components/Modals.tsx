@@ -274,7 +274,9 @@ export const SHORTCUTS: [string, string][] = [
   ["T", "Light / dark theme"],
   ["O", "Tools drawer"],
   ["Shift T", "Focus timer"],
-  ["Esc", "Close / clear search"],
+  ["Esc", "Close / clear search (again to leave the search box)"],
+  ["Alt 1 – 9", "Jump to folder 1 – 9"],
+  ["Ctrl Z / Ctrl Y", "Undo / redo your last change"],
   ["?", "This list"],
   ["Ctrl V", "Paste a link anywhere to add it"],
 ];
@@ -286,27 +288,43 @@ const CARD_SHORTCUTS: [string, string][] = [
   ["B", "Read later"],
   ["D", "Mark done"],
   ["I", "Details"],
+  ["C", "Copy its link"],
+  ["E", "Edit it (or suggest an edit)"],
   ["Space", "Select (for copying or moving several)"],
   ["Ctrl-click", "Open in a background tab"],
   ["Right-click", "More options"],
 ];
 
 export function ShortcutsModal({ onClose }: { onClose: () => void }) {
+  const [find, setFind] = useState("");
+  const f = find.trim().toLowerCase();
+  const match = ([k, label]: [string, string]) => !f || label.toLowerCase().includes(f) || k.toLowerCase() === f;
+  const main = SHORTCUTS.filter(match);
+  const card = CARD_SHORTCUTS.filter(match);
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h2>Keyboard shortcuts</h2>
+        <input
+          className="shortcut-find"
+          autoFocus
+          value={find}
+          onChange={(e) => setFind(e.target.value)}
+          placeholder="Find a shortcut… (try “theme” or “T”)"
+          aria-label="Find a shortcut"
+        />
+        {!main.length && !card.length && <p className="hint">No shortcut for “{find}”.</p>}
         <div className="shortcut-list">
-          {SHORTCUTS.map(([k, label]) => (
+          {main.map(([k, label]) => (
             <div key={k} className="shortcut-row">
               <span>{label}</span>
               <span className="kbd">{k}</span>
             </div>
           ))}
         </div>
-        <div className="admin-h">On a website (after pressing J)</div>
+        {card.length > 0 && <div className="admin-h">On a website (after pressing J)</div>}
         <div className="shortcut-list">
-          {CARD_SHORTCUTS.map(([k, label]) => (
+          {card.map(([k, label]) => (
             <div key={k} className="shortcut-row">
               <span>{label}</span>
               <span className="kbd">{k}</span>
@@ -314,7 +332,7 @@ export function ShortcutsModal({ onClose }: { onClose: () => void }) {
           ))}
         </div>
         <div className="modal-actions">
-          <button className="btn btn-secondary" onClick={onClose} autoFocus>Close</button>
+          <button className="btn btn-secondary" onClick={onClose}>Close</button>
         </div>
       </div>
     </div>
