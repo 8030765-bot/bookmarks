@@ -326,7 +326,7 @@ export function PasswordMaker() {
           <input type="range" min={3} max={7} value={opts.words} onChange={(e) => setOpts({ ...opts, words: Number(e.target.value) })} />
         </>
       )}
-      <p className="tool-hint">Made on your device — it's never sent anywhere. Use a different password for every site.</p>
+      <p className="tool-hint">Made on your device — it&apos;s never sent anywhere. Use a different password for every site.</p>
     </div>
   );
 }

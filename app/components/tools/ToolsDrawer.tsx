@@ -55,7 +55,7 @@ function ToolGrid({ onOpen }: { onOpen: (id: string) => void }) {
           onKeyDown={(e) => { if (e.key === "Enter" && list[0] && !editing) onOpen(list[0].id); }} />
         <button className={`pick ${editing ? "on" : ""}`} onClick={() => setEditing(!editing)}>{editing ? "Done" : "Choose"}</button>
       </div>
-      {editing && <p className="tool-hint">Untick the tools you don't use to hide them.</p>}
+      {editing && <p className="tool-hint">Untick the tools you don&apos;t use to hide them.</p>}
       {groups.map((g) => (
         <section key={g} className="tool-group">
           <h4>{g}</h4>

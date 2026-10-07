@@ -226,7 +226,7 @@ export function Weekend() {
   return (
     <div className="center">
       {isWeekend ? (
-        <div className="timer-big">🎉 It's the weekend!</div>
+        <div className="timer-big">🎉 It&apos;s the weekend!</div>
       ) : (
         <>
           <div className="timer-big">{untilLabel(ms)}</div>

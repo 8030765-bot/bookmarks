@@ -1399,7 +1399,7 @@ function CommunityTab({
           </div>
 
           <h3 className="admin-h">Flair</h3>
-          <p className="row-sub">A short title shown next to someone's name, like “Link hunter”.</p>
+          <p className="row-sub">A short title shown next to someone&apos;s name, like “Link hunter”.</p>
           <div className="status-row">
             <input value={flairUser} onChange={(e) => setFlairUser(e.target.value)} placeholder="username" list="flair-users" maxLength={20} />
             <input value={flairText} onChange={(e) => setFlairText(e.target.value)} placeholder="Flair (empty to remove)" maxLength={24} />

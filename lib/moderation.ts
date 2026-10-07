@@ -264,7 +264,7 @@ export async function deleteInvite(code: string) {
   await getRedis().hdel(INVITES_KEY, code.toUpperCase());
 }
 /** Check an invite code and use one of its places. */
-export async function useInvite(code: string) {
+export async function redeemInvite(code: string) {
   const c = code.trim().toUpperCase();
   const inv = c ? await getRedis().hget<Invite>(INVITES_KEY, c) : null;
   if (!inv || inv.uses >= inv.maxUses || (inv.expiresAt && Date.parse(inv.expiresAt) < Date.now())) {
@@ -278,7 +278,7 @@ export async function checkSignup(username: string, invite?: string) {
   const f = await getFlags();
   await checkNameAllowed(username);
   if (f.signups === "closed") throw new Error("Sign-ups are closed at the moment — ask an admin");
-  if (f.signups === "invite") await useInvite(invite || "");
+  if (f.signups === "invite") await redeemInvite(invite || "");
 }
 
 /* ---------- daily stats for the dashboard charts ---------- */
