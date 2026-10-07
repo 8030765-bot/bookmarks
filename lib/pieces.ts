@@ -41,6 +41,8 @@ export interface PieceStyle {
   size?: number;
   /** on phones (pieces stack top to bottom) */
   phone?: "show" | "hide";
+  /** a piece from another design keeps that design's own colours and font */
+  keep?: boolean;
 }
 
 export interface DesignPiece {
@@ -57,7 +59,13 @@ export interface DesignPiece {
   hidden?: boolean;
   style?: PieceStyle;
   props?: Record<string, PropValue>;
+  /** inside an auto layout frame (its id): then x/y don't matter, the frame places it */
+  parent?: string;
+  /** how it's sized inside an auto layout frame (or, for a frame, around its contents) */
+  sizeW?: Sizing;
+  sizeH?: Sizing;
 }
+export type Sizing = "fixed" | "fill" | "hug";
 
 export interface DesignCanvas {
   bg: string;
@@ -71,6 +79,8 @@ export interface DesignCanvas {
   tone: "dark" | "light";
   /** minimum page height in rows */
   rows: number;
+  /** pieces from other designs take on this page's colours and font */
+  blend?: boolean;
 }
 
 export interface BuiltDesign {
@@ -88,7 +98,7 @@ export interface BuiltDesign {
   pieces: DesignPiece[];
 }
 
-export const DEFAULT_CANVAS: DesignCanvas = { bg: "#0f1115", bgImage: "", bgPattern: "none", text: "#e9ecf2", accent: "#7c6cff", font: "inter", tone: "dark", rows: 60 };
+export const DEFAULT_CANVAS: DesignCanvas = { bg: "#0f1115", bgImage: "", bgPattern: "none", text: "#e9ecf2", accent: "#7c6cff", font: "inter", tone: "dark", rows: 60, blend: true };
 
 /** Fonts a design (or one piece) can use. Google ones load only when picked. */
 export const FONT_CHOICES: { id: string; label: string; family: string; google?: string }[] = [
@@ -202,6 +212,18 @@ const viewer = (id: string, name: string, emoji: string, folder: string, look: s
 
 export const PARTS: PartDef[] = [
   /* ---------- basic blocks ---------- */
+  {
+    id: "stack", name: "Auto layout frame", emoji: "⬚", folder: "Basic blocks", w: 12, h: 8,
+    blurb: "Lines up whatever you drop in it in a row or a column, evenly spaced (Shift A).",
+    props: [
+      { key: "dir", label: "Direction", type: "select", def: "row", options: [["row", "→ Across"], ["column", "↓ Down"]] },
+      { key: "gap", label: "Gap", type: "number", def: 12, min: 0, max: 120 },
+      { key: "pad", label: "Padding", type: "number", def: 12, min: 0, max: 120 },
+      { key: "align", label: "Line up", type: "select", def: "start", options: [["start", "Start"], ["center", "Middle"], ["end", "End"], ["stretch", "Stretch"]] },
+      { key: "justify", label: "Spread", type: "select", def: "start", options: [["start", "Packed at the start"], ["center", "Packed in the middle"], ["end", "Packed at the end"], ["between", "Space between"]] },
+      { key: "wrap", label: "Wrap onto new lines", type: "bool", def: false },
+    ],
+  },
   { id: "topbar", name: "Top bar", emoji: "🧭", folder: "Basic blocks", blurb: "The whole top bar: logo, search, buttons and your profile.", w: 24, h: 4, overflow: true },
   { id: "search", name: "Search bar", emoji: "🔍", folder: "Basic blocks", blurb: "Search every website.", w: 10, h: 4, overflow: true, props: [{ key: "placeholder", label: "Placeholder", type: "text", def: "" }, { key: "big", label: "Big", type: "bool", def: false }] },
   { id: "title", name: "Site title", emoji: "🏷️", folder: "Basic blocks", blurb: "The site's name.", w: 12, h: 5, props: [size("l"), align(), { key: "gradient", label: "Rainbow text", type: "bool", def: false }] },
@@ -340,7 +362,8 @@ export function defaultProps(part: PartDef): Record<string, PropValue> {
 }
 
 /* ---------- starting points: each built-in design, rebuilt from pieces ---------- */
-type T = [part: string, x: number, y: number, w: number, h: number, props?: Record<string, PropValue>, style?: PieceStyle];
+type Extra = { key?: string; parent?: string; sizeW?: Sizing; sizeH?: Sizing };
+type T = [part: string, x: number, y: number, w: number, h: number, props?: Record<string, PropValue>, style?: PieceStyle, extra?: Extra];
 const TEMPLATES: Record<string, { canvas: Partial<DesignCanvas>; pieces: T[] }> = {
   blank: { canvas: {}, pieces: [] },
   classic: {
@@ -380,7 +403,10 @@ const TEMPLATES: Record<string, { canvas: Partial<DesignCanvas>; pieces: T[] }> 
     canvas: { bg: "#0d1020", bgPattern: "aurora", text: "#eef0ff", accent: "#8b7bff", font: "grotesk" },
     pieces: [
       ["blob", 0, 0, 10, 16, { a: "#7c6cff", b: "#ff5c9a", blur: 60 }],
-      ["logo", 1, 1, 6, 3], ["search", 7, 1, 10, 3], ["bell", 19, 1, 2, 3], ["more", 20, 1, 2, 3], ["profile", 22, 1, 2, 3],
+      // the top row is an auto layout frame: the search stretches, the buttons hug the right
+      ["stack", 1, 1, 22, 3, { dir: "row", gap: 8, pad: 0, align: "center" }, undefined, { key: "top" }],
+      ["logo", 0, 0, 6, 3, undefined, undefined, { parent: "top" }], ["search", 0, 0, 10, 3, undefined, undefined, { parent: "top", sizeW: "fill" }],
+      ["bell", 0, 0, 2, 3, undefined, undefined, { parent: "top" }], ["more", 0, 0, 2, 3, undefined, undefined, { parent: "top" }], ["profile", 0, 0, 2, 3, undefined, undefined, { parent: "top" }],
       ["greeting", 1, 6, 12, 5, { size: "l" }], ["clock", 16, 5, 7, 7, { size: "l" }],
       ["apps", 1, 12, 14, 12], ["pomodoro", 16, 13, 7, 11],
       ["folders", 1, 25, 22, 40], ["viewer", 2, 8, 20, 40],
@@ -407,12 +433,18 @@ export function makePiece(partId: string, x: number, y: number, z: number, over:
 
 export function templateDesign(key: string): Pick<BuiltDesign, "canvas" | "pieces"> {
   const t = TEMPLATES[key] || TEMPLATES.blank;
-  const pieces = t.pieces.map(([part, x, y, w, h, props, style], i) => {
+  const keys = new Map<string, string>();
+  const pieces = t.pieces.map(([part, x, y, w, h, props, style, extra], i) => {
     const p = makePiece(part, x, y, i + 1, { w, h });
     if (props) p.props = { ...p.props, ...props };
     if (style) p.style = { ...p.style, ...style };
+    if (extra?.key) keys.set(extra.key, p.id);
+    if (extra?.parent) p.parent = extra.parent;
+    if (extra?.sizeW) p.sizeW = extra.sizeW;
+    if (extra?.sizeH) p.sizeH = extra.sizeH;
     return p;
   });
+  for (const p of pieces) if (p.parent) p.parent = keys.get(p.parent);
   const canvas = { ...DEFAULT_CANVAS, ...t.canvas };
   canvas.rows = Math.max(canvas.rows, ...pieces.map((p) => Math.ceil(p.y + p.h) + 4));
   return { canvas, pieces };
@@ -420,6 +452,7 @@ export function templateDesign(key: string): Pick<BuiltDesign, "canvas" | "piece
 
 /* ---------- checking a design (the server does this before saving) ---------- */
 const COLOR = /^(#[0-9a-f]{3,8}|transparent)$/i;
+const SIZINGS = ["fixed", "fill", "hug"];
 const color = (v: unknown, fallback?: string) => (typeof v === "string" && COLOR.test(v.trim()) ? v.trim() : fallback);
 const num = (v: unknown, min: number, max: number, fallback?: number) => {
   const n = typeof v === "number" ? v : Number(v);
@@ -440,6 +473,7 @@ export function cleanStyle(raw: unknown): PieceStyle | undefined {
   if (color(r.accent)) s.accent = color(r.accent);
   if (color(r.borderColor)) s.borderColor = color(r.borderColor);
   if (r.glass === true) s.glass = true;
+  if (r.keep === true) s.keep = true;
   if (r.opacity !== undefined) s.opacity = num(r.opacity, 0.05, 1);
   if (r.radius !== undefined) s.radius = num(r.radius, 0, 999);
   if (r.borderWidth !== undefined) s.borderWidth = num(r.borderWidth, 0, 12);
@@ -462,6 +496,7 @@ export function cleanCanvas(raw: unknown): DesignCanvas {
     font: FONT_CHOICES.some((f) => f.id === r.font) ? String(r.font) : "inter",
     tone: r.tone === "light" ? "light" : "dark",
     rows: num(r.rows, 20, 600, 60)!,
+    blend: r.blend !== false,
   };
 }
 
@@ -487,6 +522,9 @@ export function cleanPieces(raw: unknown): DesignPiece[] {
     };
     if (typeof r.name === "string" && r.name.trim()) piece.name = r.name.trim().slice(0, 40);
     if (r.locked === true) piece.locked = true;
+    if (typeof r.parent === "string" && /^[a-z0-9]{3,24}$/i.test(r.parent)) piece.parent = r.parent;
+    if (SIZINGS.includes(String(r.sizeW))) piece.sizeW = r.sizeW as Sizing;
+    if (SIZINGS.includes(String(r.sizeH))) piece.sizeH = r.sizeH as Sizing;
     if (r.hidden === true) piece.hidden = true;
     const style = cleanStyle(r.style);
     if (style) piece.style = style;
@@ -513,16 +551,29 @@ export function cleanPieces(raw: unknown): DesignPiece[] {
     piece.props = props;
     out.push(piece);
   }
+  // a piece can only sit inside an auto layout frame that exists (and never inside itself)
+  const byId = new Map(out.map((p) => [p.id, p]));
+  for (const p of out) {
+    if (!p.parent) continue;
+    // walk up the frames: each must exist, be a frame, and not lead back here
+    const seen = new Set([p.id]);
+    let at: DesignPiece | undefined = byId.get(p.parent);
+    let ok = true;
+    while (ok) {
+      if (!at || at.part !== "stack" || seen.has(at.id)) { ok = false; break; }
+      seen.add(at.id);
+      if (!at.parent) break;
+      at = byId.get(at.parent);
+    }
+    if (!ok) delete p.parent;
+  }
   return out;
 }
 
-/** Every bit of text people wrote in a design (for the word filter). */
-export function designTexts(d: Pick<BuiltDesign, "pieces">): string[] {
-  const out: string[] = [];
-  for (const p of d.pieces) {
-    if (p.name) out.push(p.name);
-    const part = PART_BY_ID.get(p.part);
-    for (const def of part?.props || []) if (["text", "longtext"].includes(def.type) && typeof p.props?.[def.key] === "string") out.push(p.props[def.key] as string);
-  }
-  return out;
+/** The parts, written short, for the design builder's AI. */
+export function partsForAI(): string {
+  return PARTS.map((p) => {
+    const props = (p.props || []).filter((d) => !d.when).map((d) => `${d.key}${d.options ? `:${d.options.map(([k]) => k).join("|")}` : `:${d.type}`}`).join(", ");
+    return `- ${p.id} (${p.name}${p.design ? `, ${p.design} style` : ""}) ${p.w}x${p.h}${props ? ` {${props}}` : ""}`;
+  }).join("\n");
 }

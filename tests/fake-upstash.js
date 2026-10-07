@@ -119,6 +119,17 @@ http.createServer((req, res) => {
       // test controls: wipe everything, or pretend the free plan ran out
       if (req.url.startsWith("/__flush")) { kv.clear(); res.end('{"result":"OK"}'); return; }
       if (req.url.startsWith("/__quota/")) { quota = req.url.endsWith("/on"); res.end('{"result":"OK"}'); return; }
+      // a stand-in for the design builder's AI (so tests never use the internet)
+      if (req.url.startsWith("/__ai/")) {
+        const ask = JSON.parse(body || "{}");
+        const last = String(ask.messages?.[ask.messages.length - 1]?.content || "");
+        const out = /just chat/i.test(last)
+          ? { reply: "Try a big clock at the top! ", action: "none" }
+          : { reply: "Here's a cosy page", action: "replace", canvas: { bg: "#101828", text: "#ffffff", accent: "#ff8a3d" },
+              pieces: [{ part: "clock", x: 0, y: 0, w: 8, h: 6, props: { size: "xl" } }, { part: "folders", x: 0, y: 8, w: 24, h: 30 }, { part: "not-real", x: 0, y: 0, w: 2, h: 2 }] };
+        res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "```json\n" + JSON.stringify(out) + "\n```" } }] }));
+        return;
+      }
       if (quota) { res.statusCode = 400; res.end(JSON.stringify({ error: "ERR max requests limit exceeded. Limit: 500000, Usage: 500000" })); return; }
       const parsed = JSON.parse(body);
       if (req.url.startsWith("/pipeline") || req.url.startsWith("/multi-exec")) {

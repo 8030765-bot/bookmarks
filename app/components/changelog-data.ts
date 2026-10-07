@@ -1,6 +1,16 @@
 /** Updates to the site itself, newest first (shared by the changelog page and the "what's new" pop-up). */
 export const RELEASES: { version: string; date: string; title: string; items: string[] }[] = [
   {
+    version: "3.2", date: "2026-10", title: "The design builder, Figma style",
+    items: [
+      "The design builder now works like Figma: an endless canvas, layers and assets on the left, Design / Prototype / AI on the right, and the toolbar at the bottom",
+      "Auto layout (Shift A): put pieces in a frame and they line up in a row or column, evenly spaced — drag pieces in and out",
+      "Pieces from every design blend into your page's colours and font, so a mix looks like one design",
+      "Smooth zooming and panning, frame, shape and text tools, red spacing guides (hold Alt), and Figma's shortcuts",
+      "✨ AI in the builder: it can build a whole page, change what you picked, or give ideas (15 messages a day each)",
+    ],
+  },
+  {
     version: "3.1", date: "2026-10", title: "Build your own design",
     items: [
       "🎨 The design builder (Customize → Design → Build your own): make your own home page, Figma style",

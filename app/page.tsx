@@ -3418,6 +3418,7 @@ export default function HomePage() {
     }
     return (
       <CustomCanvas design={customDesignNow} render={renderPiece} className={builderPreview ? "cz-in-builder" : ""}
+        onLayout={builderPreview ? (rects, h) => window.parent?.postMessage({ type: "preview-rects", rects, h }, location.origin) : undefined}
         extraClass={(p) => (sectionHead && p.id === popupViewer?.id ? "cz-floating" : "")}>
         {sectionHead && popupViewer && <div className="cz-float-bg" onClick={closeSection} aria-hidden="true" />}
         {showPopup && (

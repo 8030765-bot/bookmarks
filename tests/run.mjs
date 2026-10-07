@@ -51,6 +51,7 @@ if (!process.env.BASE_URL) {
       UPSTASH_REDIS_REST_URL: FAKE,
       UPSTASH_REDIS_REST_TOKEN: "test",
       ADMIN_PASSWORD: "testadmin",
+      DESIGN_AI_URL: `${FAKE}/__ai/v1/chat/completions`,
       NEXT_TELEMETRY_DISABLED: "1",
     },
     stdio: ["ignore", "ignore", "inherit"],

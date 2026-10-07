@@ -1,18 +1,19 @@
 "use client";
 import { CSSProperties, PointerEvent as RPointerEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  BUILT_IN_DESIGNS, BuiltDesign, COLS, DEFAULT_CANVAS, DesignCanvas, DesignPiece, FONT_CHOICES, PARTS, PART_BY_ID, PART_FOLDERS, PartDef, PieceStyle, PropDef,
-  PropValue, ROW, TEMPLATE_LIST, makePiece, newPieceId, templateDesign,
+  BUILT_IN_DESIGNS, BUTTON_ACTIONS, BuiltDesign, COLS, DEFAULT_CANVAS, DesignCanvas, DesignPiece, FONT_CHOICES, PARTS, PART_BY_ID, PART_FOLDERS, PartDef,
+  PieceStyle, PropDef, PropValue, ROW, Sizing, TEMPLATE_LIST, makePiece, newPieceId, templateDesign,
 } from "@/lib/pieces";
-import { canvasRows, canvasStyle } from "../components/CustomCanvas";
+import { Rects, canvasRows, canvasStyle } from "../components/CustomCanvas";
 
 /**
- * 🎨 The design builder: a Figma-style editor for your own home page.
- *   left   — the parts library (folders of pieces) and the layers list
- *   middle — the canvas: your real home page, with boxes you drag, resize and select
- *   right  — settings for the page or for whatever is selected
- * Pieces snap to the grid; hold Ctrl (⌘ on a Mac) to place them freely,
- * with pink guides when edges line up.
+ * 🎨 The design builder — made to work like Figma.
+ *   left   — the file (pages = screen sizes, and the layers) and the assets (every part)
+ *   middle — an endless canvas you pan and zoom, with your real home page as the frame
+ *   bottom — the toolbar: move, hand, frame (auto layout), shapes, text, assets, AI
+ *   right  — Design (looks), Prototype (what buttons do) and ✨ AI
+ * Pieces snap to the grid; hold Ctrl (⌘) to place them freely with red
+ * guides. Shift A puts the picked pieces in an auto layout frame.
  */
 
 type Draft = Omit<BuiltDesign, "id" | "owner" | "createdAt" | "updatedAt"> & { id?: string; owner?: string; createdAt?: string; updatedAt?: string };
@@ -20,18 +21,26 @@ type Me = { user: string | null; role: string | null };
 type Lists = { staff: boolean; siteDefault: string; mine: BuiltDesign[]; gallery: BuiltDesign[]; pending?: BuiltDesign[] };
 type FolderLite = { id: string; name: string; emoji: string };
 type Device = "desktop" | "laptop" | "tablet" | "phone";
+type Tool = "move" | "hand" | "frame" | "rect" | "ellipse" | "line" | "text";
+type Box = { x: number; y: number; w: number; h: number };
+type ChatMsg = { role: "user" | "assistant"; text: string; before?: Draft; error?: boolean };
+type Usage = { limit: number; used: number; left: number | null; unlimited: boolean };
+
 const DEVICES: { id: Device; label: string; icon: string; w: number }[] = [
   { id: "desktop", label: "Big screen", icon: "🖥️", w: 1440 },
-  { id: "laptop", label: "Laptop / Chromebook", icon: "💻", w: 1280 },
+  { id: "laptop", label: "Laptop", icon: "💻", w: 1280 },
   { id: "tablet", label: "Tablet", icon: "📱", w: 820 },
-  { id: "phone", label: "Phone (pieces stack)", icon: "📲", w: 390 },
+  { id: "phone", label: "Phone", icon: "📲", w: 390 },
 ];
 const SWATCHES = ["#ffffff", "#0f1115", "#1c2030", "#7c6cff", "#4dabff", "#3dd68c", "#ffb84d", "#ff5c7a", "#e879f9", "#2dd4bf", "#f7f3ea", "#1d2330"];
-const SNAP_PX = 6;
 const VIEWERS = ["viewer", "nova-page", "orbit-window", "journal-section", "term-dir"];
+const ACTION_KEYS = ["action", "value", "folder", "section", "design", "newTab"];
+const VIEWER_KEYS = ["mode", "look", "empty"];
+const SNAP_PX = 6;
 const round2 = (n: number) => Math.round(n * 100) / 100;
-const capture = (e: RPointerEvent) => { try { (e.target as HTMLElement).setPointerCapture(e.pointerId); } catch {} };
 const clamp = (n: number, a: number, b: number) => Math.min(b, Math.max(a, n));
+const capture = (e: RPointerEvent) => { try { (e.target as HTMLElement).setPointerCapture(e.pointerId); } catch {} };
+const isTyping = (t: EventTarget | null) => { const el = t as HTMLElement | null; return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable); };
 
 async function api<T = Record<string, unknown>>(url: string, body?: unknown): Promise<T> {
   const r = await fetch(url, body === undefined ? { cache: "no-store" } : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -40,17 +49,30 @@ async function api<T = Record<string, unknown>>(url: string, body?: unknown): Pr
   return j as T;
 }
 
+/** What kind of layer a part is, for its little icon (like Figma's layer icons). */
+function layerIcon(p: DesignPiece, part?: PartDef) {
+  if (!part) return "▫";
+  if (part.id === "stack") return p.props?.dir === "column" ? "☰" : "⫼";
+  if (["heading", "text", "title", "subtitle", "greeting"].includes(part.id)) return "T";
+  if (["box", "glass", "gradient", "pattern"].includes(part.id)) return "▭";
+  if (part.id === "circle" || part.id === "blob") return "○";
+  if (part.id === "line" || part.id === "divider") return "╱";
+  if (part.id === "image" || part.id === "bgimage") return "🖼";
+  if (part.design) return "◈";
+  if (part.folder === "Functions & buttons") return "◉";
+  return "#";
+}
+
 /* ---------- a tiny drawing of a design, for lists and the gallery ---------- */
 export function DesignMini({ d, className = "" }: { d: Pick<BuiltDesign, "canvas" | "pieces">; className?: string }) {
-  // the top of the page on a laptop-sized screen
   const rows = 55;
   return (
-    <div className={`bl-mini ${className}`} style={{ ...canvasStyle(d.canvas), aspectRatio: "16 / 11" } as CSSProperties}>
-      {d.pieces.filter((p) => !p.hidden && p.y < rows).sort((a, b) => a.z - b.z).map((p) => {
+    <div className={`fg-mini ${className}`} style={{ ...canvasStyle(d.canvas), aspectRatio: "16 / 11" } as CSSProperties}>
+      {d.pieces.filter((p) => !p.hidden && !p.parent && p.y < rows).sort((a, b) => a.z - b.z).map((p) => {
         const part = PART_BY_ID.get(p.part);
         const tone = part?.design ? "design" : part?.folder === "Functions & buttons" ? "btn" : part?.deco ? "deco" : part?.folder === "Widgets" ? "widget" : "block";
         return (
-          <span key={p.id} className={`bl-mini-p ${tone}`} style={{
+          <span key={p.id} className={`fg-mini-p ${tone}`} style={{
             left: `${(p.x / COLS) * 100}%`, top: `${(p.y / rows) * 100}%`, width: `${(p.w / COLS) * 100}%`, height: `${(p.h / rows) * 100}%`,
             background: p.style?.bg || undefined, borderRadius: p.style?.radius !== undefined ? Math.min(p.style.radius, 99) / 4 : undefined,
           }} />
@@ -60,63 +82,93 @@ export function DesignMini({ d, className = "" }: { d: Pick<BuiltDesign, "canvas
   );
 }
 
-/* ---------- small form bits for the settings panel ---------- */
-function Row({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
-  return <label className="bl-row" title={hint}><span>{label}</span><div>{children}</div></label>;
-}
-function ColorField({ value, onChange, allowNone = true, placeholder = "none" }: { value?: string; onChange: (v: string | undefined) => void; allowNone?: boolean; placeholder?: string }) {
-  const [text, setText] = useState(value || "");
-  useEffect(() => setText(value || ""), [value]);
-  const six = value && /^#[0-9a-f]{6}/i.test(value) ? value.slice(0, 7) : "#000000";
+/* ---------- Figma-style property controls ---------- */
+function Field({ icon, value, onChange, min, max, step = 1, suffix, title, mixed }: {
+  icon?: ReactNode; value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number; suffix?: string; title?: string; mixed?: boolean;
+}) {
+  const [text, setText] = useState(mixed ? "Mixed" : String(value));
+  useEffect(() => setText(mixed ? "Mixed" : String(value)), [value, mixed]);
+  const commit = (t: string) => { const n = Number(t); if (Number.isFinite(n) && t.trim() !== "") onChange(clamp(n, min ?? -1e9, max ?? 1e9)); else setText(mixed ? "Mixed" : String(value)); };
+  // drag the little label sideways to scrub the number, like Figma
+  const scrub = (e: RPointerEvent) => {
+    const start = e.clientX, v0 = value;
+    capture(e);
+    const move = (ev: PointerEvent) => onChange(clamp(round2(v0 + Math.round((ev.clientX - start) / 2) * step), min ?? -1e9, max ?? 1e9));
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
   return (
-    <div className="bl-color">
-      <span className="bl-color-sw" style={{ background: value || "transparent" }}>
-        <input type="color" value={six} onChange={(e) => onChange(e.target.value + (value && value.length === 9 ? value.slice(7) : ""))} aria-label="Pick a colour" />
-      </span>
-      <input className="bl-input bl-hex" value={text} placeholder={placeholder} spellCheck={false}
-        onChange={(e) => { setText(e.target.value); if (/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(e.target.value.trim())) onChange(e.target.value.trim()); }}
-        onBlur={() => setText(value || "")} />
-      {allowNone && value && <button className="bl-x" title="No colour" onClick={() => onChange(undefined)}>×</button>}
-      <div className="bl-swatches">
-        {SWATCHES.map((c) => <button key={c} className="bl-swatch" style={{ background: c }} title={c} onClick={() => onChange(c)} />)}
-      </div>
-    </div>
-  );
-}
-function NumberField({ value, onChange, min, max, step = 1, suffix }: { value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number; suffix?: string }) {
-  const [text, setText] = useState(String(value));
-  useEffect(() => setText(String(value)), [value]);
-  const commit = (t: string) => { const n = Number(t); if (Number.isFinite(n)) onChange(clamp(n, min ?? -1e9, max ?? 1e9)); else setText(String(value)); };
-  return (
-    <span className="bl-num">
-      <input className="bl-input" inputMode="decimal" value={text} onChange={(e) => setText(e.target.value)} onBlur={(e) => commit(e.target.value)}
+    <label className="fg-field" title={title}>
+      {icon !== undefined && <span className="fg-field-icon" onPointerDown={scrub}>{icon}</span>}
+      <input value={text} inputMode="decimal" onChange={(e) => setText(e.target.value)} onBlur={(e) => commit(e.target.value)} onFocus={(e) => e.target.select()}
         onKeyDown={(e) => {
-          if (e.key === "Enter") commit((e.target as HTMLInputElement).value);
+          if (e.key === "Enter") { commit((e.target as HTMLInputElement).value); (e.target as HTMLInputElement).blur(); }
           if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); onChange(clamp(round2(value + (e.key === "ArrowUp" ? 1 : -1) * step * (e.shiftKey ? 10 : 1)), min ?? -1e9, max ?? 1e9)); }
         }} />
       {suffix && <em>{suffix}</em>}
-    </span>
+    </label>
   );
 }
-function Slider({ value, onChange, min, max, step = 1, suffix = "" }: { value: number; onChange: (v: number) => void; min: number; max: number; step?: number; suffix?: string }) {
+function Swatch({ value, onChange }: { value?: string; onChange: (v: string) => void }) {
+  const six = value && /^#[0-9a-f]{6}/i.test(value) ? value.slice(0, 7) : "#000000";
   return (
-    <span className="bl-slider">
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
-      <em>{value}{suffix}</em>
+    <span className="fg-swatch" style={{ "--sw": value || "transparent" } as CSSProperties}>
+      <input type="color" value={six} onChange={(e) => onChange(e.target.value + (value && value.length === 9 ? value.slice(7) : ""))} aria-label="Pick a colour" />
     </span>
   );
 }
-function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
-  return <button type="button" role="switch" aria-checked={on} className={`bl-toggle ${on ? "on" : ""}`} onClick={() => onChange(!on)}><span /></button>;
+function ColorRow({ value, onChange, onRemove, placeholder = "—" }: { value?: string; onChange: (v: string) => void; onRemove?: () => void; placeholder?: string }) {
+  const [text, setText] = useState((value || "").replace("#", "").toUpperCase());
+  const [pal, setPal] = useState(false);
+  useEffect(() => setText((value || "").replace("#", "").toUpperCase()), [value]);
+  return (
+    <div className="fg-colorrow">
+      <div className="fg-colorbox">
+        <Swatch value={value} onChange={onChange} />
+        <input className="fg-hex" value={text} placeholder={placeholder} spellCheck={false}
+          onChange={(e) => { setText(e.target.value); const v = `#${e.target.value.replace("#", "").trim()}`; if (/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(v)) onChange(v.toLowerCase()); }}
+          onBlur={() => setText((value || "").replace("#", "").toUpperCase())} />
+        <button className="fg-mini-btn" title="Colour palette" onClick={() => setPal(!pal)}>⋮</button>
+      </div>
+      {onRemove && <button className="fg-icon-btn" title="Remove" onClick={onRemove}>−</button>}
+      {pal && (
+        <div className="fg-palette">
+          {SWATCHES.map((c) => <button key={c} style={{ background: c }} title={c} onClick={() => { onChange(c); setPal(false); }} />)}
+        </div>
+      )}
+    </div>
+  );
 }
-function Section({ title, children, open: startOpen = true }: { title: string; children: ReactNode; open?: boolean }) {
+function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label?: string }) {
+  return (
+    <label className="fg-check">
+      <button type="button" role="switch" aria-checked={on} className={`fg-toggle ${on ? "on" : ""}`} onClick={() => onChange(!on)}><span /></button>
+      {label && <span>{label}</span>}
+    </label>
+  );
+}
+function Seg<T extends string>({ value, options, onChange, title }: { value: T; options: [T, ReactNode, string?][]; onChange: (v: T) => void; title?: string }) {
+  return (
+    <div className="fg-seg" role="group" aria-label={title}>
+      {options.map(([v, l, tip]) => <button key={v} title={tip} className={value === v ? "on" : ""} onClick={() => onChange(v)}>{l}</button>)}
+    </div>
+  );
+}
+function Panel({ title, children, action, open: startOpen = true }: { title: string; children?: ReactNode; action?: ReactNode; open?: boolean }) {
   const [open, setOpen] = useState(startOpen);
   return (
-    <section className={`bl-sec ${open ? "open" : ""}`}>
-      <button className="bl-sec-head" onClick={() => setOpen(!open)}><span>{title}</span><i>{open ? "▾" : "▸"}</i></button>
-      {open && <div className="bl-sec-body">{children}</div>}
+    <section className={`fg-sec ${open ? "open" : ""}`}>
+      <div className="fg-sec-head">
+        <button onClick={() => setOpen(!open)}>{title}</button>
+        <span>{action}</span>
+      </div>
+      {open && children && <div className="fg-sec-body">{children}</div>}
     </section>
   );
+}
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return <div className="fg-row"><span>{label}</span><div>{children}</div></div>;
 }
 
 /* ====================================================================== */
@@ -130,31 +182,48 @@ export default function Builder() {
   const [future, setFuture] = useState<Draft[]>([]);
   const [sel, setSel] = useState<string[]>([]);
   const [device, setDevice] = useState<Device>("laptop");
-  const [zoomPick, setZoomPick] = useState<"fit" | number>("fit");
-  const [stageW, setStageW] = useState(1000);
+  const [cam, setCam] = useState({ x: 0, y: 0, z: 0.6 });
+  const [animate, setAnimate] = useState(false);
+  const [tool, setTool] = useState<Tool>("move");
+  const [shapeMenu, setShapeMenu] = useState(false);
   const [mode, setMode] = useState<"edit" | "try">("edit");
-  const [leftTab, setLeftTab] = useState<"parts" | "layers">("parts");
+  const [leftTab, setLeftTab] = useState<"file" | "assets">("file");
+  const [rightTab, setRightTab] = useState<"design" | "prototype" | "ai">("design");
   const [q, setQ] = useState("");
-  const [openFolders, setOpenFolders] = useState<Set<string>>(() => new Set(["Basic blocks"]));
+  const [openFolders, setOpenFolders] = useState<Set<string>>(() => new Set(["Basic blocks", "Widgets"]));
+  const [collapsedLayers, setCollapsedLayers] = useState<Set<string>>(() => new Set());
+  const [renaming, setRenaming] = useState<string | null>(null);
   const [status, setStatus] = useState<"" | "saving" | "saved" | "error">("");
   const [dirty, setDirty] = useState(false);
   const [toast, setToast] = useState("");
   const [modal, setModal] = useState<"" | "start" | "gallery" | "help" | "share">("");
   const [galleryTab, setGalleryTab] = useState<"gallery" | "mine" | "pending">("gallery");
+  const [menu, setMenu] = useState<"" | "main" | "zoom">("");
   const [ready, setReady] = useState(0);
+  const [rects, setRects] = useState<Rects>({});
+  const [pageH, setPageH] = useState(0);
   const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] });
-  const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [marquee, setMarquee] = useState<Box | null>(null);
+  const [drawBox, setDrawBox] = useState<Box | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [showGrid, setShowGrid] = useState(true);
   const [previewState, setPreviewState] = useState<"home" | "folder" | "search">("home");
-  const [phoneH, setPhoneH] = useState(1600);
-  const [ctrlHeld, setCtrlHeld] = useState(false);
+  const [keys, setKeys] = useState({ ctrl: false, space: false, alt: false });
+  const [hoverId, setHoverId] = useState<string | null>(null);
+  const [dropInto, setDropInto] = useState<{ stack: string; index: number; line: Box } | null>(null);
+  const [ghost, setGhost] = useState<Box | null>(null);
+  const [chat, setChat] = useState<ChatMsg[]>([]);
+  const [aiText, setAiText] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [usage, setUsage] = useState<Usage | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+  const chatEnd = useRef<HTMLDivElement>(null);
   const clipboard = useRef<DesignPiece[]>([]);
   const layerDrag = useRef("");
-  const say = useCallback((m: string) => { setToast(m); window.clearTimeout((say as unknown as { t?: number }).t); (say as unknown as { t?: number }).t = window.setTimeout(() => setToast(""), 2600); }, []);
+  const toastTimer = useRef<number>();
+  const say = useCallback((m: string) => { setToast(m); window.clearTimeout(toastTimer.current); toastTimer.current = window.setTimeout(() => setToast(""), 2800); }, []);
 
   /* ---------- loading ---------- */
   const refreshLists = useCallback(() => api<Lists>("/api/designs").then(setLists).catch(() => {}), []);
@@ -164,53 +233,26 @@ export default function Builder() {
     api<{ folders?: FolderLite[] }>("/api/bookmarks").then((d) => setFolders((d.folders || []).map((f) => ({ id: f.id, name: f.name, emoji: f.emoji })))).catch(() => {});
     document.title = "Design builder";
   }, [refreshLists]);
-  // open a design from ?id=, or start fresh
-  useEffect(() => {
-    if (!me?.user || doc) return;
-    const id = new URLSearchParams(location.search).get("id");
-    if (id) {
-      api<{ design: BuiltDesign }>(`/api/designs?id=${id}`).then(({ design }) => {
-        if (design.owner === me.user!.toLowerCase()) openDoc(design);
-        else { openDoc({ ...templateDesign("blank"), name: `${design.name} (copy)`, emoji: design.emoji, canvas: design.canvas, pieces: design.pieces }); say("This is someone else's design — you're editing your own copy"); }
-      }).catch(() => setModal("start"));
-    } else setModal("start");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me]);
+  useEffect(() => { if (me?.user) api<Usage>("/api/designs/ai").then(setUsage).catch(() => {}); }, [me]);
 
   /* ---------- the document, with undo ---------- */
   const setDoc = useCallback((next: Draft | null, opts: { history?: boolean; before?: Draft | null } = {}) => {
     const prev = opts.before !== undefined ? opts.before : docRef.current;
     docRef.current = next;
     setDocState(next);
-    if (opts.history !== false && prev && next) {
-      setPast((p) => [...p.slice(-99), prev]);
-      setFuture([]);
-    }
+    if (opts.history !== false && prev && next) { setPast((p) => [...p.slice(-99), prev]); setFuture([]); }
     if (next) setDirty(true);
   }, []);
   const change = useCallback((fn: (d: Draft) => Draft, history = true) => {
     const cur = docRef.current;
-    if (!cur) return;
-    setDoc(fn(cur), { history });
+    if (cur) setDoc(fn(cur), { history });
   }, [setDoc]);
-  function openDoc(d: Draft) {
-    docRef.current = d;
-    setDocState(d);
-    setPast([]);
-    setFuture([]);
-    setSel([]);
-    setDirty(!d.id);
-    setModal("");
-    if (d.id) history.replaceState(null, "", `/builder?id=${d.id}`);
-  }
   const undo = useCallback(() => {
     setPast((p) => {
       if (!p.length || !docRef.current) return p;
       const prev = p[p.length - 1];
       setFuture((f) => [docRef.current!, ...f]);
-      docRef.current = prev;
-      setDocState(prev);
-      setDirty(true);
+      docRef.current = prev; setDocState(prev); setDirty(true);
       return p.slice(0, -1);
     });
   }, []);
@@ -219,14 +261,80 @@ export default function Builder() {
       if (!f.length || !docRef.current) return f;
       const next = f[0];
       setPast((p) => [...p, docRef.current!]);
-      docRef.current = next;
-      setDocState(next);
-      setDirty(true);
+      docRef.current = next; setDocState(next); setDirty(true);
       return f.slice(1);
     });
   }, []);
 
-  /* ---------- saving (automatic, a moment after each change) ---------- */
+  /* ---------- the camera: an endless canvas you pan and zoom ---------- */
+  const deviceW = DEVICES.find((d) => d.id === device)!.w;
+  const colW = deviceW / COLS;
+  const rows = doc ? canvasRows(doc) : 60;
+  const frameH = device === "phone" ? Math.max(800, pageH) : Math.max((rows + 12) * ROW, pageH);
+  const camRef = useRef(cam);
+  camRef.current = cam;
+  const moveCam = useCallback((next: { x: number; y: number; z: number }, smooth = false) => {
+    setAnimate(smooth);
+    setCam({ x: next.x, y: next.y, z: clamp(next.z, 0.05, 4) });
+    if (smooth) window.setTimeout(() => setAnimate(false), 260);
+  }, []);
+  const fit = useCallback((smooth = true) => {
+    const el = stageRef.current;
+    if (!el) return;
+    const z = clamp((el.clientWidth - 120) / deviceW, 0.08, 1);
+    moveCam({ z, x: (el.clientWidth - deviceW * z) / 2, y: 56 }, smooth);
+  }, [deviceW, moveCam]);
+  useEffect(() => { fit(true); }, [device, fit]);
+  const zoomAt = useCallback((factor: number, sx?: number, sy?: number, smooth = false) => {
+    const el = stageRef.current;
+    if (!el) return;
+    const c = camRef.current;
+    const px = sx ?? el.clientWidth / 2, py = sy ?? el.clientHeight / 2;
+    const z = clamp(c.z * factor, 0.05, 4);
+    // keep the point under the cursor still
+    moveCam({ z, x: px - ((px - c.x) / c.z) * z, y: py - ((py - c.y) / c.z) * z }, smooth);
+  }, [moveCam]);
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if ((e.target as HTMLElement).closest(".fg-menu")) return;
+      e.preventDefault();
+      const r = el.getBoundingClientRect();
+      if (e.ctrlKey || e.metaKey) zoomAt(Math.exp(-e.deltaY * 0.0022), e.clientX - r.left, e.clientY - r.top);
+      else {
+        const c = camRef.current;
+        const dx = e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX;
+        const dy = e.shiftKey && !e.deltaX ? 0 : e.deltaY;
+        moveCam({ ...c, x: c.x - dx, y: c.y - dy });
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [zoomAt, moveCam, doc]);
+
+  function openDoc(d: Draft) {
+    docRef.current = d;
+    setDocState(d);
+    setPast([]); setFuture([]); setSel([]); setChat([]);
+    setDirty(!d.id);
+    setModal("");
+    if (d.id) history.replaceState(null, "", `/builder?id=${d.id}`);
+    window.setTimeout(() => fit(false), 30);
+  }
+  useEffect(() => {
+    if (!me?.user || doc) return;
+    const id = new URLSearchParams(location.search).get("id");
+    if (id) {
+      api<{ design: BuiltDesign }>(`/api/designs?id=${id}`).then(({ design }) => {
+        if (design.owner === me.user!.toLowerCase()) openDoc(design);
+        else { openDoc({ name: `${design.name} (copy)`, emoji: design.emoji, canvas: design.canvas, pieces: design.pieces }); say("This is someone else's design — you're editing your own copy"); }
+      }).catch(() => setModal("start"));
+    } else setModal("start");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me]);
+
+  /* ---------- saving (by itself, a moment after each change) ---------- */
   const saving = useRef(false);
   const save = useCallback(async (): Promise<string | undefined> => {
     const d = docRef.current;
@@ -266,13 +374,14 @@ export default function Builder() {
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
-  /* ---------- the live preview (your real home page in a frame) ---------- */
+  /* ---------- the live preview (your real home page, inside the frame) ---------- */
   const post = useCallback((msg: unknown) => iframeRef.current?.contentWindow?.postMessage(msg, location.origin), []);
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
       if (e.origin !== location.origin) return;
       if (e.data?.type === "preview-ready") setReady((n) => n + 1);
-      if (e.data?.type === "preview-height" && typeof e.data.h === "number") setPhoneH(Math.max(600, Math.min(20000, e.data.h)));
+      if (e.data?.type === "preview-rects") { setRects(e.data.rects || {}); setPageH(Number(e.data.h) || 0); }
+      if (e.data?.type === "preview-height" && typeof e.data.h === "number") setPageH((h) => Math.max(h, e.data.h));
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
@@ -285,31 +394,33 @@ export default function Builder() {
   }, [doc, ready, post]);
   useEffect(() => {
     if (!ready) return;
-    const firstFolder = folders[0];
-    post({ type: "design-section", section: previewState === "folder" && firstFolder ? `folder:${firstFolder.id}` : "home", search: previewState === "search" ? "a" : "" });
+    post({ type: "design-section", section: previewState === "folder" && folders[0] ? `folder:${folders[0].id}` : "home", search: previewState === "search" ? "a" : "" });
   }, [previewState, ready, folders, post]);
-
-  /* ---------- canvas size and zoom ---------- */
-  const deviceW = DEVICES.find((d) => d.id === device)!.w;
-  const colW = deviceW / COLS;
-  const rows = doc ? canvasRows(doc) : 60;
-  const frameH = device === "phone" ? phoneH : (rows + 12) * ROW;
-  useEffect(() => {
-    const el = stageRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setStageW(el.clientWidth));
-    ro.observe(el);
-    setStageW(el.clientWidth);
-    return () => ro.disconnect();
-  }, [doc]);
-  const fitZoom = clamp((stageW - 64) / deviceW, 0.2, 1);
-  const zoom = zoomPick === "fit" ? fitZoom : zoomPick;
 
   /* ---------- pieces ---------- */
   const pieces = useMemo(() => doc?.pieces || [], [doc]);
+  const byId = useMemo(() => new Map(pieces.map((p) => [p.id, p])), [pieces]);
+  const childrenOf = useCallback((id: string) => pieces.filter((p) => p.parent === id), [pieces]);
   const selected = pieces.filter((p) => sel.includes(p.id));
   const one = selected.length === 1 ? selected[0] : null;
   const maxZ = () => Math.max(0, ...(docRef.current?.pieces || []).map((p) => p.z));
+  /** where a piece is on the frame, in pixels (frames place their pieces, so those come from the page) */
+  const rectOf = useCallback((p: DesignPiece): Box | null => {
+    if (p.parent || p.sizeW === "hug" || p.sizeH === "hug") {
+      const r = rects[p.id];
+      if (r) return r;
+      if (p.parent) return null;
+    }
+    return { x: p.x * colW, y: p.y * ROW, w: p.w * colW, h: p.h * ROW };
+  }, [rects, colW]);
+  const descendants = useCallback((id: string): Set<string> => {
+    const out = new Set<string>();
+    const walk = (pid: string) => { for (const c of pieces) if (c.parent === pid && !out.has(c.id)) { out.add(c.id); walk(c.id); } };
+    walk(id);
+    return out;
+  }, [pieces]);
+  /** a piece and everything inside it */
+  const withKids = (ids: string[]) => { const all = new Set(ids); for (const id of ids) descendants(id).forEach((c) => all.add(c)); return all; };
   const updatePieces = (ids: string[], fn: (p: DesignPiece) => DesignPiece, history = true) =>
     change((d) => ({ ...d, pieces: d.pieces.map((p) => (ids.includes(p.id) ? fn(p) : p)) }), history);
   const setProp = (id: string, key: string, v: PropValue) => updatePieces([id], (p) => ({ ...p, props: { ...p.props, [key]: v } }));
@@ -318,52 +429,70 @@ export default function Builder() {
     for (const k of Object.keys(style) as (keyof PieceStyle)[]) if (style[k] === undefined) delete style[k];
     return { ...p, style };
   });
-  function addPart(partId: string, at?: { x: number; y: number }) {
+  /** the first empty spot, from the top of what you're looking at */
+  function freeSpot(w: number, h: number): { x: number; y: number } {
+    const from = Math.max(0, Math.floor(((-camRef.current.y + 40) / camRef.current.z) / ROW));
+    const solid = (docRef.current?.pieces || []).filter((o) => !o.hidden && !o.parent && !PART_BY_ID.get(o.part)?.deco && !(VIEWERS.includes(o.part) && o.props?.mode !== "inline"));
+    const free = (cx: number, cy: number) => solid.every((o) => cx + w <= o.x || cx >= o.x + o.w || cy + h <= o.y || cy >= o.y + o.h);
+    for (let cy = from; cy < from + 400; cy++) for (let cx = 0; cx <= COLS - Math.min(w, COLS); cx++) if (free(cx, cy)) return { x: cx, y: cy };
+    return { x: (COLS - w) / 2, y: from + 2 };
+  }
+  function addPart(partId: string, at?: { x: number; y: number }, size?: { w: number; h: number }) {
     const part = PART_BY_ID.get(partId);
     if (!part || !docRef.current) return;
-    let x: number, y: number;
-    if (at) { x = at.x - part.w / 2; y = at.y - part.h / 2; } else {
-      // clicked: the first empty spot from the top of what you're looking at
-      const st = stageRef.current;
-      const from = st ? Math.max(0, Math.floor((st.scrollTop / zoom) / ROW)) : 0;
-      const solid = docRef.current.pieces.filter((o) => !o.hidden && !PART_BY_ID.get(o.part)?.deco && !(VIEWERS.includes(o.part) && o.props?.mode !== "inline"));
-      const free = (cx: number, cy: number) => solid.every((o) => cx + part.w <= o.x || cx >= o.x + o.w || cy + part.h <= o.y || cy >= o.y + o.h);
-      let spot: { x: number; y: number } | null = null;
-      for (let cy = from; cy < from + 400 && !spot; cy++) for (let cx = 0; cx <= COLS - Math.min(part.w, COLS); cx++) if (free(cx, cy)) { spot = { x: cx, y: cy }; break; }
-      x = spot ? spot.x : (COLS - part.w) / 2;
-      y = spot ? spot.y : from + 2;
-    }
-    x = clamp(Math.round(x), 0, COLS - Math.min(part.w, COLS));
-    y = Math.max(0, Math.round(y));
-    const p = makePiece(partId, x, y, maxZ() + 1);
+    const w = size?.w ?? part.w, h = size?.h ?? part.h;
+    const spot = at ? { x: at.x - (size ? 0 : w / 2), y: at.y - (size ? 0 : h / 2) } : freeSpot(w, h);
+    const p = makePiece(partId, clamp(size ? spot.x : Math.round(spot.x), 0, COLS - Math.min(w, COLS)), Math.max(0, size ? spot.y : Math.round(spot.y)), maxZ() + 1, { w, h });
     change((d) => ({ ...d, pieces: [...d.pieces, p] }));
     setSel([p.id]);
     setMode("edit");
+    return p;
   }
   const removeSel = () => {
     const ids = selected.filter((p) => !p.locked).map((p) => p.id);
     if (!ids.length) { if (selected.length) say("🔒 Unlock it first"); return; }
-    change((d) => ({ ...d, pieces: d.pieces.filter((p) => !ids.includes(p.id)) }));
+    const gone = withKids(ids);
+    change((d) => ({ ...d, pieces: d.pieces.filter((p) => !gone.has(p.id)) }));
     setSel([]);
   };
-  const duplicateSel = (offset = 2) => {
-    if (!selected.length) return;
+  /** copies of pieces (with whatever's inside frames), with new ids */
+  function cloneSet(list: DesignPiece[], dx: number, dy: number) {
+    const all = Array.from(withKids(list.map((p) => p.id))).map((id) => byId.get(id) || list.find((p) => p.id === id)!).filter(Boolean);
+    const ids = new Map(all.map((p) => [p.id, newPieceId()]));
     let z = maxZ();
-    const copies = selected.map((p) => ({ ...p, id: newPieceId(), x: clamp(p.x + offset / 2, 0, COLS - p.w), y: p.y + offset, z: ++z, locked: false, name: p.name }));
-    change((d) => ({ ...d, pieces: [...d.pieces, ...copies] }));
-    setSel(copies.map((c) => c.id));
+    const roots = new Set(list.map((p) => p.id));
+    const copies = all.map((p) => ({
+      ...p, id: ids.get(p.id)!, z: ++z, locked: undefined,
+      parent: p.parent && ids.has(p.parent) ? ids.get(p.parent) : p.parent && byId.has(p.parent) ? p.parent : undefined,
+      ...(roots.has(p.id) && !p.parent ? { x: clamp(p.x + dx, 0, COLS - p.w), y: p.y + dy } : {}),
+    }));
+    return { copies, rootIds: list.map((p) => ids.get(p.id)!) };
+  }
+  const duplicateSel = () => {
+    if (!selected.length) return;
+    const { copies, rootIds } = cloneSet(selected, 1, 2);
+    change((d) => {
+      const out = [...d.pieces];
+      for (const c of copies) {
+        // a copy of something inside a frame goes right after the original
+        const i = rootIds.indexOf(c.id);
+        const src = i >= 0 ? selected[i] : undefined;
+        const at = src?.parent ? out.findIndex((x) => x.id === src.id) + 1 : out.length;
+        out.splice(at, 0, c);
+      }
+      return { ...d, pieces: out };
+    });
+    setSel(rootIds);
   };
   const paste = () => {
     if (!clipboard.current.length) return;
-    let z = maxZ();
-    const copies = clipboard.current.map((p) => ({ ...p, id: newPieceId(), y: p.y + 2, z: ++z }));
-    clipboard.current = copies;
+    const { copies, rootIds } = cloneSet(clipboard.current, 0, 2);
     change((d) => ({ ...d, pieces: [...d.pieces, ...copies] }));
-    setSel(copies.map((c) => c.id));
+    setSel(rootIds);
   };
   const layer = (how: "front" | "back" | "up" | "down") => {
     if (!selected.length || !docRef.current) return;
-    const order = [...docRef.current.pieces].sort((a, b) => a.z - b.z).map((p) => p.id);
+    const order = [...docRef.current.pieces].filter((p) => !p.parent).sort((a, b) => a.z - b.z).map((p) => p.id);
     const ids = new Set(sel);
     let next = order.filter((id) => !ids.has(id));
     const picked = order.filter((id) => ids.has(id));
@@ -371,10 +500,8 @@ export default function Builder() {
     else if (how === "back") next = [...picked, ...next];
     else {
       next = [...order];
-      const list = how === "up" ? [...picked].reverse() : picked;
-      for (const id of list) {
-        const i = next.indexOf(id);
-        const j = how === "up" ? i + 1 : i - 1;
+      for (const id of how === "up" ? [...picked].reverse() : picked) {
+        const i = next.indexOf(id), j = how === "up" ? i + 1 : i - 1;
         if (j < 0 || j >= next.length || ids.has(next[j])) continue;
         [next[i], next[j]] = [next[j], next[i]];
       }
@@ -382,14 +509,15 @@ export default function Builder() {
     const z = new Map(next.map((id, i) => [id, i + 1]));
     change((d) => ({ ...d, pieces: d.pieces.map((p) => ({ ...p, z: z.get(p.id) || p.z })) }));
   };
-  const align = (how: "left" | "center" | "right" | "top" | "middle" | "bottom" | "hdist" | "vdist" | "pageCenter") => {
-    if (!selected.length) return;
-    const xs = selected.map((p) => p.x), ys = selected.map((p) => p.y);
-    const minX = Math.min(...xs), maxR = Math.max(...selected.map((p) => p.x + p.w));
-    const minY = Math.min(...ys), maxB = Math.max(...selected.map((p) => p.y + p.h));
-    const ids = selected.filter((p) => !p.locked).map((p) => p.id);
+  const align = (how: "left" | "center" | "right" | "top" | "middle" | "bottom" | "hdist" | "vdist") => {
+    const list = selected.filter((p) => !p.parent && !p.locked);
+    if (!list.length) return;
+    // one piece lines up with the page; several line up with each other
+    const minX = list.length === 1 ? 0 : Math.min(...list.map((p) => p.x)), maxR = list.length === 1 ? COLS : Math.max(...list.map((p) => p.x + p.w));
+    const minY = Math.min(...list.map((p) => p.y)), maxB = Math.max(...list.map((p) => p.y + p.h));
+    const ids = list.map((p) => p.id);
     if (how === "hdist" || how === "vdist") {
-      const sorted = [...selected].sort((a, b) => (how === "hdist" ? a.x - b.x : a.y - b.y));
+      const sorted = [...list].sort((a, b) => (how === "hdist" ? a.x - b.x : a.y - b.y));
       const total = sorted.reduce((n, p) => n + (how === "hdist" ? p.w : p.h), 0);
       const gap = ((how === "hdist" ? maxR - minX : maxB - minY) - total) / Math.max(1, sorted.length - 1);
       let at = how === "hdist" ? minX : minY;
@@ -403,101 +531,230 @@ export default function Builder() {
         case "left": return { ...p, x: minX };
         case "right": return { ...p, x: round2(maxR - p.w) };
         case "center": return { ...p, x: round2((minX + maxR) / 2 - p.w / 2) };
-        case "top": return { ...p, y: minY };
-        case "bottom": return { ...p, y: round2(maxB - p.h) };
-        case "middle": return { ...p, y: round2((minY + maxB) / 2 - p.h / 2) };
-        case "pageCenter": return { ...p, x: round2((COLS - p.w) / 2) };
+        case "top": return list.length === 1 ? p : { ...p, y: minY };
+        case "bottom": return list.length === 1 ? p : { ...p, y: round2(maxB - p.h) };
+        case "middle": return list.length === 1 ? p : { ...p, y: round2((minY + maxB) / 2 - p.h / 2) };
         default: return p;
       }
     });
   };
 
-  /* ---------- dragging, resizing and box-selecting on the canvas ---------- */
-  const drag = useRef<{ kind: "move" | "resize" | "marquee"; dir?: string; sx: number; sy: number; start: Map<string, DesignPiece>; before: Draft; moved: boolean; additive?: boolean } | null>(null);
-  const toCanvas = (clientX: number, clientY: number) => {
-    const r = overlayRef.current!.getBoundingClientRect();
-    return { px: (clientX - r.left) / zoom, py: (clientY - r.top) / zoom };
+  /* ---------- auto layout (Shift A) ---------- */
+  function addAutoLayout() {
+    const list = selected.filter((p) => !p.locked);
+    if (!list.length) { if (addPart("stack")) say("⬚ Auto layout frame added — drop pieces into it"); return; }
+    const parent = list[0].parent;
+    const same = list.filter((p) => p.parent === parent);
+    const boxes = same.map((p) => ({ p, b: rectOf(p) || { x: p.x * colW, y: p.y * ROW, w: p.w * colW, h: p.h * ROW } }));
+    const minX = Math.min(...boxes.map((x) => x.b.x)), minY = Math.min(...boxes.map((x) => x.b.y));
+    const maxR = Math.max(...boxes.map((x) => x.b.x + x.b.w)), maxB = Math.max(...boxes.map((x) => x.b.y + x.b.h));
+    const spreadX = maxR - minX - Math.max(...boxes.map((x) => x.b.w)), spreadY = maxB - minY - Math.max(...boxes.map((x) => x.b.h));
+    const dir = spreadX >= spreadY ? "row" : "column";
+    const ordered = [...boxes].sort((a, b) => (dir === "row" ? a.b.x - b.b.x : a.b.y - b.b.y));
+    // keep roughly the gap they already had
+    let gap = 12;
+    if (ordered.length > 1) {
+      const gaps = ordered.slice(1).map((x, i) => (dir === "row" ? x.b.x - (ordered[i].b.x + ordered[i].b.w) : x.b.y - (ordered[i].b.y + ordered[i].b.h)));
+      gap = clamp(Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length), 0, 120);
+    }
+    const frame = makePiece("stack", round2(minX / colW), round2(minY / ROW), Math.max(...same.map((p) => p.z)), {
+      w: round2((maxR - minX) / colW), h: round2((maxB - minY) / ROW), parent,
+    });
+    frame.props = { ...frame.props, dir, gap, pad: 0, align: "start" };
+    if (parent) { frame.sizeW = "fixed"; frame.sizeH = "fixed"; }
+    const ids = new Set(same.map((p) => p.id));
+    change((d) => {
+      const rest = d.pieces.filter((p) => !ids.has(p.id));
+      const at = Math.min(...same.map((p) => d.pieces.findIndex((x) => x.id === p.id)));
+      const kids = ordered.map(({ p, b }) => ({ ...p, parent: frame.id, w: round2(b.w / colW), h: round2(b.h / ROW), sizeW: p.sizeW || "fixed" as Sizing, sizeH: p.sizeH || "fixed" as Sizing }));
+      rest.splice(Math.min(at, rest.length), 0, frame, ...kids);
+      return { ...d, pieces: rest };
+    });
+    setSel([frame.id]);
+    say(`⬚ Auto layout ${dir === "row" ? "→ across" : "↓ down"} — drag pieces in or out of it`);
+  }
+  function removeAutoLayout(stackId: string) {
+    const st = byId.get(stackId);
+    if (!st) return;
+    const kids = childrenOf(stackId);
+    change((d) => ({
+      ...d,
+      pieces: d.pieces.filter((p) => p.id !== stackId).map((p) => {
+        if (p.parent !== stackId) return p;
+        const r = rects[p.id];
+        if (st.parent) return { ...p, parent: st.parent };
+        return { ...p, parent: undefined, sizeW: undefined, sizeH: undefined, x: r ? round2(clamp(r.x / colW, 0, COLS - p.w)) : st.x, y: r ? round2(r.y / ROW) : st.y, z: st.z };
+      }),
+    }));
+    setSel(kids.map((k) => k.id));
+  }
+  /** put a piece into a frame, at a spot among its pieces */
+  const insertInto = (d: Draft, piece: DesignPiece, stack: string, index: number): Draft => {
+    const rest = d.pieces.filter((x) => x.id !== piece.id);
+    const sibs = rest.filter((x) => x.parent === stack);
+    const after = sibs[index];
+    const at = after ? rest.findIndex((x) => x.id === after.id) : sibs.length ? rest.findIndex((x) => x.id === sibs[sibs.length - 1].id) + 1 : rest.findIndex((x) => x.id === stack) + 1;
+    rest.splice(at, 0, { ...piece, parent: stack, sizeW: piece.sizeW || "fixed", sizeH: piece.sizeH || "fixed" });
+    return { ...d, pieces: rest };
   };
-  function startMove(e: RPointerEvent, p: DesignPiece) {
-    if (mode !== "edit" || e.button !== 0) return;
-    e.stopPropagation();
-    setCtxMenu(null);
-    let ids = sel;
-    if (e.shiftKey) { ids = sel.includes(p.id) ? sel.filter((x) => x !== p.id) : [...sel, p.id]; setSel(ids); return; }
-    if (!sel.includes(p.id)) { ids = [p.id]; setSel(ids); }
-    const movable = pieces.filter((x) => ids.includes(x.id) && !x.locked);
-    if (!movable.length) return;
+
+  /* ---------- the canvas: drag, resize, draw, box-select, pan ---------- */
+  type Drag = {
+    kind: "move" | "resize" | "marquee" | "pan" | "draw" | "child";
+    dir?: string; sx: number; sy: number; start: Map<string, DesignPiece>; before: Draft; moved: boolean; additive?: boolean;
+    cam?: { x: number; y: number }; startBox?: Box;
+  };
+  const drag = useRef<Drag | null>(null);
+  const toWorld = (clientX: number, clientY: number) => {
+    const el = overlayRef.current || stageRef.current!;
+    const r = el.getBoundingClientRect();
+    return overlayRef.current ? { px: (clientX - r.left) / cam.z, py: (clientY - r.top) / cam.z } : { px: (clientX - r.left - cam.x) / cam.z, py: (clientY - r.top - cam.y) / cam.z };
+  };
+  /** which auto layout frame (and where in it) a point is over */
+  function frameAt(px: number, py: number, skip: Set<string>): { stack: string; index: number; line: Box } | null {
+    const stacks = pieces.filter((p) => p.part === "stack" && !p.hidden && !skip.has(p.id)).map((p) => ({ p, r: rectOf(p) }))
+      .filter((x) => x.r && px >= x.r.x && px <= x.r.x + x.r.w && py >= x.r.y && py <= x.r.y + x.r.h);
+    if (!stacks.length) return null;
+    // the innermost one
+    stacks.sort((a, b) => a.r!.w * a.r!.h - b.r!.w * b.r!.h);
+    const { p: st, r } = stacks[0];
+    const row = st.props?.dir !== "column";
+    const kids = childrenOf(st.id).filter((k) => !skip.has(k.id)).map((k) => ({ k, r: rects[k.id] })).filter((x) => x.r);
+    let index = kids.length;
+    for (let i = 0; i < kids.length; i++) {
+      const kr = kids[i].r!;
+      if (row ? px < kr.x + kr.w / 2 : py < kr.y + kr.h / 2) { index = i; break; }
+    }
+    const pad = Number(st.props?.pad ?? 12);
+    const before = kids[index - 1]?.r, after = kids[index]?.r;
+    const line: Box = row
+      ? { x: after ? after.x - 2 : before ? before.x + before.w + 1 : r!.x + pad, y: r!.y + 4, w: 2 / cam.z, h: r!.h - 8 }
+      : { x: r!.x + 4, y: after ? after.y - 2 : before ? before.y + before.h + 1 : r!.y + pad, w: r!.w - 8, h: 2 / cam.z };
+    return { stack: st.id, index, line };
+  }
+  function startPan(e: RPointerEvent) {
     capture(e);
+    drag.current = { kind: "pan", sx: e.clientX, sy: e.clientY, start: new Map(), before: docRef.current!, moved: false, cam: { x: cam.x, y: cam.y } };
+  }
+  function startMove(e: RPointerEvent, p: DesignPiece) {
+    if (mode !== "edit" || e.button === 2) return;
+    if (e.button === 1 || keys.space || tool === "hand") { e.stopPropagation(); startPan(e); return; }
+    if (tool !== "move") return;
+    e.stopPropagation();
+    setCtxMenu(null); setMenu("");
+    // clicking a piece inside a frame picks the frame first, then (click again) the piece — like Figma
+    let target = p;
+    if (p.parent && !sel.includes(p.id) && !e.ctrlKey && !e.metaKey) {
+      let top = p;
+      while (top.parent && byId.get(top.parent) && !sel.includes(top.parent) && !sel.some((s) => byId.get(s)?.parent === top.parent)) top = byId.get(top.parent)!;
+      target = top;
+    }
+    let ids = sel;
+    if (e.shiftKey) { ids = sel.includes(target.id) ? sel.filter((x) => x !== target.id) : [...sel, target.id]; setSel(ids); return; }
+    if (!sel.includes(target.id)) { ids = [target.id]; setSel(ids); }
+    capture(e);
+    if (target.locked) return;
+    if (target.parent) {
+      drag.current = { kind: "child", sx: e.clientX, sy: e.clientY, start: new Map([[target.id, target]]), before: docRef.current!, moved: false, startBox: rectOf(target) || undefined };
+      return;
+    }
+    const movable = pieces.filter((x) => ids.includes(x.id) && !x.locked && !x.parent);
+    if (!movable.length) return;
     drag.current = { kind: "move", sx: e.clientX, sy: e.clientY, start: new Map(movable.map((x) => [x.id, x])), before: docRef.current!, moved: false };
   }
   function startResize(e: RPointerEvent, p: DesignPiece, dir: string) {
     if (mode !== "edit" || p.locked) return;
     e.stopPropagation();
     capture(e);
-    drag.current = { kind: "resize", dir, sx: e.clientX, sy: e.clientY, start: new Map([[p.id, p]]), before: docRef.current!, moved: false };
+    const r = rectOf(p);
+    // a piece inside a frame (or one that hugs) starts from where it really is
+    const base = p.parent || p.sizeW === "hug" || p.sizeH === "hug" ? { ...p, w: r ? round2(r.w / colW) : p.w, h: r ? round2(r.h / ROW) : p.h } : p;
+    drag.current = { kind: "resize", dir, sx: e.clientX, sy: e.clientY, start: new Map([[p.id, base]]), before: docRef.current!, moved: false };
   }
-  function startMarquee(e: RPointerEvent) {
-    if (mode !== "edit" || e.button !== 0) return;
-    setCtxMenu(null);
-    const { px, py } = toCanvas(e.clientX, e.clientY);
+  function onStageDown(e: RPointerEvent) {
+    if ((e.target as HTMLElement).closest(".fg-toolbar,.fg-menu,.fg-previewsel")) return;
+    setCtxMenu(null); setMenu(""); setShapeMenu(false);
+    if (e.button === 1 || keys.space || tool === "hand") { startPan(e); return; }
+    if (mode !== "edit" || e.button !== 0 || !docRef.current) return;
+    const { px, py } = toWorld(e.clientX, e.clientY);
+    if (tool !== "move") {
+      capture(e);
+      drag.current = { kind: "draw", sx: px, sy: py, start: new Map(), before: docRef.current!, moved: false };
+      setDrawBox({ x: px, y: py, w: 0, h: 0 });
+      return;
+    }
     capture(e);
     drag.current = { kind: "marquee", sx: px, sy: py, start: new Map(), before: docRef.current!, moved: false, additive: e.shiftKey };
     if (!e.shiftKey) setSel([]);
   }
-  /** Free placement: line edges up with other pieces (and the page's middle), Figma style. */
-  function snapToGuides(box: { l: number; t: number; w: number; h: number }, skip: Set<string>) {
+  /** free placement: line edges up with other pieces (and the page's middle) */
+  function snapToGuides(box: Box, skip: Set<string>) {
     const xs: number[] = [deviceW / 2, 0, deviceW], ys: number[] = [];
     for (const o of pieces) {
       if (skip.has(o.id) || o.hidden) continue;
-      xs.push(o.x * colW, (o.x + o.w / 2) * colW, (o.x + o.w) * colW);
-      ys.push(o.y * ROW, (o.y + o.h / 2) * ROW, (o.y + o.h) * ROW);
+      const r = rectOf(o);
+      if (!r) continue;
+      xs.push(r.x, r.x + r.w / 2, r.x + r.w);
+      ys.push(r.y, r.y + r.h / 2, r.y + r.h);
     }
-    const lim = SNAP_PX / zoom;
-    let dx = 0, dy = 0;
-    const gv: number[] = [], gh: number[] = [];
-    let best = lim + 1;
-    for (const edge of [box.l, box.l + box.w / 2, box.l + box.w]) for (const x of xs) { const d = x - edge; if (Math.abs(d) < Math.abs(best) && Math.abs(d) <= lim) { best = d; dx = d; } }
-    if (best <= lim) for (const edge of [box.l + dx, box.l + dx + box.w / 2, box.l + dx + box.w]) for (const x of xs) if (Math.abs(x - edge) < 0.5) gv.push(x);
-    best = lim + 1;
-    for (const edge of [box.t, box.t + box.h / 2, box.t + box.h]) for (const y of ys) { const d = y - edge; if (Math.abs(d) < Math.abs(best) && Math.abs(d) <= lim) { best = d; dy = d; } }
-    if (best <= lim) for (const edge of [box.t + dy, box.t + dy + box.h / 2, box.t + dy + box.h]) for (const y of ys) if (Math.abs(y - edge) < 0.5) gh.push(y);
+    const lim = SNAP_PX / cam.z;
+    let dx = 0, dy = 0, bx = lim + 1, by = lim + 1;
+    for (const edge of [box.x, box.x + box.w / 2, box.x + box.w]) for (const x of xs) { const d = x - edge; if (Math.abs(d) < Math.abs(bx) && Math.abs(d) <= lim) { bx = d; dx = d; } }
+    for (const edge of [box.y, box.y + box.h / 2, box.y + box.h]) for (const y of ys) { const d = y - edge; if (Math.abs(d) < Math.abs(by) && Math.abs(d) <= lim) { by = d; dy = d; } }
+    const gv = Math.abs(bx) <= lim ? xs.filter((x) => [box.x + dx, box.x + dx + box.w / 2, box.x + dx + box.w].some((e2) => Math.abs(x - e2) < 0.5)) : [];
+    const gh = Math.abs(by) <= lim ? ys.filter((y) => [box.y + dy, box.y + dy + box.h / 2, box.y + dy + box.h].some((e2) => Math.abs(y - e2) < 0.5)) : [];
     return { dx, dy, gv: Array.from(new Set(gv)), gh: Array.from(new Set(gh)) };
   }
   function onPointerMove(e: RPointerEvent) {
     const g = drag.current;
     if (!g) return;
     const free = e.ctrlKey || e.metaKey;
+    if (g.kind === "pan") { moveCam({ ...cam, x: g.cam!.x + (e.clientX - g.sx), y: g.cam!.y + (e.clientY - g.sy) }); return; }
+    const { px, py } = toWorld(e.clientX, e.clientY);
+    if (g.kind === "draw") {
+      g.moved = true;
+      let x = Math.min(px, g.sx), y = Math.min(py, g.sy), w = Math.abs(px - g.sx), h = Math.abs(py - g.sy);
+      if (!free) { const x2 = Math.round((x + w) / colW) * colW, y2 = Math.round((y + h) / ROW) * ROW; x = Math.round(x / colW) * colW; y = Math.round(y / ROW) * ROW; w = x2 - x; h = y2 - y; }
+      setDrawBox({ x, y, w, h });
+      return;
+    }
     if (g.kind === "marquee") {
-      const { px, py } = toCanvas(e.clientX, e.clientY);
       const r = { x: Math.min(px, g.sx), y: Math.min(py, g.sy), w: Math.abs(px - g.sx), h: Math.abs(py - g.sy) };
       setMarquee(r);
       if (r.w > 3 || r.h > 3) {
-        const hit = pieces.filter((p) => !p.hidden && p.x * colW < r.x + r.w && (p.x + p.w) * colW > r.x && p.y * ROW < r.y + r.h && (p.y + p.h) * ROW > r.y).map((p) => p.id);
+        const hit = pieces.filter((p) => !p.hidden && !p.parent && p.x * colW < r.x + r.w && (p.x + p.w) * colW > r.x && p.y * ROW < r.y + r.h && (p.y + p.h) * ROW > r.y).map((p) => p.id);
         setSel(g.additive ? Array.from(new Set([...sel, ...hit])) : hit);
       }
       return;
     }
-    const dxPx = (e.clientX - g.sx) / zoom, dyPx = (e.clientY - g.sy) / zoom;
-    if (!g.moved && Math.abs(dxPx) < 2 && Math.abs(dyPx) < 2) return;
+    const dxPx = (e.clientX - g.sx) / cam.z, dyPx = (e.clientY - g.sy) / cam.z;
+    if (!g.moved && Math.abs(dxPx) < 3 && Math.abs(dyPx) < 3) return;
     g.moved = true;
     const base = g.before;
+    if (g.kind === "child") {
+      // a piece inside a frame: slide it to a new place in the frame, into another frame, or out onto the page
+      const sb = g.startBox || { x: px, y: py, w: 80, h: 40 };
+      setGhost({ x: sb.x + dxPx, y: sb.y + dyPx, w: sb.w, h: sb.h });
+      setDropInto(frameAt(px, py, withKids(Array.from(g.start.keys()))));
+      return;
+    }
     if (g.kind === "move") {
       const group = Array.from(g.start.values());
-      const l = Math.min(...group.map((p) => p.x)) * colW + dxPx, t = Math.min(...group.map((p) => p.y)) * ROW + dyPx;
-      const w = (Math.max(...group.map((p) => p.x + p.w)) - Math.min(...group.map((p) => p.x))) * colW;
-      const h = (Math.max(...group.map((p) => p.y + p.h)) - Math.min(...group.map((p) => p.y))) * ROW;
+      const minX = Math.min(...group.map((p) => p.x)), maxR = Math.max(...group.map((p) => p.x + p.w)), minY = Math.min(...group.map((p) => p.y));
+      const box = { x: minX * colW + dxPx, y: minY * ROW + dyPx, w: (maxR - minX) * colW, h: (Math.max(...group.map((p) => p.y + p.h)) - minY) * ROW };
       let dc: number, dr: number;
       if (free) {
-        const s = snapToGuides({ l, t, w, h }, new Set(g.start.keys()));
+        const s = snapToGuides(box, withKids(Array.from(g.start.keys())));
         dc = (dxPx + s.dx) / colW; dr = (dyPx + s.dy) / ROW;
         setGuides({ v: s.gv, h: s.gh });
       } else {
         dc = Math.round(dxPx / colW); dr = Math.round(dyPx / ROW);
         setGuides({ v: [], h: [] });
       }
-      const minX = Math.min(...group.map((p) => p.x)), maxR = Math.max(...group.map((p) => p.x + p.w)), minY = Math.min(...group.map((p) => p.y));
       dc = clamp(dc, -minX, COLS - maxR);
       dr = Math.max(dr, -minY);
+      // one piece dragged over an auto layout frame drops inside it
+      setDropInto(group.length === 1 && group[0].part !== "stack" ? frameAt(px, py, withKids([group[0].id])) : group.length === 1 ? frameAt(px, py, withKids([group[0].id])) : null);
       setDoc({ ...base, pieces: base.pieces.map((p) => (g.start.has(p.id) ? { ...p, x: round2(p.x + dc), y: round2(p.y + dr) } : p)) }, { history: false });
     } else if (g.kind === "resize") {
       const p0 = Array.from(g.start.values())[0];
@@ -509,35 +766,78 @@ export default function Builder() {
       if (dir.includes("w")) { x = p0.x + dc; w = p0.w - dc; }
       if (dir.includes("n")) { y = p0.y + dr; h = p0.h - dr; }
       if (free) {
-        const s = snapToGuides({ l: x * colW, t: y * ROW, w: w * colW, h: h * ROW }, new Set([p0.id]));
+        const s = snapToGuides({ x: x * colW, y: y * ROW, w: w * colW, h: h * ROW }, new Set([p0.id]));
         if (dir.includes("e")) w += s.dx / colW;
         if (dir.includes("w")) { x += s.dx / colW; w -= s.dx / colW; }
         if (dir.includes("s")) h += s.dy / ROW;
         if (dir.includes("n")) { y += s.dy / ROW; h -= s.dy / ROW; }
         setGuides({ v: s.gv, h: s.gh });
       } else {
-        const r = (n: number) => Math.round(n);
-        if (dir.includes("e")) w = r(x + w) - x;
-        if (dir.includes("w")) { const nx = r(x); w += x - nx; x = nx; }
-        if (dir.includes("s")) h = r(y + h) - y;
-        if (dir.includes("n")) { const ny = r(y); h += y - ny; y = ny; }
+        if (dir.includes("e")) w = Math.round(x + w) - x;
+        if (dir.includes("w")) { const nx = Math.round(x); w += x - nx; x = nx; }
+        if (dir.includes("s")) h = Math.round(y + h) - y;
+        if (dir.includes("n")) { const ny = Math.round(y); h += y - ny; y = ny; }
         setGuides({ v: [], h: [] });
       }
-      const minW = free ? 0.5 : 1, minH = free ? 0.5 : 1;
+      const minW = free ? 0.25 : 1, minH = free ? 0.5 : 1;
       if (w < minW) { if (dir.includes("w")) x -= minW - w; w = minW; }
       if (h < minH) { if (dir.includes("n")) y -= minH - h; h = minH; }
       if (x < 0) { w += x; x = 0; }
       if (x + w > COLS) w = COLS - x;
       if (y < 0) { h += y; y = 0; }
-      setDoc({ ...base, pieces: base.pieces.map((p) => (p.id === p0.id ? { ...p, x: round2(x), y: round2(y), w: round2(w), h: round2(h) } : p)) }, { history: false });
+      const inFrame = !!p0.parent;
+      const keepSizing = inFrame || p0.part === "stack";
+      setDoc({
+        ...base,
+        pieces: base.pieces.map((p) => (p.id !== p0.id ? p : {
+          ...p, w: round2(w), h: round2(h),
+          ...(inFrame ? {} : { x: round2(x), y: round2(y) }),
+          // dragging a size by hand makes it a fixed size (in the direction you dragged)
+          ...(/[ew]/.test(dir) ? { sizeW: keepSizing ? "fixed" as Sizing : undefined } : {}),
+          ...(/[ns]/.test(dir) ? { sizeH: keepSizing ? "fixed" as Sizing : undefined } : {}),
+        })),
+      }, { history: false });
     }
   }
-  function onPointerUp() {
+  function onPointerUp(e?: RPointerEvent) {
     const g = drag.current;
     drag.current = null;
     setGuides({ v: [], h: [] });
     setMarquee(null);
-    if (!g || g.kind === "marquee" || !g.moved) return;
+    const target = dropInto;
+    setDropInto(null);
+    setGhost(null);
+    if (!g) return;
+    if (g.kind === "draw") {
+      const b = drawBox;
+      setDrawBox(null);
+      const partId = ({ frame: "stack", rect: "box", ellipse: "circle", line: "line", text: "heading" } as Record<string, string>)[tool] || "box";
+      if (b && b.w > 4 && b.h > 4) addPart(partId, { x: b.x / colW, y: b.y / ROW }, { w: round2(Math.max(0.25, b.w / colW)), h: round2(Math.max(0.5, b.h / ROW)) });
+      else if (b) { const part = PART_BY_ID.get(partId)!; addPart(partId, { x: b.x / colW + part.w / 2, y: b.y / ROW + part.h / 2 }); }
+      setTool("move");
+      return;
+    }
+    if (g.kind === "child" && g.moved) {
+      const id = Array.from(g.start.keys())[0];
+      const p = g.start.get(id)!;
+      const pt = e ? toWorld(e.clientX, e.clientY) : null;
+      const sb = g.startBox || { x: 0, y: 0, w: p.w * colW, h: p.h * ROW };
+      if (target) change((d) => insertInto(d, p, target.stack, target.index));
+      else change((d) => {
+        // out onto the page, where you let go
+        const w = round2(sb.w / colW), h = round2(sb.h / ROW);
+        const left = (pt ? pt.px : sb.x) - (g.sx - g.sx) - sb.w / 2, top = (pt ? pt.py : sb.y) - sb.h / 2;
+        return { ...d, pieces: [...d.pieces.filter((x) => x.id !== id), { ...p, parent: undefined, sizeW: undefined, sizeH: undefined, w, h, z: maxZ() + 1, x: round2(clamp(left / colW, 0, COLS - w)), y: round2(Math.max(0, top / ROW)) }] };
+      });
+      return;
+    }
+    if (g.kind === "move" && g.moved && target && g.start.size === 1) {
+      const id = Array.from(g.start.keys())[0];
+      change((d) => insertInto(d, d.pieces.find((x) => x.id === id)!, target.stack, target.index), false);
+      setPast((p) => [...p.slice(-99), g.before]); setFuture([]);
+      return;
+    }
+    if (g.kind === "marquee" || g.kind === "pan" || !g.moved) return;
     // one undo step for the whole drag
     setPast((p) => [...p.slice(-99), g.before]);
     setFuture([]);
@@ -545,52 +845,112 @@ export default function Builder() {
   }
 
   /* ---------- keyboard ---------- */
+  function zoomToSelection() {
+    const el = stageRef.current;
+    const bs = selected.map((p) => rectOf(p)).filter(Boolean) as Box[];
+    if (!el || !bs.length) { fit(); return; }
+    const x1 = Math.min(...bs.map((b) => b.x)), y1 = Math.min(...bs.map((b) => b.y));
+    const x2 = Math.max(...bs.map((b) => b.x + b.w)), y2 = Math.max(...bs.map((b) => b.y + b.h));
+    const z = clamp(Math.min((el.clientWidth - 160) / (x2 - x1), (el.clientHeight - 200) / (y2 - y1)), 0.08, 4);
+    moveCam({ z, x: el.clientWidth / 2 - ((x1 + x2) / 2) * z, y: el.clientHeight / 2 - ((y1 + y2) / 2) * z - 30 }, true);
+  }
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      if (e.key === "Control" || e.key === "Meta") setCtrlHeld(true);
-      const t = e.target as HTMLElement;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      if (e.key === "Control" || e.key === "Meta") setKeys((k) => ({ ...k, ctrl: true }));
+      if (e.key === "Alt") setKeys((k) => ({ ...k, alt: true }));
+      if (isTyping(e.target)) return;
+      if (e.key === " " && !e.repeat) { e.preventDefault(); setKeys((k) => ({ ...k, space: true })); return; }
       const mod = e.ctrlKey || e.metaKey;
       const k = e.key.toLowerCase();
       if (mod && k === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if (mod && k === "y") { e.preventDefault(); redo(); return; }
       if (mod && k === "s") { e.preventDefault(); setDirty(false); save().then((id) => id && say("Saved ✓")); return; }
+      if (mod && (k === "=" || k === "+")) { e.preventDefault(); zoomAt(1.25, undefined, undefined, true); return; }
+      if (mod && k === "-") { e.preventDefault(); zoomAt(0.8, undefined, undefined, true); return; }
+      if (e.shiftKey && e.code === "Digit1") { e.preventDefault(); fit(); return; }
+      if (e.shiftKey && e.code === "Digit0") { e.preventDefault(); zoomAt(1 / camRef.current.z, undefined, undefined, true); return; }
+      if (e.shiftKey && e.code === "Digit2") { e.preventDefault(); zoomToSelection(); return; }
       if (!docRef.current) return;
-      if (mod && k === "a") { e.preventDefault(); setSel(docRef.current.pieces.filter((p) => !p.hidden).map((p) => p.id)); return; }
+      if (mod && k === "a") { e.preventDefault(); setSel(docRef.current.pieces.filter((p) => !p.hidden && !p.parent).map((p) => p.id)); return; }
       if (mod && k === "d") { e.preventDefault(); duplicateSel(); return; }
-      if (mod && k === "c") { clipboard.current = selected.map((p) => ({ ...p })); if (selected.length) say(`Copied ${selected.length} piece${selected.length === 1 ? "" : "s"}`); return; }
+      if (mod && k === "c") { clipboard.current = selected.map((p) => ({ ...p })); if (selected.length) say(`Copied ${selected.length}`); return; }
       if (mod && k === "x") { clipboard.current = selected.map((p) => ({ ...p })); removeSel(); return; }
       if (mod && k === "v") { e.preventDefault(); paste(); return; }
-      if (mod && (k === "=" || k === "+")) { e.preventDefault(); setZoomPick(round2(Math.min(2, zoom + 0.1))); return; }
-      if (mod && k === "-") { e.preventDefault(); setZoomPick(round2(Math.max(0.2, zoom - 0.1))); return; }
-      if (mod && k === "0") { e.preventDefault(); setZoomPick("fit"); return; }
+      if (e.shiftKey && e.altKey && e.code === "KeyA") { e.preventDefault(); const st = selected.find((p) => p.part === "stack"); if (st) removeAutoLayout(st.id); return; }
+      if (e.shiftKey && !mod && k === "a") { e.preventDefault(); addAutoLayout(); return; }
+      if (e.shiftKey && k === "i") { e.preventDefault(); setLeftTab("assets"); return; }
       if (k === "delete" || k === "backspace") { if (selected.length) { e.preventDefault(); removeSel(); } return; }
-      if (k === "escape") { setSel([]); setCtxMenu(null); setModal((m) => (m === "start" && !docRef.current ? m : "")); return; }
+      if (k === "escape") {
+        setCtxMenu(null); setMenu(""); setShapeMenu(false); setTool("move");
+        // Esc picks the frame around what's picked, then nothing
+        setSel(one?.parent ? [one.parent] : []);
+        if (modal && (modal !== "start" || docRef.current)) setModal("");
+        return;
+      }
+      if (k === "enter" && one?.part === "stack") { const kids = childrenOf(one.id); if (kids.length) setSel(kids.map((c) => c.id)); return; }
       if (k === "]") { layer(mod ? "front" : "up"); return; }
       if (k === "[") { layer(mod ? "back" : "down"); return; }
-      if (k === "g" && !mod) { setShowGrid((s) => !s); return; }
-      if (k === "p" && !mod) { setMode((m) => (m === "edit" ? "try" : "edit")); return; }
-      if (k === "?" ) { setModal("help"); return; }
-      if (mod && e.shiftKey && k === "l") { e.preventDefault(); updatePieces(sel, (p) => ({ ...p, locked: !p.locked })); return; }
-      if (mod && e.shiftKey && k === "h") { e.preventDefault(); updatePieces(sel, (p) => ({ ...p, hidden: !p.hidden })); return; }
+      if (mod && e.shiftKey && k === "l") { e.preventDefault(); updatePieces(sel, (p) => ({ ...p, locked: !p.locked || undefined })); return; }
+      if (mod && e.shiftKey && k === "h") { e.preventDefault(); updatePieces(sel, (p) => ({ ...p, hidden: !p.hidden || undefined })); return; }
+      if (mod) return;
+      const toolKeys: Record<string, Tool> = { v: "move", h: "hand", f: "frame", r: "rect", o: "ellipse", l: "line", t: "text" };
+      if (toolKeys[k] && !e.shiftKey && !e.altKey) { setTool(toolKeys[k]); setMode("edit"); return; }
+      if (k === "g") { setShowGrid((s) => !s); return; }
+      if (k === "p") { setMode((m) => (m === "edit" ? "try" : "edit")); setSel([]); return; }
+      if (k === "?") { setModal("help"); return; }
       if (k.startsWith("arrow") && selected.length) {
         e.preventDefault();
-        const step = mod ? 0.25 : e.shiftKey ? 4 : 1;
+        const step = e.altKey ? 0.25 : e.shiftKey ? 4 : 1;
         const dx = k === "arrowleft" ? -step : k === "arrowright" ? step : 0;
         const dy = k === "arrowup" ? -step : k === "arrowdown" ? step : 0;
-        updatePieces(selected.filter((p) => !p.locked).map((p) => p.id), (p) => ({ ...p, x: round2(clamp(p.x + dx, 0, COLS - p.w)), y: round2(Math.max(0, p.y + dy)) }));
+        updatePieces(selected.filter((p) => !p.locked && !p.parent).map((p) => p.id), (p) => ({ ...p, x: round2(clamp(p.x + dx, 0, COLS - p.w)), y: round2(Math.max(0, p.y + dy)) }));
       }
     };
-    const up = (e: KeyboardEvent) => { if (e.key === "Control" || e.key === "Meta") setCtrlHeld(false); };
-    const blur = () => setCtrlHeld(false);
+    const up = (e: KeyboardEvent) => {
+      if (e.key === "Control" || e.key === "Meta") setKeys((k) => ({ ...k, ctrl: false }));
+      if (e.key === "Alt") setKeys((k) => ({ ...k, alt: false }));
+      if (e.key === " ") setKeys((k) => ({ ...k, space: false }));
+    };
+    const blur = () => setKeys({ ctrl: false, space: false, alt: false });
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     window.addEventListener("blur", blur);
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); window.removeEventListener("blur", blur); };
   });
 
+  /* ---------- the AI ---------- */
+  useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [chat, aiBusy]);
+  async function askAI(text: string) {
+    const d = docRef.current;
+    const msg = text.trim();
+    if (!d || !msg || aiBusy) return;
+    setAiText("");
+    setChat((c) => [...c, { role: "user", text: msg }]);
+    setAiBusy(true);
+    try {
+      const r = await api<{ reply: string; action: string; design?: Pick<BuiltDesign, "canvas" | "pieces">; usage: Usage }>("/api/designs/ai", {
+        message: msg, design: { canvas: d.canvas, pieces: d.pieces }, selection: sel,
+        history: chat.filter((m) => !m.error).slice(-6).map((m) => ({ role: m.role, text: m.text })),
+      });
+      setUsage(r.usage);
+      let before: Draft | undefined;
+      if (r.design && docRef.current) {
+        before = docRef.current;
+        setDoc({ ...docRef.current, canvas: r.design.canvas, pieces: r.design.pieces });
+        setSel((s) => s.filter((id) => r.design!.pieces.some((p) => p.id === id)));
+        if (r.action === "replace") window.setTimeout(() => fit(), 50);
+      }
+      setChat((c) => [...c, { role: "assistant", text: r.reply, before }]);
+    } catch (e) {
+      setChat((c) => [...c, { role: "assistant", text: e instanceof Error ? e.message : "The AI couldn't answer — try again", error: true }]);
+      api<Usage>("/api/designs/ai").then(setUsage).catch(() => {});
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
   /* ---------- design-level actions ---------- */
-  async function useDesign() {
+  async function applyDesign() {
     const id = docRef.current?.id || (await save());
     if (!id) return;
     await api("/api/designs", { action: "use", id }).catch(() => {});
@@ -627,31 +987,35 @@ export default function Builder() {
   }
   function newFromTemplate(key: string) {
     const t = templateDesign(key);
-    const name = key === "blank" ? "My design" : `My ${TEMPLATE_LIST.find((x) => x[0] === key)?.[1] || ""} remix`;
+    const name = key === "blank" ? "Untitled" : `${TEMPLATE_LIST.find((x) => x[0] === key)?.[1] || ""} remix`;
     openDoc({ name, emoji: "🎨", ...t });
     history.replaceState(null, "", "/builder");
   }
   async function deleteDoc() {
     const d = docRef.current;
-    if (!d) return;
-    if (!confirm(`Delete “${d.name}”? This can't be undone.`)) return;
+    if (!d || !confirm(`Delete “${d.name}”? This can't be undone.`)) return;
     if (d.id) await galleryAction("delete", d.id, "Deleted");
     docRef.current = null;
     setDocState(null);
     setModal("start");
     history.replaceState(null, "", "/builder");
   }
+  const switchTo = async (id: string) => {
+    await api("/api/designs", { action: "use", id }).catch(() => {});
+    refreshLists();
+    if (window.opener && !window.opener.closed) { window.opener.postMessage({ type: "use-design", id }, location.origin); say("✅ It's on — look at your other tab"); } else window.open(`/?design=${id}`, "_blank");
+  };
 
   /* ====================================================================== */
-  if (!me) return <div className="bl-app bl-center"><div className="bl-spinner" /></div>;
+  if (!me) return <div className="fg-app fg-center"><div className="fg-spinner" /></div>;
   if (!me.user) {
     return (
-      <div className="bl-app bl-center">
-        <div className="bl-card">
+      <div className="fg-app fg-center">
+        <div className="fg-card">
           <h1>🎨 Design builder</h1>
-          <p>Build your own home page out of pieces of every design — drag, drop, resize and colour everything.</p>
+          <p>Build your own home page out of pieces of every design — drag, drop, resize and colour everything, like Figma.</p>
           <p><strong>Log in first</strong> so your designs are saved to your account.</p>
-          <a className="bl-btn primary" href="/">Log in on the home page</a>
+          <a className="fg-btn primary" href="/">Log in on the home page</a>
         </div>
       </div>
     );
@@ -662,76 +1026,94 @@ export default function Builder() {
   const canvas = doc?.canvas || DEFAULT_CANVAS;
   const setCanvas = (patch: Partial<DesignCanvas>) => change((d) => ({ ...d, canvas: { ...d.canvas, ...patch } }));
   const editing = mode === "edit" && device !== "phone";
+  const px = (cols: number) => Math.round(cols * colW);
+  const statusText = status === "saving" ? "Saving…" : status === "error" ? "Not saved" : dirty ? "Edited" : doc?.id ? "Saved" : "Not saved yet";
 
-  /* ---------- the parts library ---------- */
+  /* ---------- left: file (pages + layers) and assets ---------- */
   const matching = q.trim() ? PARTS.filter((p) => `${p.name} ${p.blurb} ${p.folder}`.toLowerCase().includes(q.trim().toLowerCase())) : null;
-  const partItem = (p: PartDef) => (
-    <button key={p.id} className="bl-part" draggable title={p.blurb}
+  const assetTile = (p: PartDef) => (
+    <button key={p.id} className={`fg-asset ${p.design ? "comp" : ""}`} draggable title={p.blurb}
       onDragStart={(e) => { e.dataTransfer.setData("application/x-part", p.id); e.dataTransfer.effectAllowed = "copy"; }}
       onClick={() => addPart(p.id)}>
-      <span className="bl-part-emoji">{p.emoji}</span>
-      <span className="bl-part-text"><strong>{p.name}</strong><em>{p.blurb}</em></span>
+      <span className="fg-asset-thumb">{p.emoji}</span>
+      <span className="fg-asset-name">{p.name}</span>
     </button>
   );
-  const folderNode = (name: string, path: string, depth: number, children: ReactNode, count: number, emoji = "📁") => {
+  const assetGroup = (name: string, path: string, list: PartDef[], depth = 0, sub?: ReactNode): ReactNode => {
     const open = openFolders.has(path);
     return (
-      <div key={path} className={`bl-folder depth-${depth}`}>
-        <button className="bl-folder-head" onClick={() => setOpenFolders((s) => { const n = new Set(s); if (n.has(path)) n.delete(path); else n.add(path); return n; })}>
-          <i>{open ? "▾" : "▸"}</i><span>{open ? "📂" : emoji}</span><strong>{name}</strong><em>{count}</em>
+      <div key={path} className={`fg-agroup depth-${depth}`}>
+        <button className="fg-agroup-head" onClick={() => setOpenFolders((s0) => { const n = new Set(s0); if (n.has(path)) n.delete(path); else n.add(path); return n; })}>
+          <i>{open ? "▾" : "▸"}</i><span>{name}</span><em>{sub ? "" : list.length}</em>
         </button>
-        {open && <div className="bl-folder-body">{children}</div>}
+        {open && (sub || <div className="fg-agrid">{list.map(assetTile)}</div>)}
       </div>
     );
   };
-  const designFolders = BUILT_IN_DESIGNS.map(([id, label]) => {
-    const list = PARTS.filter((p) => p.folder === `Design pieces/${label}`);
-    const emoji = { classic: "📄", nova: "✨", orbit: "🪐", board: "🗂️", desk: "🖥️", journal: "📰", terminal: "💻", zen: "🍃" }[id] || "📁";
-    return folderNode(label, `Design pieces/${label}`, 1, list.map(partItem), list.length, emoji);
-  });
-  const library = matching ? (
-    <div className="bl-parts-flat">{matching.length ? matching.map(partItem) : <p className="bl-muted">Nothing called that.</p>}</div>
+  const assets = matching ? (
+    <div className="fg-agrid">{matching.length ? matching.map(assetTile) : <p className="fg-muted">Nothing called that.</p>}</div>
   ) : (
     <>
       {PART_FOLDERS.map((f) => f === "Design pieces"
-        ? folderNode("Design pieces", f, 0, designFolders, PARTS.filter((p) => p.folder.startsWith("Design pieces")).length, "🎨")
-        : folderNode(f, f, 0, PARTS.filter((p) => p.folder === f).map(partItem), PARTS.filter((p) => p.folder === f).length,
-          { "Basic blocks": "🧱", Widgets: "🧩", "Shapes & decoration": "🔷", "Functions & buttons": "🔘" }[f]))}
+        ? assetGroup("Design pieces", f, [], 0, <div className="fg-agroup-sub">{BUILT_IN_DESIGNS.map(([, label]) => assetGroup(label, `Design pieces/${label}`, PARTS.filter((p) => p.folder === `Design pieces/${label}`), 1))}</div>)
+        : assetGroup(f, f, PARTS.filter((p) => p.folder === f)))}
     </>
   );
-
-  /* ---------- layers ---------- */
-  const layers = [...pieces].sort((a, b) => b.z - a.z);
-  const layerList = (
-    <div className="bl-layers">
-      {layers.length === 0 && <p className="bl-muted">No pieces yet — drag some in from Parts.</p>}
-      {layers.map((p) => {
-        const part = PART_BY_ID.get(p.part);
-        return (
-          <div key={p.id} className={`bl-layer ${sel.includes(p.id) ? "on" : ""} ${p.hidden ? "hidden" : ""}`} draggable
-            onDragStart={() => { layerDrag.current = p.id; }}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={() => {
-              const from = layerDrag.current;
-              if (!from || from === p.id) return;
-              // drop above this layer
-              const order = [...pieces].sort((a, b) => a.z - b.z).map((x) => x.id).filter((id) => id !== from);
+  const layerRow = (p: DesignPiece, depth: number): ReactNode => {
+    const part = PART_BY_ID.get(p.part);
+    const kids = pieces.filter((c) => c.parent === p.id);
+    const folded = collapsedLayers.has(p.id);
+    return (
+      <div key={p.id}>
+        <div className={`fg-layer ${sel.includes(p.id) ? "on" : ""} ${p.hidden ? "hidden" : ""} ${part?.design ? "comp" : ""} ${p.part === "stack" ? "frame" : ""}`}
+          style={{ paddingLeft: 6 + depth * 14 }} draggable
+          onMouseEnter={() => setHoverId(p.id)} onMouseLeave={() => setHoverId(null)}
+          onDragStart={() => { layerDrag.current = p.id; }}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.stopPropagation();
+            const from = layerDrag.current;
+            if (!from || from === p.id || withKids([from]).has(p.id)) return;
+            change((d) => {
+              const moving = d.pieces.find((x) => x.id === from)!;
+              if (p.part === "stack") return insertInto(d, moving, p.id, d.pieces.filter((x) => x.parent === p.id).length);
+              const rest = d.pieces.filter((x) => x.id !== from);
+              if (p.parent) { rest.splice(rest.findIndex((x) => x.id === p.id), 0, { ...moving, parent: p.parent }); return { ...d, pieces: rest }; }
+              // among the top pieces: just above this one
+              const order = rest.filter((x) => !x.parent).sort((a, b) => a.z - b.z).map((x) => x.id);
               order.splice(order.indexOf(p.id) + 1, 0, from);
               const z = new Map(order.map((id, i) => [id, i + 1]));
-              change((d) => ({ ...d, pieces: d.pieces.map((x) => ({ ...x, z: z.get(x.id) || x.z })) }));
-            }}
-            onClick={(e) => setSel(e.shiftKey ? (sel.includes(p.id) ? sel.filter((x) => x !== p.id) : [...sel, p.id]) : [p.id])}>
-            <span className="bl-layer-emoji">{part?.emoji}</span>
-            <span className="bl-layer-name">{p.name || part?.name}</span>
-            <button title={p.hidden ? "Show" : "Hide"} onClick={(e) => { e.stopPropagation(); updatePieces([p.id], (x) => ({ ...x, hidden: !x.hidden })); }}>{p.hidden ? "🙈" : "👁️"}</button>
-            <button title={p.locked ? "Unlock" : "Lock"} onClick={(e) => { e.stopPropagation(); updatePieces([p.id], (x) => ({ ...x, locked: !x.locked })); }}>{p.locked ? "🔒" : "🔓"}</button>
-          </div>
-        );
-      })}
-    </div>
-  );
+              const r = rects[from];
+              const moved = moving.parent ? { ...moving, parent: undefined, sizeW: undefined, sizeH: undefined, ...(r ? { x: round2(clamp(r.x / colW, 0, COLS - moving.w)), y: round2(r.y / ROW) } : {}) } : moving;
+              return { ...d, pieces: [...rest, moved].map((x) => ({ ...x, z: z.get(x.id) || x.z })) };
+            });
+          }}
+          onClick={(e) => setSel(e.shiftKey ? (sel.includes(p.id) ? sel.filter((x) => x !== p.id) : [...sel, p.id]) : [p.id])}
+          onDoubleClick={() => setRenaming(p.id)}>
+          {kids.length ? <button className="fg-caret" onClick={(e) => { e.stopPropagation(); setCollapsedLayers((s0) => { const n = new Set(s0); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n; }); }}>{folded ? "▸" : "▾"}</button> : <span className="fg-caret" />}
+          <span className="fg-layer-icon">{layerIcon(p, part)}</span>
+          {renaming === p.id ? (
+            <input className="fg-layer-rename" autoFocus defaultValue={p.name || part?.name} onClick={(e) => e.stopPropagation()}
+              onBlur={(e) => { updatePieces([p.id], (x) => ({ ...x, name: e.target.value.trim() || undefined })); setRenaming(null); }}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setRenaming(null); }} />
+          ) : <span className="fg-layer-name">{p.name || part?.name}</span>}
+          <span className="fg-layer-tools">
+            <button title={p.locked ? "Unlock" : "Lock"} className={p.locked ? "keep" : ""} onClick={(e) => { e.stopPropagation(); updatePieces([p.id], (x) => ({ ...x, locked: !x.locked || undefined })); }}>{p.locked ? "🔒" : "🔓"}</button>
+            <button title={p.hidden ? "Show" : "Hide"} className={p.hidden ? "keep" : ""} onClick={(e) => { e.stopPropagation(); updatePieces([p.id], (x) => ({ ...x, hidden: !x.hidden || undefined })); }}>{p.hidden ? "◌" : "👁"}</button>
+          </span>
+        </div>
+        {!folded && kids.map((c) => layerRow(c, depth + 1))}
+      </div>
+    );
+  };
+  const topLayers = [...pieces].filter((p) => !p.parent || !byId.has(p.parent)).sort((a, b) => b.z - a.z);
 
-  /* ---------- the settings panel ---------- */
+  /* ---------- right: Design ---------- */
+  const st1 = one?.style || {};
+  const ids = sel;
+  const part1 = one ? PART_BY_ID.get(one.part) : undefined;
+  const inFrame = !!one?.parent;
+  const r1 = one ? rectOf(one) : null;
   const propField = (p: DesignPiece, def: PropDef) => {
     const v = p.props?.[def.key] ?? def.def;
     if (def.when) {
@@ -741,332 +1123,561 @@ export default function Builder() {
     let field: ReactNode;
     switch (def.type) {
       case "bool": field = <Toggle on={!!v} onChange={(x) => setProp(p.id, def.key, x)} />; break;
-      case "number": field = <NumberField value={Number(v)} min={def.min} max={def.max} onChange={(x) => setProp(p.id, def.key, x)} />; break;
+      case "number": field = <Field value={Number(v)} min={def.min} max={def.max} onChange={(x) => setProp(p.id, def.key, x)} />; break;
       case "select": case "action":
-        field = <select className="bl-input" value={String(v)} onChange={(e) => setProp(p.id, def.key, e.target.value)}>{(def.options || []).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>;
+        field = <select className="fg-select" value={String(v)} onChange={(e) => setProp(p.id, def.key, e.target.value)}>{(def.options || []).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>;
         break;
       case "folder":
         field = (
-          <select className="bl-input" value={String(v)} onChange={(e) => setProp(p.id, def.key, e.target.value)}>
-            <option value="">— pick a folder —</option>
+          <select className="fg-select" value={String(v)} onChange={(e) => setProp(p.id, def.key, e.target.value)}>
+            <option value="">Pick a folder…</option>
             {folders.map((f) => <option key={f.id} value={f.id}>{f.emoji} {f.name}</option>)}
           </select>
         );
         break;
-      case "color": field = <ColorField value={String(v)} allowNone={false} onChange={(x) => x && setProp(p.id, def.key, x)} />; break;
-      case "longtext": field = <textarea className="bl-input" rows={4} value={String(v)} onChange={(e) => setProp(p.id, def.key, e.target.value)} />; break;
-      case "date": field = <input className="bl-input" type="date" value={String(v)} onChange={(e) => setProp(p.id, def.key, e.target.value)} />; break;
-      case "time": field = <input className="bl-input" type="time" value={String(v)} onChange={(e) => setProp(p.id, def.key, e.target.value)} />; break;
-      case "emoji": field = <input className="bl-input bl-emoji-in" value={String(v)} maxLength={16} onChange={(e) => setProp(p.id, def.key, e.target.value)} />; break;
-      default: field = <input className="bl-input" value={String(v)} placeholder={def.type === "url" ? "https://…" : ""} onChange={(e) => setProp(p.id, def.key, e.target.value)} />;
+      case "color": field = <ColorRow value={String(v)} onChange={(x) => setProp(p.id, def.key, x)} />; break;
+      case "longtext": field = <textarea className="fg-input" rows={4} value={String(v)} onChange={(e) => setProp(p.id, def.key, e.target.value)} />; break;
+      case "date": field = <input className="fg-input" type="date" value={String(v)} onChange={(e) => setProp(p.id, def.key, e.target.value)} />; break;
+      case "time": field = <input className="fg-input" type="time" value={String(v)} onChange={(e) => setProp(p.id, def.key, e.target.value)} />; break;
+      case "emoji": field = <input className="fg-input fg-emoji-in" value={String(v)} maxLength={16} onChange={(e) => setProp(p.id, def.key, e.target.value)} />; break;
+      default: field = <input className="fg-input" value={String(v)} placeholder={def.type === "url" ? "https://…" : ""} onChange={(e) => setProp(p.id, def.key, e.target.value)} />;
     }
-    return <Row key={def.key} label={def.label} hint={def.hint}>{field}</Row>;
+    return <Row key={def.key} label={def.label}>{field}</Row>;
   };
-  const styleOf = (p: DesignPiece) => p.style || {};
-  const ids = sel;
-  const pageSettings = doc && (
+  const alignBar = (
+    <div className="fg-alignbar">
+      {([["left", "⇤", "Align left"], ["center", "⇹", "Align centres"], ["right", "⇥", "Align right"], ["top", "⤒", "Align top"], ["middle", "⇳", "Align middles"], ["bottom", "⤓", "Align bottom"]] as const).map(([k, icon, t]) => (
+        <button key={k} title={t} disabled={!selected.length || (selected.length === 1 && ["top", "middle", "bottom"].includes(k))} onClick={() => align(k)}>{icon}</button>
+      ))}
+      <button title="Space evenly across" disabled={selected.length < 3} onClick={() => align("hdist")}>⋯</button>
+      <button title="Space evenly down" disabled={selected.length < 3} onClick={() => align("vdist")}>⋮</button>
+    </div>
+  );
+  const sizing = (axis: "W" | "H") => {
+    const key = axis === "W" ? "sizeW" : "sizeH";
+    const val = (one?.[key] as Sizing) || "fixed";
+    return (
+      <select className="fg-select fg-sizing" value={val} title={`${axis === "W" ? "Width" : "Height"} resizing`}
+        onChange={(e) => updatePieces([one!.id], (p) => ({ ...p, [key]: e.target.value === "fixed" && !p.parent && p.part !== "stack" ? undefined : e.target.value as Sizing }))}>
+        <option value="fixed">Fixed</option>
+        {inFrame && <option value="fill">Fill container</option>}
+        <option value="hug">Hug contents</option>
+      </select>
+    );
+  };
+  const stackSection = one?.part === "stack" ? (() => {
+    const pr = one.props || {};
+    const row = pr.dir !== "column";
+    const A = String(pr.align || "start"), J = String(pr.justify || "start");
+    const cells = ["start", "center", "end"];
+    return (
+      <Panel title="Auto layout" action={<button className="fg-icon-btn" title="Remove auto layout (Alt Shift A)" onClick={() => removeAutoLayout(one.id)}>−</button>}>
+        <div className="fg-al">
+          <div className="fg-al-left">
+            <Seg value={row ? "row" : "column"} onChange={(v) => setProp(one.id, "dir", v)} options={[["row", "→", "Across"], ["column", "↓", "Down"]]} />
+            <button className={`fg-chip ${pr.wrap ? "on" : ""}`} title="Wrap onto new lines" onClick={() => setProp(one.id, "wrap", !pr.wrap)}>↩ Wrap</button>
+          </div>
+          <div className="fg-al-grid" title="Line up the pieces inside">
+            {cells.map((v) => cells.map((h) => {
+              const main = row ? h : v, cross = row ? v : h;
+              const on = (J === main || (J === "between" && main === "center")) && (A === cross || (A === "stretch" && cross === "start"));
+              return <button key={`${v}${h}`} className={on ? "on" : ""} onClick={() => updatePieces([one.id], (p) => ({ ...p, props: { ...p.props, justify: J === "between" ? "between" : main, align: cross } }))}><i /></button>;
+            }))}
+          </div>
+        </div>
+        <div className="fg-grid2">
+          <Field icon={row ? "⇿" : "⇳"} title="Gap between pieces" value={Number(pr.gap ?? 12)} min={0} max={120} onChange={(v) => setProp(one.id, "gap", v)} />
+          <Field icon="▣" title="Padding" value={Number(pr.pad ?? 12)} min={0} max={120} onChange={(v) => setProp(one.id, "pad", v)} />
+        </div>
+        <div className="fg-grid2">
+          <Toggle label="Space between" on={J === "between"} onChange={(v) => setProp(one.id, "justify", v ? "between" : "start")} />
+          <Toggle label="Stretch" on={A === "stretch"} onChange={(v) => setProp(one.id, "align", v ? "stretch" : "start")} />
+        </div>
+        <p className="fg-muted small">{childrenOf(one.id).length} inside · drag pieces in or out · Enter picks them</p>
+      </Panel>
+    );
+  })() : null;
+  const contentProps = (part1?.props || []).filter((d) => !ACTION_KEYS.includes(d.key) && !VIEWER_KEYS.includes(d.key) && part1?.id !== "stack");
+
+  const designTab = !doc ? <p className="fg-muted pad">Start a design to see its settings.</p> : selected.length === 0 ? (
     <>
-      <div className="bl-panel-head"><span className="bl-panel-emoji">📄</span><div><strong>Page</strong><em>Nothing selected — these change the whole page</em></div></div>
-      <Section title="Design">
-        <Row label="Name"><input className="bl-input" value={doc.name} maxLength={40} onChange={(e) => change((d) => ({ ...d, name: e.target.value }), false)} /></Row>
-        <Row label="Icon"><input className="bl-input bl-emoji-in" value={doc.emoji} maxLength={8} onChange={(e) => change((d) => ({ ...d, emoji: e.target.value }), false)} /></Row>
-        <Row label="About it"><textarea className="bl-input" rows={2} maxLength={160} value={doc.description || ""} placeholder="Shown in the gallery" onChange={(e) => change((d) => ({ ...d, description: e.target.value }), false)} /></Row>
-      </Section>
-      <Section title="Colours">
-        <Row label="Background"><ColorField value={canvas.bg} allowNone={false} onChange={(v) => v && setCanvas({ bg: v })} /></Row>
+      <Panel title="Page">
+        <Row label="Name"><input className="fg-input" value={doc.name} maxLength={40} onChange={(e) => change((d) => ({ ...d, name: e.target.value }), false)} /></Row>
+        <Row label="Icon"><input className="fg-input fg-emoji-in" value={doc.emoji} maxLength={8} onChange={(e) => change((d) => ({ ...d, emoji: e.target.value }), false)} /></Row>
+        <Row label="About"><textarea className="fg-input" rows={2} maxLength={160} value={doc.description || ""} placeholder="Shown in the gallery" onChange={(e) => change((d) => ({ ...d, description: e.target.value }), false)} /></Row>
+      </Panel>
+      <Panel title="Fill">
+        <ColorRow value={canvas.bg} onChange={(v) => setCanvas({ bg: v })} />
         <Row label="Pattern">
-          <select className="bl-input" value={canvas.bgPattern || "none"} onChange={(e) => setCanvas({ bgPattern: e.target.value as DesignCanvas["bgPattern"] })}>
+          <select className="fg-select" value={canvas.bgPattern || "none"} onChange={(e) => setCanvas({ bgPattern: e.target.value as DesignCanvas["bgPattern"] })}>
             {[["none", "None"], ["dots", "Dots"], ["grid", "Grid"], ["gradient", "Soft gradient"], ["aurora", "Aurora glow"], ["stripes", "Stripes"]].map(([k, l]) => <option key={k} value={k}>{l}</option>)}
           </select>
         </Row>
-        <Row label="Picture"><input className="bl-input" value={canvas.bgImage || ""} placeholder="https://… (optional)" onChange={(e) => setCanvas({ bgImage: e.target.value })} /></Row>
-        <Row label="Text"><ColorField value={canvas.text} allowNone={false} onChange={(v) => v && setCanvas({ text: v })} /></Row>
-        <Row label="Accent"><ColorField value={canvas.accent} allowNone={false} onChange={(v) => v && setCanvas({ accent: v })} /></Row>
-        <Row label="Cards & menus" hint="Whether the site's own cards, menus and pop-ups are dark or light">
-          <div className="bl-seg">{(["dark", "light"] as const).map((t) => <button key={t} className={canvas.tone === t ? "on" : ""} onClick={() => setCanvas({ tone: t })}>{t === "dark" ? "🌙 Dark" : "☀️ Light"}</button>)}</div>
-        </Row>
-      </Section>
-      <Section title="Text">
-        <Row label="Font"><select className="bl-input" value={canvas.font} onChange={(e) => setCanvas({ font: e.target.value })}>{FONT_CHOICES.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}</select></Row>
-      </Section>
-      <Section title="Size">
-        <Row label="Page height" hint="It also grows by itself as you add pieces lower down"><NumberField value={canvas.rows} min={20} max={600} onChange={(v) => setCanvas({ rows: v })} suffix="rows" /></Row>
-      </Section>
-      <Section title="Start again" open={false}>
-        <p className="bl-muted">Swap everything for one of the starting points (you can undo).</p>
-        <div className="bl-tpl-mini">
-          {TEMPLATE_LIST.map(([k, l, e]) => <button key={k} className="bl-btn" onClick={() => { const t = templateDesign(k); change((d) => ({ ...d, ...t })); setSel([]); }}>{e} {l}</button>)}
+        <Row label="Picture"><input className="fg-input" value={canvas.bgImage || ""} placeholder="https://… (optional)" onChange={(e) => setCanvas({ bgImage: e.target.value })} /></Row>
+      </Panel>
+      <Panel title="Colours">
+        <Row label="Text"><ColorRow value={canvas.text} onChange={(v) => setCanvas({ text: v })} /></Row>
+        <Row label="Accent"><ColorRow value={canvas.accent} onChange={(v) => setCanvas({ accent: v })} /></Row>
+        <Row label="Menus"><Seg value={canvas.tone} onChange={(v) => setCanvas({ tone: v })} options={[["dark", "🌙 Dark"], ["light", "☀️ Light"]]} /></Row>
+        <Toggle label="Blend every piece into this page" on={canvas.blend !== false} onChange={(v) => setCanvas({ blend: v })} />
+        <p className="fg-muted small">Pieces from Orbit, Journal, Terminal… wear these colours and this font, so it all looks like one design.</p>
+      </Panel>
+      <Panel title="Text">
+        <select className="fg-select" value={canvas.font} onChange={(e) => setCanvas({ font: e.target.value })}>{FONT_CHOICES.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}</select>
+      </Panel>
+      <Panel title="Size">
+        <Field icon="H" title="Page height in rows" value={canvas.rows} min={20} max={600} suffix="rows" onChange={(v) => setCanvas({ rows: v })} />
+      </Panel>
+      <Panel title="Start again" open={false}>
+        <div className="fg-tplmini">
+          {TEMPLATE_LIST.map(([k, l, e]) => <button key={k} className="fg-btn sm" onClick={() => { change((d) => ({ ...d, ...templateDesign(k) })); setSel([]); }}>{e} {l}</button>)}
         </div>
-      </Section>
+      </Panel>
       {isAdmin && doc.id && (
-        <Section title="🛡️ Admin" open={false}>
-          <p className="bl-muted">{lists?.siteDefault === doc.id ? "⭐ This is what new visitors start with." : "Make new visitors start with this design (people who already picked a look keep theirs)."}</p>
-          <button className="bl-btn" onClick={() => setSiteDefault(lists?.siteDefault === doc.id ? "" : doc.id!)}>{lists?.siteDefault === doc.id ? "Stop using it as the default" : "⭐ Make it the site default"}</button>
-        </Section>
+        <Panel title="Admin" open={false}>
+          <p className="fg-muted small">{lists?.siteDefault === doc.id ? "⭐ New visitors start with this design." : "Make new visitors start with this design."}</p>
+          <button className="fg-btn sm" onClick={() => setSiteDefault(lists?.siteDefault === doc.id ? "" : doc.id!)}>{lists?.siteDefault === doc.id ? "Stop using it as the default" : "⭐ Make it the site default"}</button>
+        </Panel>
       )}
     </>
-  );
-  const pieceSettings = one && (() => {
-    const part = PART_BY_ID.get(one.part)!;
-    const s = styleOf(one);
-    return (
-      <>
-        <div className="bl-panel-head">
-          <span className="bl-panel-emoji">{part.emoji}</span>
-          <div>
-            <input className="bl-input bl-name-in" value={one.name ?? ""} placeholder={part.name} maxLength={40} onChange={(e) => updatePieces([one.id], (p) => ({ ...p, name: e.target.value || undefined }), false)} />
-            <em>{part.folder.replace("Design pieces/", "From ")} · {part.blurb}</em>
-          </div>
-        </div>
-        <div className="bl-quick">
-          <button title="Duplicate (Ctrl D)" onClick={() => duplicateSel()}>⧉</button>
-          <button title={one.locked ? "Unlock" : "Lock in place"} onClick={() => updatePieces([one.id], (p) => ({ ...p, locked: !p.locked }))}>{one.locked ? "🔒" : "🔓"}</button>
-          <button title={one.hidden ? "Show" : "Hide"} onClick={() => updatePieces([one.id], (p) => ({ ...p, hidden: !p.hidden }))}>{one.hidden ? "🙈" : "👁️"}</button>
-          <button title="Bring to front (Ctrl ])" onClick={() => layer("front")}>⤒</button>
-          <button title="Forward (])" onClick={() => layer("up")}>↑</button>
-          <button title="Backward ([)" onClick={() => layer("down")}>↓</button>
-          <button title="Send to back (Ctrl [)" onClick={() => layer("back")}>⤓</button>
-          <button className="danger" title="Delete (Del)" onClick={removeSel}>🗑</button>
-        </div>
-        <Section title="Position & size">
-          <div className="bl-grid4">
-            <label><span>X</span><NumberField value={one.x} step={0.25} min={0} max={COLS - one.w} onChange={(v) => updatePieces([one.id], (p) => ({ ...p, x: round2(v) }))} /></label>
-            <label><span>Y</span><NumberField value={one.y} step={0.25} min={0} onChange={(v) => updatePieces([one.id], (p) => ({ ...p, y: round2(v) }))} /></label>
-            <label><span>W</span><NumberField value={one.w} step={0.25} min={0.5} max={COLS - one.x} onChange={(v) => updatePieces([one.id], (p) => ({ ...p, w: round2(v) }))} /></label>
-            <label><span>H</span><NumberField value={one.h} step={0.25} min={0.5} onChange={(v) => updatePieces([one.id], (p) => ({ ...p, h: round2(v) }))} /></label>
-          </div>
-          <p className="bl-muted small">X and W are in columns ({COLS} across the screen); Y and H are in rows of {ROW}px.</p>
-          <div className="bl-seg wrap">
-            <button onClick={() => align("pageCenter")}>↔ Centre on page</button>
-            <button onClick={() => updatePieces([one.id], (p) => ({ ...p, x: 0, w: COLS }))}>⟷ Full width</button>
-          </div>
-        </Section>
-        {(part.props || []).length > 0 && <Section title="Options">{(part.props || []).map((d) => propField(one, d))}</Section>}
-        <Section title="Colours">
-          <Row label="Background"><ColorField value={s.bg} onChange={(v) => setStyle(ids, { bg: v })} placeholder={part.design ? "the design's own" : "none"} /></Row>
-          <Row label="Glass" hint="Frosted see-through background"><Toggle on={!!s.glass} onChange={(v) => setStyle(ids, { glass: v || undefined })} /></Row>
-          <Row label="Text"><ColorField value={s.text} onChange={(v) => setStyle(ids, { text: v })} placeholder="page's" /></Row>
-          <Row label="Accent"><ColorField value={s.accent} onChange={(v) => setStyle(ids, { accent: v })} placeholder="page's" /></Row>
-          <Row label="See-through"><Slider value={Math.round((s.opacity ?? 1) * 100)} min={5} max={100} suffix="%" onChange={(v) => setStyle(ids, { opacity: v >= 100 ? undefined : v / 100 })} /></Row>
-        </Section>
-        <Section title="Shape">
-          <Row label="Corners"><Slider value={Math.min(s.radius ?? 0, 80)} min={0} max={80} suffix="px" onChange={(v) => setStyle(ids, { radius: v })} /></Row>
-          <Row label="Round"><Toggle on={(s.radius ?? 0) >= 999} onChange={(v) => setStyle(ids, { radius: v ? 999 : 16 })} /></Row>
-          <Row label="Border"><Slider value={s.borderWidth ?? 0} min={0} max={12} suffix="px" onChange={(v) => setStyle(ids, { borderWidth: v || undefined })} /></Row>
-          {(s.borderWidth ?? 0) > 0 && <Row label="Border colour"><ColorField value={s.borderColor} onChange={(v) => setStyle(ids, { borderColor: v })} placeholder="soft" /></Row>}
-          <Row label="Shadow">
-            <div className="bl-seg">{(["none", "soft", "strong", "glow"] as const).map((k) => <button key={k} className={(s.shadow || "none") === k ? "on" : ""} onClick={() => setStyle(ids, { shadow: k === "none" ? undefined : k })}>{k === "none" ? "None" : k[0].toUpperCase() + k.slice(1)}</button>)}</div>
-          </Row>
-          <Row label="Padding"><Slider value={s.pad ?? 0} min={0} max={60} suffix="px" onChange={(v) => setStyle(ids, { pad: v || undefined })} /></Row>
-        </Section>
-        <Section title="Font">
-          <Row label="Font"><select className="bl-input" value={s.font || ""} onChange={(e) => setStyle(ids, { font: e.target.value || undefined })}><option value="">Page&apos;s font</option>{FONT_CHOICES.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}</select></Row>
-          <Row label="Text size"><Slider value={s.size ?? 100} min={50} max={250} step={5} suffix="%" onChange={(v) => setStyle(ids, { size: v === 100 ? undefined : v })} /></Row>
-        </Section>
-        <Section title="Layering & phones">
-          <div className="bl-seg wrap">
-            <button onClick={() => layer("front")}>⤒ Front</button><button onClick={() => layer("up")}>↑ Forward</button>
-            <button onClick={() => layer("down")}>↓ Backward</button><button onClick={() => layer("back")}>⤓ Back</button>
-          </div>
-          <Row label="Lock in place"><Toggle on={!!one.locked} onChange={(v) => updatePieces([one.id], (p) => ({ ...p, locked: v || undefined }))} /></Row>
-          <Row label="Hide"><Toggle on={!!one.hidden} onChange={(v) => updatePieces([one.id], (p) => ({ ...p, hidden: v || undefined }))} /></Row>
-          <Row label="On phones">
-            <div className="bl-seg">
-              {(["show", "hide"] as const).map((k) => {
-                const cur = s.phone || (part.deco ? "hide" : "show");
-                return <button key={k} className={cur === k ? "on" : ""} onClick={() => setStyle(ids, { phone: k })}>{k === "show" ? "Show" : "Hide"}</button>;
-              })}
-            </div>
-          </Row>
-        </Section>
-      </>
-    );
-  })();
-  const multiSettings = selected.length > 1 && (
+  ) : one ? (
     <>
-      <div className="bl-panel-head"><span className="bl-panel-emoji">🧩</span><div><strong>{selected.length} pieces</strong><em>Shift-click to add or remove pieces</em></div></div>
-      <Section title="Line up">
-        <div className="bl-seg wrap">
-          <button title="Left edges" onClick={() => align("left")}>⇤ Left</button><button title="Middles" onClick={() => align("center")}>↔ Centre</button><button title="Right edges" onClick={() => align("right")}>⇥ Right</button>
-          <button title="Top edges" onClick={() => align("top")}>⤒ Top</button><button title="Middles" onClick={() => align("middle")}>↕ Middle</button><button title="Bottoms" onClick={() => align("bottom")}>⤓ Bottom</button>
-          <button title="Same gaps across" onClick={() => align("hdist")}>⋯ Space across</button><button title="Same gaps down" onClick={() => align("vdist")}>⋮ Space down</button>
+      <div className="fg-selhead">
+        <span className={`fg-selicon ${part1?.design ? "comp" : ""}`}>{layerIcon(one, part1)}</span>
+        <input className="fg-input fg-selname" value={one.name ?? ""} placeholder={part1?.name} maxLength={40} onChange={(e) => updatePieces([one.id], (p) => ({ ...p, name: e.target.value || undefined }), false)} />
+      </div>
+      <p className="fg-muted small pad">{part1?.design ? `◈ From ${part1.design[0].toUpperCase()}${part1.design.slice(1)} · ` : ""}{part1?.blurb}</p>
+      {alignBar}
+      <Panel title="Position">
+        {inFrame ? <p className="fg-muted small">In an auto layout frame — the frame places it. Drag it out to place it yourself.</p> : (
+          <div className="fg-grid2">
+            <Field icon="X" value={px(one.x)} onChange={(v) => updatePieces([one.id], (p) => ({ ...p, x: round2(clamp(v / colW, 0, COLS - p.w)) }))} />
+            <Field icon="Y" value={Math.round(one.y * ROW)} onChange={(v) => updatePieces([one.id], (p) => ({ ...p, y: round2(Math.max(0, v / ROW)) }))} />
+          </div>
+        )}
+      </Panel>
+      <Panel title="Layout" action={one.part !== "stack" ? <button className="fg-icon-btn" title="Add auto layout (Shift A)" onClick={addAutoLayout}>+</button> : undefined}>
+        <div className="fg-grid2">
+          <Field icon="W" value={Math.round(r1?.w ?? px(one.w))} onChange={(v) => updatePieces([one.id], (p) => ({ ...p, w: round2(clamp(v / colW, 0.25, COLS - (p.parent ? 0 : p.x))), sizeW: p.parent || p.part === "stack" ? "fixed" : undefined }))} />
+          <Field icon="H" value={Math.round(r1?.h ?? one.h * ROW)} onChange={(v) => updatePieces([one.id], (p) => ({ ...p, h: round2(Math.max(0.5, v / ROW)), sizeH: p.parent || p.part === "stack" ? "fixed" : undefined }))} />
         </div>
-      </Section>
-      <Section title="Colours (all of them)">
-        <Row label="Background"><ColorField value={undefined} onChange={(v) => setStyle(ids, { bg: v })} /></Row>
-        <Row label="Text"><ColorField value={undefined} onChange={(v) => setStyle(ids, { text: v })} /></Row>
-        <Row label="Corners"><Slider value={styleOf(selected[0]).radius ?? 0} min={0} max={80} suffix="px" onChange={(v) => setStyle(ids, { radius: v })} /></Row>
-        <Row label="Shadow">
-          <div className="bl-seg">{(["none", "soft", "strong", "glow"] as const).map((k) => <button key={k} onClick={() => setStyle(ids, { shadow: k === "none" ? undefined : k })}>{k === "none" ? "None" : k[0].toUpperCase() + k.slice(1)}</button>)}</div>
+        {(inFrame || one.part === "stack") && <div className="fg-grid2 fg-sizings"><label>W {sizing("W")}</label><label>H {sizing("H")}</label></div>}
+        {!inFrame && <button className="fg-link" onClick={() => updatePieces([one.id], (p) => ({ ...p, x: 0, w: COLS }))}>⟷ Full width</button>}
+      </Panel>
+      {stackSection}
+      <Panel title="Appearance">
+        <div className="fg-grid2">
+          <Field icon="◐" title="Opacity" value={Math.round((st1.opacity ?? 1) * 100)} min={5} max={100} suffix="%" onChange={(v) => setStyle(ids, { opacity: v >= 100 ? undefined : v / 100 })} />
+          <Field icon="◜" title="Corner radius" value={Math.min(st1.radius ?? 0, 999)} min={0} max={999} onChange={(v) => setStyle(ids, { radius: v })} />
+        </div>
+        {part1?.design && <Toggle label="Keep its own design's colours" on={!!st1.keep} onChange={(v) => setStyle(ids, { keep: v || undefined })} />}
+      </Panel>
+      <Panel title="Fill" action={st1.bg ? undefined : <button className="fg-icon-btn" title="Add a fill" onClick={() => setStyle(ids, { bg: "#1c2030" })}>+</button>}>
+        {st1.bg ? <ColorRow value={st1.bg} onChange={(v) => setStyle(ids, { bg: v })} onRemove={() => setStyle(ids, { bg: undefined })} /> : <p className="fg-muted small">{part1?.design ? "Uses the design's own background" : "No fill"}</p>}
+      </Panel>
+      <Panel title="Stroke" action={st1.borderWidth ? undefined : <button className="fg-icon-btn" title="Add a stroke" onClick={() => setStyle(ids, { borderWidth: 1, borderColor: "#ffffff33" })}>+</button>}>
+        {!!st1.borderWidth && (
+          <>
+            <ColorRow value={st1.borderColor} onChange={(v) => setStyle(ids, { borderColor: v })} onRemove={() => setStyle(ids, { borderWidth: undefined, borderColor: undefined })} />
+            <Field icon="≡" title="Stroke width" value={st1.borderWidth} min={1} max={12} onChange={(v) => setStyle(ids, { borderWidth: v })} />
+          </>
+        )}
+      </Panel>
+      <Panel title="Effects" action={<button className="fg-icon-btn" title="Add an effect" onClick={() => setStyle(ids, st1.shadow ? { glass: true } : { shadow: "soft" })}>+</button>}>
+        {st1.shadow && (
+          <div className="fg-effect">
+            <select className="fg-select" value={st1.shadow} onChange={(e) => setStyle(ids, { shadow: e.target.value as PieceStyle["shadow"] })}>
+              <option value="soft">Drop shadow</option><option value="strong">Big shadow</option><option value="glow">Glow</option>
+            </select>
+            <button className="fg-icon-btn" title="Remove" onClick={() => setStyle(ids, { shadow: undefined })}>−</button>
+          </div>
+        )}
+        {st1.glass && (
+          <div className="fg-effect">
+            <span className="fg-effect-name">Background blur (glass)</span>
+            <button className="fg-icon-btn" title="Remove" onClick={() => setStyle(ids, { glass: undefined })}>−</button>
+          </div>
+        )}
+        <Field icon="▣" title="Padding inside" value={st1.pad ?? 0} min={0} max={80} onChange={(v) => setStyle(ids, { pad: v || undefined })} />
+      </Panel>
+      <Panel title="Text">
+        <select className="fg-select" value={st1.font || ""} onChange={(e) => setStyle(ids, { font: e.target.value || undefined })}><option value="">Page font</option>{FONT_CHOICES.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}</select>
+        <Field icon="Aa" title="Text size" value={st1.size ?? 100} min={50} max={250} step={5} suffix="%" onChange={(v) => setStyle(ids, { size: v === 100 ? undefined : v })} />
+        <Row label="Colour"><ColorRow value={st1.text} placeholder="page's" onChange={(v) => setStyle(ids, { text: v })} onRemove={st1.text ? () => setStyle(ids, { text: undefined }) : undefined} /></Row>
+        <Row label="Accent"><ColorRow value={st1.accent} placeholder="page's" onChange={(v) => setStyle(ids, { accent: v })} onRemove={st1.accent ? () => setStyle(ids, { accent: undefined }) : undefined} /></Row>
+      </Panel>
+      {contentProps.length > 0 && <Panel title="Content">{contentProps.map((d) => propField(one, d))}</Panel>}
+      <Panel title="Layer">
+        <div className="fg-grid2">
+          <Toggle label="Lock" on={!!one.locked} onChange={(v) => updatePieces([one.id], (p) => ({ ...p, locked: v || undefined }))} />
+          <Toggle label="Hide" on={!!one.hidden} onChange={(v) => updatePieces([one.id], (p) => ({ ...p, hidden: v || undefined }))} />
+        </div>
+        <Row label="On phones">
+          <Seg value={st1.phone || (part1?.deco ? "hide" : "show")} onChange={(v) => setStyle(ids, { phone: v })} options={[["show", "Show"], ["hide", "Hide"]]} />
         </Row>
-      </Section>
-      <Section title="Everything selected">
-        <div className="bl-seg wrap">
-          <button onClick={() => duplicateSel()}>⧉ Duplicate</button>
-          <button onClick={() => updatePieces(ids, (p) => ({ ...p, locked: !selected.every((x) => x.locked) || undefined }))}>🔒 Lock / unlock</button>
-          <button onClick={() => layer("front")}>⤒ Front</button><button onClick={() => layer("back")}>⤓ Back</button>
-          <button className="danger" onClick={removeSel}>🗑 Delete</button>
-        </div>
-      </Section>
+        {!inFrame && (
+          <div className="fg-seg wide">
+            <button title="Send to back (Ctrl [)" onClick={() => layer("back")}>⤓</button><button title="Backward ([)" onClick={() => layer("down")}>↓</button>
+            <button title="Forward (])" onClick={() => layer("up")}>↑</button><button title="Bring to front (Ctrl ])" onClick={() => layer("front")}>⤒</button>
+          </div>
+        )}
+      </Panel>
+    </>
+  ) : (
+    <>
+      <div className="fg-selhead"><span className="fg-selicon">⧉</span><strong>{selected.length} layers</strong></div>
+      {alignBar}
+      <Panel title="Auto layout" action={<button className="fg-icon-btn" title="Add auto layout (Shift A)" onClick={addAutoLayout}>+</button>}>
+        <p className="fg-muted small">Press + (or Shift A) to line these up in a frame.</p>
+      </Panel>
+      <Panel title="Appearance">
+        <Field icon="◜" title="Corner radius" value={0} mixed min={0} max={999} onChange={(v) => setStyle(ids, { radius: v })} />
+      </Panel>
+      <Panel title="Fill" action={<button className="fg-icon-btn" title="Add a fill" onClick={() => setStyle(ids, { bg: "#1c2030" })}>+</button>}>
+        <ColorRow value={undefined} placeholder="Mixed" onChange={(v) => setStyle(ids, { bg: v })} />
+      </Panel>
+      <Panel title="Effects">
+        <Seg value={"" as string} onChange={(v) => setStyle(ids, { shadow: v === "none" ? undefined : v as PieceStyle["shadow"] })} options={[["none", "None"], ["soft", "Shadow"], ["glow", "Glow"]]} />
+      </Panel>
     </>
   );
 
-  /* ---------- the canvas ---------- */
-  const H = frameH;
+  /* ---------- right: Prototype (what things do) ---------- */
+  const actionProps = (part1?.props || []).filter((d) => ACTION_KEYS.includes(d.key));
+  const viewerProps = (part1?.props || []).filter((d) => VIEWER_KEYS.includes(d.key));
+  const protoTab = !one ? (
+    <div className="fg-empty">
+      <div className="fg-empty-icon">◎</div>
+      <p>Pick a button to choose what happens when it&apos;s clicked, or a folder window to choose how it opens.</p>
+      <p className="fg-muted small">Ready-made buttons are in Assets → Functions &amp; buttons.</p>
+    </div>
+  ) : actionProps.length ? (
+    <Panel title="Interactions">
+      <div className="fg-interaction">
+        <span className="fg-trigger">On click</span>
+        <span className="fg-arrow">→</span>
+        <select className="fg-select" value={String(one.props?.action ?? "url")} onChange={(e) => setProp(one.id, "action", e.target.value)}>
+          {BUTTON_ACTIONS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        </select>
+      </div>
+      {actionProps.filter((d) => d.key !== "action").map((d) => propField(one, d))}
+      <p className="fg-muted small">Press ▶ (or P) to try it.</p>
+    </Panel>
+  ) : viewerProps.length ? (
+    <Panel title="Overlay">{viewerProps.map((d) => propField(one, d))}<p className="fg-muted small">Folders, Starred and search results open in this window.</p></Panel>
+  ) : (
+    <div className="fg-empty"><div className="fg-empty-icon">◎</div><p>{part1?.name} doesn&apos;t do anything when clicked — buttons and folder windows do.</p></div>
+  );
+
+  /* ---------- right: ✨ AI ---------- */
+  const suggestions = selected.length
+    ? ["Make these glassy with a soft glow", "Line these up in a row", "Give these my accent colour"]
+    : pieces.length ? ["Give me 3 ideas to make this better", "Make it feel cosier", "Add a focus timer and a to-do list"]
+    : ["A cosy dark page with a big clock and my folders as apps", "A neon gamer page", "A clean light page like a newspaper"];
+  const outOfMessages = usage !== null && !usage.unlimited && usage.left === 0;
+  const aiTab = (
+    <div className="fg-ai">
+      <div className="fg-ai-top">
+        <strong>✨ AI</strong>
+        <span className={`fg-ai-left ${usage && !usage.unlimited && (usage.left || 0) <= 3 ? "low" : ""}`}>{usage ? (usage.unlimited ? "Unlimited (owner)" : `${usage.left} of ${usage.limit} left today`) : ""}</span>
+      </div>
+      <div className="fg-ai-log">
+        {chat.length === 0 && (
+          <div className="fg-ai-hello">
+            <p>Tell me what you&apos;d like. I can <b>build a whole page</b>, <b>change what you&apos;ve picked</b>, or just <b>give ideas</b>.</p>
+            {selected.length > 0 && <p className="fg-muted small">I&apos;ll change the {selected.length} piece{selected.length === 1 ? "" : "s"} you picked.</p>}
+            <div className="fg-ai-sugs">{suggestions.map((t) => <button key={t} onClick={() => askAI(t)} disabled={aiBusy || outOfMessages || !doc}>{t}</button>)}</div>
+          </div>
+        )}
+        {chat.map((m, i) => (
+          <div key={i} className={`fg-ai-msg ${m.role} ${m.error ? "error" : ""}`}>
+            <p>{m.text}</p>
+            {m.before && (
+              <button className="fg-link" onClick={() => { const b = m.before!; setDoc(b); setChat((c) => c.map((x, j) => (j === i ? { ...x, before: undefined, text: `${x.text} (undone)` } : x))); }}>↶ Undo this</button>
+            )}
+          </div>
+        ))}
+        {aiBusy && <div className="fg-ai-msg assistant"><p className="fg-dots"><span /><span /><span /></p></div>}
+        <div ref={chatEnd} />
+      </div>
+      <form className="fg-ai-input" onSubmit={(e) => { e.preventDefault(); askAI(aiText); }}>
+        <textarea value={aiText} rows={2} maxLength={800} placeholder={selected.length ? "Change the picked pieces…" : "Describe a page, or ask anything…"}
+          disabled={!doc || outOfMessages}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); askAI(aiText); } }}
+          onChange={(e) => setAiText(e.target.value)} />
+        <button type="submit" disabled={aiBusy || !aiText.trim()} title="Send (Enter)">↑</button>
+      </form>
+      <p className="fg-muted small fg-ai-note">{outOfMessages ? "You've used today's 15 — they come back tomorrow. " : ""}Uses Pollinations&apos; free AI: what you type and your design are sent to it. It can be slow or busy sometimes.</p>
+    </div>
+  );
+
+  /* ---------- the canvas boxes ---------- */
   const handles = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
-  const statusText = status === "saving" ? "Saving…" : status === "error" ? "⚠️ Not saved" : dirty ? "Edited" : doc?.id ? "Saved ✓" : "Not saved yet";
+  const depthOf = (p: DesignPiece) => { let n = 0, at = p; while (at.parent && byId.get(at.parent) && n < 9) { at = byId.get(at.parent)!; n++; } return n; };
+  // frames first, then what's inside them (on top), so the inside can be clicked
+  const boxes = pieces.map((p) => ({ p, r: rectOf(p) })).filter((x): x is { p: DesignPiece; r: Box } => !!x.r)
+    .sort((a, b) => depthOf(a.p) - depthOf(b.p) || (a.p.parent ? 0 : a.p.z - b.p.z));
+  // Alt: how far the picked piece is from the one under the mouse (red lines, like Figma)
+  const measure = (() => {
+    if (!keys.alt || !one || !hoverId || hoverId === one.id) return null;
+    const a = rectOf(one), hp = byId.get(hoverId), h = hp ? rectOf(hp) : null;
+    if (!a || !h) return null;
+    const lines: { x1: number; y1: number; x2: number; y2: number; n: number }[] = [];
+    const cy = (Math.max(a.y, h.y) + Math.min(a.y + a.h, h.y + h.h)) / 2, cx = (Math.max(a.x, h.x) + Math.min(a.x + a.w, h.x + h.w)) / 2;
+    const ay = a.y + a.h / 2, ax = a.x + a.w / 2;
+    const yy = Math.max(a.y, h.y) < Math.min(a.y + a.h, h.y + h.h) ? cy : ay, xx = Math.max(a.x, h.x) < Math.min(a.x + a.w, h.x + h.w) ? cx : ax;
+    if (h.x >= a.x + a.w) lines.push({ x1: a.x + a.w, y1: yy, x2: h.x, y2: yy, n: h.x - a.x - a.w });
+    else if (h.x + h.w <= a.x) lines.push({ x1: h.x + h.w, y1: yy, x2: a.x, y2: yy, n: a.x - h.x - h.w });
+    if (h.y >= a.y + a.h) lines.push({ x1: xx, y1: a.y + a.h, x2: xx, y2: h.y, n: h.y - a.y - a.h });
+    else if (h.y + h.h <= a.y) lines.push({ x1: xx, y1: h.y + h.h, x2: xx, y2: a.y, n: a.y - h.y - h.h });
+    return lines;
+  })();
+  const cursor = keys.space || tool === "hand" ? (drag.current?.kind === "pan" ? "grabbing" : "grab") : tool !== "move" ? "crosshair" : undefined;
+  const toolBtn = (t: Tool, icon: ReactNode, label: string, key: string) => (
+    <button className={tool === t ? "on" : ""} title={`${label}  ${key}`} onClick={() => { setTool(t); setMode("edit"); setShapeMenu(false); }}>{icon}</button>
+  );
+  const selBounds = selected.length > 1 ? (() => {
+    const bs = selected.map((p) => rectOf(p)).filter(Boolean) as Box[];
+    if (!bs.length) return null;
+    const x = Math.min(...bs.map((b) => b.x)), y = Math.min(...bs.map((b) => b.y));
+    return { x, y, w: Math.max(...bs.map((b) => b.x + b.w)) - x, h: Math.max(...bs.map((b) => b.y + b.h)) - y };
+  })() : null;
 
   return (
-    <div className={`bl-app ${ctrlHeld ? "free" : ""}`} onPointerUp={onPointerUp}>
-      {/* top bar */}
-      <header className="bl-top">
-        <a className="bl-home" href="/" title="Back to the bookmarks">🔖</a>
-        <div className="bl-docname">
-          {doc ? (
-            <>
-              <span>{doc.emoji}</span>
-              <input value={doc.name} maxLength={40} aria-label="Design name" onChange={(e) => change((d) => ({ ...d, name: e.target.value }), false)} />
-              <em className={`bl-status ${status}`}>{statusText}</em>
-            </>
-          ) : <strong>Design builder</strong>}
-        </div>
-        <div className="bl-tools">
-          <button title="Undo (Ctrl Z)" disabled={!past.length} onClick={undo}>↶</button>
-          <button title="Redo (Ctrl Shift Z)" disabled={!future.length} onClick={redo}>↷</button>
-          <span className="bl-sep" />
-          <div className="bl-seg dark" role="group" aria-label="Screen size">
-            {DEVICES.map((d) => <button key={d.id} title={`${d.label} (${d.w}px)`} className={device === d.id ? "on" : ""} onClick={() => setDevice(d.id)}>{d.icon}</button>)}
+    <div className={`fg-app ${keys.ctrl ? "free" : ""}`} onPointerUp={() => onPointerUp()}
+      onContextMenu={(e) => { if (!(e.target as HTMLElement).closest("input,textarea")) e.preventDefault(); }}>
+      {/* ---------------- left panel ---------------- */}
+      <aside className="fg-left">
+        <div className="fg-filehead">
+          <button className={`fg-logo ${menu === "main" ? "on" : ""}`} onClick={() => setMenu(menu === "main" ? "" : "main")} title="Main menu">
+            <span>🔖</span><i>▾</i>
+          </button>
+          <div className="fg-filename">
+            <input value={doc?.name ?? "Design builder"} disabled={!doc} maxLength={40} aria-label="Design name" onChange={(e) => change((d) => ({ ...d, name: e.target.value }), false)} />
+            <em className={`fg-status ${status}`}>Drafts · {statusText}</em>
           </div>
-          <select className="bl-zoom" value={zoomPick === "fit" ? "fit" : String(zoomPick)} onChange={(e) => setZoomPick(e.target.value === "fit" ? "fit" : Number(e.target.value))} aria-label="Zoom">
-            <option value="fit">Fit ({Math.round(fitZoom * 100)}%)</option>
-            {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 2].map((z) => <option key={z} value={z}>{Math.round(z * 100)}%</option>)}
-            {zoomPick !== "fit" && ![0.25, 0.5, 0.75, 1, 1.25, 1.5, 2].includes(zoomPick) && <option value={zoomPick}>{Math.round(zoomPick * 100)}%</option>}
-          </select>
-          <span className="bl-sep" />
-          <div className="bl-seg dark" role="group" aria-label="Mode">
-            <button className={mode === "edit" ? "on" : ""} onClick={() => setMode("edit")} title="Move and change pieces">✏️ Edit</button>
-            <button className={mode === "try" ? "on" : ""} onClick={() => { setMode("try"); setSel([]); }} title="Click around your design for real (P)">▶ Try it</button>
+        </div>
+        {menu === "main" && (
+          <div className="fg-menu fg-mainmenu" onPointerDown={(e) => e.stopPropagation()}>
+            <a href="/">← Back to bookmarks</a>
+            <hr />
+            <button onClick={() => { setMenu(""); setModal("start"); }}>New design…</button>
+            <button onClick={() => { setMenu(""); refreshLists(); setGalleryTab("mine"); setModal("gallery"); }}>Open… <kbd>My designs</kbd></button>
+            <button onClick={() => { setMenu(""); refreshLists(); setGalleryTab("gallery"); setModal("gallery"); }}>Gallery</button>
+            <button disabled={!doc} onClick={() => { setMenu(""); if (doc) openDoc({ ...doc, id: undefined, name: `${doc.name} (copy)`.slice(0, 40), gallery: undefined }); }}>Duplicate design</button>
+            <button disabled={!doc} className="danger" onClick={() => { setMenu(""); deleteDoc(); }}>Delete design</button>
+            <hr />
+            <button disabled={!past.length} onClick={() => { setMenu(""); undo(); }}>Undo <kbd>Ctrl Z</kbd></button>
+            <button disabled={!future.length} onClick={() => { setMenu(""); redo(); }}>Redo <kbd>Ctrl Shift Z</kbd></button>
+            <button disabled={!selected.length} onClick={() => { setMenu(""); duplicateSel(); }}>Duplicate <kbd>Ctrl D</kbd></button>
+            <button disabled={!doc} onClick={() => { setMenu(""); addAutoLayout(); }}>Add auto layout <kbd>Shift A</kbd></button>
+            <hr />
+            <button onClick={() => { setMenu(""); setShowGrid((g) => !g); }}>{showGrid ? "✓ " : ""}Grid lines <kbd>G</kbd></button>
+            <button onClick={() => { setMenu(""); fit(); }}>Zoom to fit <kbd>Shift 1</kbd></button>
+            <hr />
+            <button onClick={() => { setMenu(""); setModal("help"); }}>Keyboard shortcuts <kbd>?</kbd></button>
           </div>
-          <select className="bl-zoom" value={previewState} onChange={(e) => setPreviewState(e.target.value as typeof previewState)} title="See how pop-ups and search look" aria-label="Show">
-            <option value="home">Show: Home</option>
-            <option value="folder">Show: a folder open</option>
-            <option value="search">Show: searching</option>
-          </select>
+        )}
+        <div className="fg-tabs">
+          <button className={leftTab === "file" ? "on" : ""} onClick={() => setLeftTab("file")}>File</button>
+          <button className={leftTab === "assets" ? "on" : ""} onClick={() => setLeftTab("assets")}>Assets</button>
         </div>
-        <div className="bl-right">
-          <button className="bl-btn ghost" onClick={() => { refreshLists(); setGalleryTab("mine"); setModal("gallery"); }}>📚 Designs</button>
-          <button className="bl-btn ghost" onClick={() => setModal("help")} title="Shortcuts and tips (?)">❓</button>
-          {doc && <button className="bl-btn ghost" onClick={() => setModal("share")}>🌍 Share</button>}
-          {doc && <button className="bl-btn primary" onClick={useDesign}>✅ Use this design</button>}
-        </div>
-      </header>
-
-      {/* parts and layers */}
-      <aside className="bl-left">
-        <div className="bl-tabs">
-          <button className={leftTab === "parts" ? "on" : ""} onClick={() => setLeftTab("parts")}>🧱 Parts</button>
-          <button className={leftTab === "layers" ? "on" : ""} onClick={() => setLeftTab("layers")}>🗂 Layers <em>{pieces.length}</em></button>
-        </div>
-        {leftTab === "parts" ? (
-          <>
-            <input className="bl-input bl-search" placeholder={`Search ${PARTS.length} parts…`} value={q} onChange={(e) => setQ(e.target.value)} />
-            <p className="bl-muted small">Drag a part onto the page, or click it.</p>
-            <div className="bl-scroll">{library}</div>
-          </>
-        ) : <div className="bl-scroll">{layerList}</div>}
+        {leftTab === "file" ? (
+          <div className="fg-scroll">
+            <div className="fg-pages">
+              <div className="fg-small-head">Pages</div>
+              {DEVICES.map((d) => (
+                <button key={d.id} className={device === d.id ? "on" : ""} onClick={() => setDevice(d.id)}>
+                  <span className="fg-tick">{device === d.id ? "✓" : ""}</span>{d.icon} {d.label}<em>{d.w}</em>
+                </button>
+              ))}
+            </div>
+            <div className="fg-small-head">Layers</div>
+            <div className="fg-layers" onDragOver={(e) => e.preventDefault()}>
+              {topLayers.length === 0 && <p className="fg-muted pad small">Nothing here yet. Open Assets (Shift I) and drag parts onto the page, or ask ✨ AI.</p>}
+              {topLayers.map((p) => layerRow(p, 0))}
+            </div>
+          </div>
+        ) : (
+          <div className="fg-scroll">
+            <input className="fg-input fg-asearch" placeholder={`Search ${PARTS.length} assets`} value={q} onChange={(e) => setQ(e.target.value)} />
+            {assets}
+          </div>
+        )}
       </aside>
 
-      {/* the canvas */}
-      <main className={`bl-stage ${mode}`} ref={stageRef} onPointerDown={(e) => { if (e.target === e.currentTarget) { setSel([]); setCtxMenu(null); } }}
-        onWheel={(e) => { if (e.ctrlKey) { e.preventDefault(); setZoomPick(round2(clamp(zoom - Math.sign(e.deltaY) * 0.08, 0.2, 2))); } }}>
+      {/* ---------------- the canvas ---------------- */}
+      <main className={`fg-stage ${mode}`} ref={stageRef} style={{ cursor }} onPointerDown={onStageDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
         {doc ? (
-          <div className="bl-frame" style={{ width: deviceW * zoom, height: H * zoom }}>
-            <div className="bl-scale" style={{ width: deviceW, height: H, transform: `scale(${zoom})` }}>
-              <iframe ref={iframeRef} className="bl-iframe" src="/?builder=preview" title="Your design" style={{ width: deviceW, height: H }} tabIndex={mode === "try" ? 0 : -1} />
+          <div className={`fg-world ${animate ? "anim" : ""}`} style={{ transform: `translate(${cam.x}px, ${cam.y}px) scale(${cam.z})` }}>
+            <div className="fg-framelabel" style={{ transform: `scale(${1 / cam.z})` }} onPointerDown={(e) => { e.stopPropagation(); setSel([]); }}>
+              {DEVICES.find((d) => d.id === device)!.label} <em>{deviceW} × {Math.round(rows * ROW)}</em>
+            </div>
+            <div className="fg-frame" style={{ width: deviceW, height: frameH }}>
+              <iframe ref={iframeRef} className="fg-iframe" src="/?builder=preview" title="Your design" style={{ width: deviceW, height: frameH }} tabIndex={mode === "try" ? 0 : -1} />
               {editing && (
-                <div ref={overlayRef} className={`bl-overlay ${showGrid ? "grid" : ""}`} style={{ "--colw": `${colW}px`, "--row": `${ROW}px` } as CSSProperties}
-                  onPointerDown={startMarquee} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
-                  onContextMenu={(e) => e.preventDefault()}
+                <div ref={overlayRef} className={`fg-overlay ${showGrid && !keys.ctrl ? "grid" : ""}`} style={{ "--colw": `${colW}px`, "--z": 1 / cam.z } as CSSProperties}
                   onDragOver={(e) => { if (e.dataTransfer.types.includes("application/x-part")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
                   onDrop={(e) => {
                     const id = e.dataTransfer.getData("application/x-part");
                     if (!id) return;
                     e.preventDefault();
-                    const { px, py } = toCanvas(e.clientX, e.clientY);
-                    addPart(id, { x: px / colW, y: py / ROW });
+                    const { px: wx, py: wy } = toWorld(e.clientX, e.clientY);
+                    const into = frameAt(wx, wy, new Set());
+                    const p = addPart(id, { x: wx / colW, y: wy / ROW });
+                    // dropped onto an auto layout frame: it goes inside
+                    if (p && into) change((d) => insertInto(d, p, into.stack, into.index), false);
                   }}>
-                  <div className="bl-pagebottom" style={{ top: rows * ROW }}><span>end of page · {rows} rows</span></div>
-                  {[...pieces].sort((a, b) => a.z - b.z).map((p) => {
+                  <div className="fg-pagebottom" style={{ top: rows * ROW }}><span>end of page</span></div>
+                  {boxes.map(({ p, r }) => {
                     const part = PART_BY_ID.get(p.part);
                     const on = sel.includes(p.id);
-                    // pop-up folder windows take no room on the page: grab them by their label (or in Layers)
                     const popup = VIEWERS.includes(p.part) && p.props?.mode !== "inline";
+                    const isStack = p.part === "stack";
                     return (
-                      <div key={p.id} className={`bl-box ${on ? "on" : ""} ${p.locked ? "locked" : ""} ${p.hidden ? "hidden" : ""} ${part?.design ? "design" : ""} ${popup ? "popup" : ""}`}
-                        style={{ left: p.x * colW, top: p.y * ROW, width: p.w * colW, height: p.h * ROW }}
+                      <div key={p.id} className={`fg-box ${on ? "on" : ""} ${hoverId === p.id ? "hover" : ""} ${p.locked ? "locked" : ""} ${p.hidden ? "hidden" : ""} ${part?.design ? "comp" : ""} ${popup ? "popup" : ""} ${isStack ? "stack" : ""} ${p.parent ? "child" : ""} ${ghost && drag.current?.start.has(p.id) ? "lifting" : ""}`}
+                        style={{ left: r.x, top: r.y, width: r.w, height: r.h }}
+                        onPointerEnter={() => setHoverId(p.id)} onPointerLeave={() => setHoverId((h) => (h === p.id ? null : h))}
                         onPointerDown={(e) => startMove(e, p)}
-                        onDoubleClick={() => { setLeftTab("layers"); }}
-                        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (!sel.includes(p.id)) setSel([p.id]); const r = stageRef.current!.getBoundingClientRect(); setCtxMenu({ x: e.clientX - r.left + stageRef.current!.scrollLeft, y: e.clientY - r.top + stageRef.current!.scrollTop }); }}>
-                        <span className="bl-box-tag" style={{ transform: `scale(${1 / zoom})` }} onPointerDown={popup ? (e) => startMove(e, p) : undefined}>{p.locked ? "🔒 " : ""}{part?.emoji} {p.name || part?.name}{p.hidden ? " (hidden)" : ""}{popup ? " · pop-up" : ""}</span>
-                        {on && sel.length === 1 && !p.locked && handles.map((h) => (
-                          <span key={h} className={`bl-handle ${h}`} style={{ "--hs": `${10 / zoom}px` } as CSSProperties} onPointerDown={(e) => startResize(e, p, h)} />
-                        ))}
-                        {on && sel.length === 1 && <span className="bl-size" style={{ transform: `translateX(-50%) scale(${1 / zoom})` }}>{round2(p.w)} × {round2(p.h)}</span>}
+                        onDoubleClick={() => { if (isStack) { const kids = childrenOf(p.id); if (kids.length) setSel([kids[0].id]); } else { setLeftTab("file"); setRenaming(p.id); } }}
+                        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (!sel.includes(p.id)) setSel([p.id]); const sr = stageRef.current!.getBoundingClientRect(); setCtxMenu({ x: e.clientX - sr.left, y: e.clientY - sr.top }); }}>
+                        {(on || hoverId === p.id || popup || (isStack && !p.parent)) && (
+                          <span className="fg-box-tag" onPointerDown={popup ? (e) => startMove(e, p) : undefined}>{p.locked ? "🔒 " : ""}{isStack ? "⬚ " : part?.design ? "◈ " : ""}{p.name || part?.name}{popup ? " · pop-up" : ""}</span>
+                        )}
+                        {on && sel.length === 1 && !p.locked && handles.map((h) => <span key={h} className={`fg-handle ${h}`} onPointerDown={(e) => startResize(e, p, h)} />)}
+                        {on && sel.length === 1 && <span className="fg-size">{Math.round(r.w)} × {Math.round(r.h)}{p.sizeW === "fill" ? " · Fill" : p.sizeW === "hug" ? " · Hug" : ""}</span>}
                       </div>
                     );
                   })}
-                  {guides.v.map((x) => <span key={`v${x}`} className="bl-guide v" style={{ left: x, width: 1 / zoom }} />)}
-                  {guides.h.map((y) => <span key={`h${y}`} className="bl-guide h" style={{ top: y, height: 1 / zoom }} />)}
-                  {marquee && <span className="bl-marquee" style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }} />}
+                  {selBounds && <div className="fg-groupbox" style={{ left: selBounds.x, top: selBounds.y, width: selBounds.w, height: selBounds.h }} />}
+                  {guides.v.map((x) => <span key={`v${x}`} className="fg-guide v" style={{ left: x }} />)}
+                  {guides.h.map((y) => <span key={`h${y}`} className="fg-guide h" style={{ top: y }} />)}
+                  {measure?.map((l, i) => (
+                    <span key={i} className={`fg-measure ${l.x1 === l.x2 ? "v" : "h"}`} style={{ left: Math.min(l.x1, l.x2), top: Math.min(l.y1, l.y2), width: Math.abs(l.x2 - l.x1), height: Math.abs(l.y2 - l.y1) }}>
+                      <b>{Math.round(l.n)}</b>
+                    </span>
+                  ))}
+                  {dropInto && (() => { const st = byId.get(dropInto.stack); const r = st ? rectOf(st) : null; return r ? <span className="fg-droptarget" style={{ left: r.x, top: r.y, width: r.w, height: r.h }} /> : null; })()}
+                  {dropInto && <span className="fg-insert" style={{ left: dropInto.line.x, top: dropInto.line.y, width: dropInto.line.w, height: dropInto.line.h }} />}
+                  {ghost && <span className="fg-ghost" style={{ left: ghost.x, top: ghost.y, width: ghost.w, height: ghost.h }} />}
+                  {marquee && <span className="fg-marquee" style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }} />}
+                  {drawBox && <span className={`fg-drawbox ${tool}`} style={{ left: drawBox.x, top: drawBox.y, width: drawBox.w, height: drawBox.h }} />}
                 </div>
               )}
             </div>
           </div>
-        ) : <div className="bl-empty-stage"><button className="bl-btn primary" onClick={() => setModal("start")}>Start a design</button></div>}
+        ) : <div className="fg-empty-stage"><button className="fg-btn primary" onClick={() => setModal("start")}>Start a design</button></div>}
+
         {ctxMenu && (
-          <div className="bl-ctx" style={{ left: ctxMenu.x, top: ctxMenu.y }} onPointerDown={(e) => e.stopPropagation()}>
-            <button onClick={() => { duplicateSel(); setCtxMenu(null); }}>⧉ Duplicate <kbd>Ctrl D</kbd></button>
-            <button onClick={() => { clipboard.current = selected.map((p) => ({ ...p })); setCtxMenu(null); say("Copied"); }}>📋 Copy <kbd>Ctrl C</kbd></button>
-            <button disabled={!clipboard.current.length} onClick={() => { paste(); setCtxMenu(null); }}>📥 Paste <kbd>Ctrl V</kbd></button>
+          <div className="fg-menu fg-ctx" style={{ left: ctxMenu.x, top: ctxMenu.y }} onPointerDown={(e) => e.stopPropagation()}>
+            <button onClick={() => { clipboard.current = selected.map((p) => ({ ...p })); setCtxMenu(null); say("Copied"); }}>Copy <kbd>Ctrl C</kbd></button>
+            <button disabled={!clipboard.current.length} onClick={() => { paste(); setCtxMenu(null); }}>Paste <kbd>Ctrl V</kbd></button>
+            <button onClick={() => { duplicateSel(); setCtxMenu(null); }}>Duplicate <kbd>Ctrl D</kbd></button>
+            <button className="danger" onClick={() => { removeSel(); setCtxMenu(null); }}>Delete <kbd>Del</kbd></button>
             <hr />
-            <button onClick={() => { layer("front"); setCtxMenu(null); }}>⤒ Bring to front <kbd>Ctrl ]</kbd></button>
-            <button onClick={() => { layer("back"); setCtxMenu(null); }}>⤓ Send to back <kbd>Ctrl [</kbd></button>
+            <button onClick={() => { layer("front"); setCtxMenu(null); }}>Bring to front <kbd>Ctrl ]</kbd></button>
+            <button onClick={() => { layer("back"); setCtxMenu(null); }}>Send to back <kbd>Ctrl [</kbd></button>
             <hr />
-            <button onClick={() => { updatePieces(sel, (p) => ({ ...p, locked: !p.locked })); setCtxMenu(null); }}>🔒 Lock / unlock</button>
-            <button onClick={() => { updatePieces(sel, (p) => ({ ...p, hidden: !p.hidden })); setCtxMenu(null); }}>👁️ Hide / show</button>
-            <button onClick={() => { align("pageCenter"); setCtxMenu(null); }}>↔ Centre on page</button>
+            <button onClick={() => { addAutoLayout(); setCtxMenu(null); }}>Add auto layout <kbd>Shift A</kbd></button>
+            {one?.part === "stack" && <button onClick={() => { removeAutoLayout(one.id); setCtxMenu(null); }}>Remove auto layout <kbd>Alt Shift A</kbd></button>}
+            <button onClick={() => { zoomToSelection(); setCtxMenu(null); }}>Zoom to selection <kbd>Shift 2</kbd></button>
             <hr />
-            <button className="danger" onClick={() => { removeSel(); setCtxMenu(null); }}>🗑 Delete <kbd>Del</kbd></button>
+            <button onClick={() => { updatePieces(sel, (p) => ({ ...p, hidden: !p.hidden || undefined })); setCtxMenu(null); }}>Show / hide <kbd>Ctrl Shift H</kbd></button>
+            <button onClick={() => { updatePieces(sel, (p) => ({ ...p, locked: !p.locked || undefined })); setCtxMenu(null); }}>Lock / unlock <kbd>Ctrl Shift L</kbd></button>
+            <button onClick={() => { setRightTab("ai"); setCtxMenu(null); }}>✨ Ask AI about this</button>
+          </div>
+        )}
+
+        {doc && (
+          <div className="fg-toolbar">
+            {toolBtn("move", <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3l12 7.5-5.4 1.6L10 18z" /></svg>, "Move", "V")}
+            {toolBtn("hand", <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 11V5.5a1.5 1.5 0 013 0V11m0-1V4.5a1.5 1.5 0 013 0V11m0-.5V6a1.5 1.5 0 013 0v7c0 4-2.5 7-6 7s-5-1.5-7-5l-1.5-3a1.4 1.4 0 012.4-1.4L8 13" /></svg>, "Hand", "H")}
+            <span className="fg-tsep" />
+            {toolBtn("frame", <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3v18M16 3v18M3 8h18M3 16h18" /></svg>, "Frame (auto layout)", "F")}
+            <div className="fg-tgroup">
+              <button className={["rect", "ellipse", "line"].includes(tool) ? "on" : ""} title="Shapes" onClick={() => { setTool(["rect", "ellipse", "line"].includes(tool) ? tool : "rect"); setMode("edit"); }}>
+                {tool === "ellipse" ? <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5" /></svg> : tool === "line" ? <svg viewBox="0 0 24 24"><path d="M5 19L19 5" /></svg> : <svg viewBox="0 0 24 24"><rect x="4.5" y="4.5" width="15" height="15" rx="1" /></svg>}
+              </button>
+              <button className="fg-tcaret" title="More shapes" onClick={() => setShapeMenu(!shapeMenu)}>▾</button>
+              {shapeMenu && (
+                <div className="fg-menu fg-shapemenu">
+                  <button onClick={() => { setTool("rect"); setShapeMenu(false); }}>▭ Rectangle <kbd>R</kbd></button>
+                  <button onClick={() => { setTool("ellipse"); setShapeMenu(false); }}>○ Ellipse <kbd>O</kbd></button>
+                  <button onClick={() => { setTool("line"); setShapeMenu(false); }}>╱ Line <kbd>L</kbd></button>
+                </div>
+              )}
+            </div>
+            {toolBtn("text", <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6V4.5h14V6M12 4.5v15M9 19.5h6" /></svg>, "Text", "T")}
+            <span className="fg-tsep" />
+            <button title="Assets  Shift I" className={leftTab === "assets" ? "soft" : ""} onClick={() => setLeftTab("assets")}><svg viewBox="0 0 24 24"><path d="M12 3l3 3-3 3-3-3zM6 9l3 3-3 3-3-3zM18 9l3 3-3 3-3-3zM12 15l3 3-3 3-3-3z" /></svg></button>
+            <button title="✨ AI" className={`fg-tai ${rightTab === "ai" ? "on" : ""}`} onClick={() => setRightTab(rightTab === "ai" ? "design" : "ai")}>✨</button>
+            <span className="fg-tsep" />
+            <button className={mode === "try" ? "on" : ""} title="Try it — click around for real  P" onClick={() => { setMode(mode === "try" ? "edit" : "try"); setSel([]); }}><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z" /></svg></button>
           </div>
         )}
         {doc && (
-          <div className="bl-hint">
-            {device === "phone" ? "📲 On phones pieces stack top to bottom (small ones sit side by side). Switch to a bigger screen to move things."
-              : mode === "try" ? "▶ Try it: click around like it's your real page. Press P (or ✏️ Edit) to go back to editing."
-              : ctrlHeld ? "🎯 Free placement: no grid — pink lines show when edges line up."
-              : "Drag to move · corners to resize · hold Ctrl to place freely · Shift-click to pick several · right-click for more"}
+          <div className="fg-hint">
+            {device === "phone" ? "📲 On phones pieces stack top to bottom — pick a bigger page to move things."
+              : mode === "try" ? "▶ Trying it out — click around like it's your real page. Press P to edit again."
+              : tool !== "move" && tool !== "hand" ? "Drag on the page to draw · Esc to cancel"
+              : keys.ctrl ? "Free placement — red lines show when edges line up"
+              : keys.alt && one ? "Point at another piece to see the distance"
+              : "Scroll to move · Ctrl + scroll to zoom · Space + drag to pan · hold Ctrl to place freely · Shift A for auto layout"}
           </div>
+        )}
+        {doc && (
+          <select className="fg-previewsel" value={previewState} onChange={(e) => setPreviewState(e.target.value as typeof previewState)} title="Preview how pop-ups and search look">
+            <option value="home">Preview: Home</option>
+            <option value="folder">Preview: a folder open</option>
+            <option value="search">Preview: searching</option>
+          </select>
         )}
       </main>
 
-      {/* settings */}
-      <aside className="bl-rightpanel">
-        <div className="bl-scroll">
-          {!doc ? <p className="bl-muted">Start a design to see its settings.</p> : selected.length > 1 ? multiSettings : one ? pieceSettings : pageSettings}
+      {/* ---------------- right panel ---------------- */}
+      <aside className="fg-right">
+        <div className="fg-righthead">
+          <span className="fg-avatar" title={me.user}>{me.user[0]?.toUpperCase()}</span>
+          <span className="fg-flex" />
+          <button className={`fg-play ${mode === "try" ? "on" : ""}`} title="Try it (P)" onClick={() => { setMode(mode === "try" ? "edit" : "try"); setSel([]); }}><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z" /></svg></button>
+          <button className="fg-btn ghost sm" title="Use this design as your home page" onClick={applyDesign} disabled={!doc}>Use</button>
+          <button className="fg-btn primary sm" onClick={() => setModal("share")} disabled={!doc}>Share</button>
+        </div>
+        <div className="fg-tabs right">
+          <button className={rightTab === "design" ? "on" : ""} onClick={() => setRightTab("design")}>Design</button>
+          <button className={rightTab === "prototype" ? "on" : ""} onClick={() => setRightTab("prototype")}>Prototype</button>
+          <button className={rightTab === "ai" ? "on" : ""} onClick={() => setRightTab("ai")}>✨ AI</button>
+          <span className="fg-flex" />
+          <div className="fg-zoomwrap">
+            <button className="fg-zoombtn" onClick={() => setMenu(menu === "zoom" ? "" : "zoom")}>{Math.round(cam.z * 100)}%<i>▾</i></button>
+            {menu === "zoom" && (
+              <div className="fg-menu fg-zoommenu" onPointerDown={(e) => e.stopPropagation()}>
+                <button onClick={() => { zoomAt(1.25, undefined, undefined, true); setMenu(""); }}>Zoom in <kbd>Ctrl +</kbd></button>
+                <button onClick={() => { zoomAt(0.8, undefined, undefined, true); setMenu(""); }}>Zoom out <kbd>Ctrl −</kbd></button>
+                <button onClick={() => { fit(); setMenu(""); }}>Zoom to fit <kbd>Shift 1</kbd></button>
+                <button disabled={!selected.length} onClick={() => { zoomToSelection(); setMenu(""); }}>Zoom to selection <kbd>Shift 2</kbd></button>
+                <hr />
+                {[0.5, 1, 2].map((z) => <button key={z} onClick={() => { zoomAt(z / cam.z, undefined, undefined, true); setMenu(""); }}>Zoom to {z * 100}% {z === 1 && <kbd>Shift 0</kbd>}</button>)}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className={`fg-scroll ${rightTab === "ai" ? "noscroll" : ""}`}>
+          {rightTab === "design" ? designTab : rightTab === "prototype" ? protoTab : aiTab}
         </div>
       </aside>
 
-      {toast && <div className="bl-toast" role="status">{toast}</div>}
+      {toast && <div className="fg-toast" role="status">{toast}</div>}
 
-      {/* start: pick where to begin */}
+      {/* ---------------- new design / designs / share / shortcuts ---------------- */}
       {modal === "start" && (
-        <div className="bl-modal-bg" onClick={() => doc && setModal("")}>
-          <div className="bl-modal wide" onClick={(e) => e.stopPropagation()}>
-            <h2>🎨 Start a design</h2>
-            <p className="bl-muted">Begin from a blank page or from any of the site&apos;s designs, already rebuilt out of pieces you can move.</p>
-            <div className="bl-tpls">
+        <div className="fg-modal-bg" onClick={() => doc && setModal("")}>
+          <div className="fg-modal wide" onClick={(e) => e.stopPropagation()}>
+            <div className="fg-modal-top"><h2>New design</h2>{doc && <button className="fg-x" onClick={() => setModal("")} aria-label="Close">×</button>}</div>
+            <p className="fg-muted">Start from a blank page or any of the site&apos;s designs — already rebuilt out of pieces you can move. Or ask ✨ AI once you&apos;re in.</p>
+            <div className="fg-tpls">
               {TEMPLATE_LIST.map(([k, l, e]) => (
-                <button key={k} className="bl-tpl" onClick={() => newFromTemplate(k)}>
+                <button key={k} className="fg-tpl" onClick={() => newFromTemplate(k)}>
                   <DesignMini d={templateDesign(k)} />
                   <strong>{e} {l}</strong>
                 </button>
@@ -1074,10 +1685,10 @@ export default function Builder() {
             </div>
             {(lists?.mine.length || 0) > 0 && (
               <>
-                <h3>Your designs</h3>
-                <div className="bl-tpls">
+                <h3>Recents</h3>
+                <div className="fg-tpls">
                   {lists!.mine.map((d) => (
-                    <button key={d.id} className="bl-tpl" onClick={() => openDoc(d)}>
+                    <button key={d.id} className="fg-tpl" onClick={() => openDoc(d)}>
                       <DesignMini d={d} />
                       <strong>{d.emoji} {d.name}</strong>
                       <em>{d.gallery === "approved" ? "🌍 In the gallery" : d.gallery === "pending" ? "⏳ Waiting for a check" : "Only you"}</em>
@@ -1086,127 +1697,102 @@ export default function Builder() {
                 </div>
               </>
             )}
-            <div className="bl-modal-foot">
-              <button className="bl-btn ghost" onClick={() => { setGalleryTab("gallery"); setModal("gallery"); }}>🌍 Browse the gallery</button>
-              {doc && <button className="bl-btn" onClick={() => setModal("")}>Back to my design</button>}
-            </div>
+            <div className="fg-modal-foot"><button className="fg-btn ghost" onClick={() => { setGalleryTab("gallery"); setModal("gallery"); }}>🌍 Browse the gallery</button></div>
           </div>
         </div>
       )}
-
-      {/* designs: mine, the gallery, and (staff) ones waiting for a check */}
       {modal === "gallery" && (
-        <div className="bl-modal-bg" onClick={() => setModal(doc ? "" : "start")}>
-          <div className="bl-modal wide" onClick={(e) => e.stopPropagation()}>
-            <div className="bl-modal-top">
-              <h2>📚 Designs</h2>
-              <div className="bl-seg">
-                <button className={galleryTab === "mine" ? "on" : ""} onClick={() => setGalleryTab("mine")}>Mine ({lists?.mine.length || 0})</button>
-                <button className={galleryTab === "gallery" ? "on" : ""} onClick={() => setGalleryTab("gallery")}>🌍 Gallery ({lists?.gallery.length || 0})</button>
-                {staff && <button className={galleryTab === "pending" ? "on" : ""} onClick={() => setGalleryTab("pending")}>🛡️ To check ({lists?.pending?.length || 0})</button>}
-              </div>
-              <button className="bl-x big" onClick={() => setModal(doc ? "" : "start")} aria-label="Close">×</button>
+        <div className="fg-modal-bg" onClick={() => setModal(doc ? "" : "start")}>
+          <div className="fg-modal wide" onClick={(e) => e.stopPropagation()}>
+            <div className="fg-modal-top">
+              <h2>Designs</h2>
+              <Seg value={galleryTab} onChange={setGalleryTab} options={[
+                ["mine", `Mine (${lists?.mine.length || 0})`], ["gallery", `🌍 Gallery (${lists?.gallery.length || 0})`],
+                ...(staff ? [["pending", `🛡️ To check (${lists?.pending?.length || 0})`] as ["pending", string]] : []),
+              ]} />
+              <button className="fg-x" onClick={() => setModal(doc ? "" : "start")} aria-label="Close">×</button>
             </div>
-            <div className="bl-gallery">
+            <div className="fg-gallery">
               {(galleryTab === "mine" ? lists?.mine : galleryTab === "pending" ? lists?.pending : lists?.gallery)?.map((d) => (
-                <div key={d.id} className="bl-gcard">
+                <div key={d.id} className="fg-gcard">
                   <DesignMini d={d} />
-                  <div className="bl-gcard-body">
-                    <strong>{d.emoji} {d.name}</strong>
-                    <em>{galleryTab === "mine" ? (d.gallery === "approved" ? "🌍 Shared" : d.gallery === "pending" ? "⏳ Waiting for a check" : "🔒 Only you") : `by ${d.owner} · used ${d.uses || 0}×`}{lists?.siteDefault === d.id ? " · ⭐ site default" : ""}</em>
-                    {d.description && <p>{d.description}</p>}
-                    <div className="bl-gcard-actions">
-                      {galleryTab === "mine" ? (
-                        <>
-                          <button className="bl-btn primary" onClick={() => openDoc(d)}>✏️ Edit</button>
-                          <button className="bl-btn" onClick={async () => { await api("/api/designs", { action: "use", id: d.id }).catch(() => {}); if (window.opener && !window.opener.closed) { window.opener.postMessage({ type: "use-design", id: d.id }, location.origin); say("✅ It's on"); } else window.open(`/?design=${d.id}`, "_blank"); }}>Use</button>
-                          <button className="bl-btn ghost" onClick={async () => { if (confirm(`Delete “${d.name}”?`)) { await galleryAction("delete", d.id, "Deleted"); if (docRef.current?.id === d.id) { docRef.current = null; setDocState(null); setModal("start"); } } }}>🗑</button>
-                        </>
-                      ) : galleryTab === "pending" ? (
-                        <>
-                          <button className="bl-btn primary" onClick={() => galleryAction("approve", d.id, "✅ Approved — it's in the gallery")}>✅ Approve</button>
-                          <button className="bl-btn" onClick={() => galleryAction("reject", d.id, "Sent back — it stays private")}>✖ Not okay</button>
-                          <button className="bl-btn ghost" onClick={() => window.open(`/?design=${d.id}`, "_blank")}>👀 Try it</button>
-                        </>
-                      ) : (
-                        <>
-                          <button className="bl-btn primary" onClick={async () => { await api("/api/designs", { action: "use", id: d.id }).catch(() => {}); refreshLists(); if (window.opener && !window.opener.closed) { window.opener.postMessage({ type: "use-design", id: d.id }, location.origin); say("✅ It's on — look at your other tab"); } else window.open(`/?design=${d.id}`, "_blank"); }}>Use it</button>
-                          <button className="bl-btn" onClick={async () => { const r = await galleryAction("copy", d.id, "Copied — it's yours to change"); if (r?.saved) openDoc(r.saved); }}>⧉ Copy & edit</button>
-                          {staff && <button className="bl-btn ghost" onClick={() => galleryAction("unshare", d.id, "Taken out of the gallery")}>Remove</button>}
-                          {isAdmin && <button className="bl-btn ghost" title="New visitors start with this design" onClick={() => setSiteDefault(lists?.siteDefault === d.id ? "" : d.id)}>{lists?.siteDefault === d.id ? "★ Default" : "☆ Make default"}</button>}
-                        </>
-                      )}
-                    </div>
+                  <strong>{d.emoji} {d.name}</strong>
+                  <em>{galleryTab === "mine" ? (d.gallery === "approved" ? "🌍 Shared" : d.gallery === "pending" ? "⏳ Waiting for a check" : "🔒 Only you") : `by ${d.owner} · used ${d.uses || 0}×`}{lists?.siteDefault === d.id ? " · ⭐ site default" : ""}</em>
+                  {d.description && <p>{d.description}</p>}
+                  <div className="fg-gcard-actions">
+                    {galleryTab === "mine" ? (
+                      <>
+                        <button className="fg-btn primary sm" onClick={() => openDoc(d)}>Open</button>
+                        <button className="fg-btn sm" onClick={() => switchTo(d.id)}>Use</button>
+                        <button className="fg-btn ghost sm" onClick={async () => { if (confirm(`Delete “${d.name}”?`)) { await galleryAction("delete", d.id, "Deleted"); if (docRef.current?.id === d.id) { docRef.current = null; setDocState(null); setModal("start"); } } }}>Delete</button>
+                      </>
+                    ) : galleryTab === "pending" ? (
+                      <>
+                        <button className="fg-btn primary sm" onClick={() => galleryAction("approve", d.id, "✅ Approved — it's in the gallery")}>Approve</button>
+                        <button className="fg-btn sm" onClick={() => galleryAction("reject", d.id, "Sent back — it stays private")}>Not okay</button>
+                        <button className="fg-btn ghost sm" onClick={() => window.open(`/?design=${d.id}`, "_blank")}>Try it</button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="fg-btn primary sm" onClick={() => switchTo(d.id)}>Use it</button>
+                        <button className="fg-btn sm" onClick={async () => { const r = await galleryAction("copy", d.id, "Copied — it's yours to change"); if (r?.saved) openDoc(r.saved); }}>Copy &amp; edit</button>
+                        {staff && <button className="fg-btn ghost sm" onClick={() => galleryAction("unshare", d.id, "Taken out of the gallery")}>Remove</button>}
+                        {isAdmin && <button className="fg-btn ghost sm" onClick={() => setSiteDefault(lists?.siteDefault === d.id ? "" : d.id)}>{lists?.siteDefault === d.id ? "★ Default" : "☆ Make default"}</button>}
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
               {((galleryTab === "mine" ? lists?.mine : galleryTab === "pending" ? lists?.pending : lists?.gallery)?.length || 0) === 0 && (
-                <p className="bl-muted">{galleryTab === "mine" ? "You haven't made any designs yet." : galleryTab === "pending" ? "Nothing waiting — all checked! ✨" : "Nobody has shared a design yet — be the first! 🌍"}</p>
+                <p className="fg-muted">{galleryTab === "mine" ? "You haven't made any designs yet." : galleryTab === "pending" ? "Nothing waiting — all checked! ✨" : "Nobody has shared a design yet — be the first! 🌍"}</p>
               )}
             </div>
-            <div className="bl-modal-foot">
-              <button className="bl-btn" onClick={() => setModal("start")}>➕ New design</button>
-              {doc?.id && <button className="bl-btn ghost danger" onClick={deleteDoc}>🗑 Delete this design</button>}
-            </div>
+            <div className="fg-modal-foot"><button className="fg-btn" onClick={() => setModal("start")}>+ New design</button></div>
           </div>
         </div>
       )}
-
-      {/* sharing */}
       {modal === "share" && doc && (
-        <div className="bl-modal-bg" onClick={() => setModal("")}>
-          <div className="bl-modal" onClick={(e) => e.stopPropagation()}>
-            <h2>🌍 Share “{doc.name}”</h2>
+        <div className="fg-modal-bg" onClick={() => setModal("")}>
+          <div className="fg-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="fg-modal-top"><h2>Share “{doc.name}”</h2><button className="fg-x" onClick={() => setModal("")} aria-label="Close">×</button></div>
+            <div className="fg-sharebox">
+              <span className="fg-avatar">{me.user[0]?.toUpperCase()}</span>
+              <div><strong>{me.user} (you)</strong><em>owner</em></div>
+            </div>
             {doc.gallery === "approved" ? (
-              <>
-                <p>It&apos;s in the gallery — anyone can use it or make a copy. If you change it, a moderator checks it again first.</p>
-                <button className="bl-btn" onClick={() => share(false)}>Take it out of the gallery</button>
-              </>
+              <><p>🌍 It&apos;s in the gallery — anyone can use it or make a copy. If you change it, a moderator checks it again.</p><button className="fg-btn" onClick={() => share(false)}>Take it out of the gallery</button></>
             ) : doc.gallery === "pending" ? (
-              <>
-                <p>⏳ Waiting for a moderator to check it. It shows in the gallery once they say it&apos;s okay.</p>
-                <button className="bl-btn" onClick={() => share(false)}>Cancel sharing</button>
-              </>
+              <><p>⏳ Waiting for a moderator to check it.</p><button className="fg-btn" onClick={() => share(false)}>Cancel sharing</button></>
             ) : (
-              <>
-                <p>Put your design in the gallery so other people can use it or make their own copy. A moderator checks it first (pictures and text follow the site rules).</p>
-                <button className="bl-btn primary" onClick={() => share(true)}>🌍 Share to the gallery</button>
-              </>
+              <><p>Put it in the gallery so others can use it or copy it. A moderator checks it first.</p><button className="fg-btn primary" onClick={() => share(true)}>🌍 Share to the gallery</button></>
             )}
             {doc.id && (
-              <>
-                <h3>Link</h3>
-                <p className="bl-muted">{doc.gallery === "approved" ? "Anyone with this link can switch to your design:" : "Works for other people once it's in the gallery:"}</p>
-                <div className="bl-copyrow">
-                  <input className="bl-input" readOnly value={`${location.origin}/?design=${doc.id}`} onFocus={(e) => e.target.select()} />
-                  <button className="bl-btn" onClick={() => { navigator.clipboard?.writeText(`${location.origin}/?design=${doc.id}`); say("Link copied 📋"); }}>Copy</button>
-                </div>
-              </>
+              <div className="fg-copyrow">
+                <input className="fg-input" readOnly value={`${location.origin}/?design=${doc.id}`} onFocus={(e) => e.target.select()} />
+                <button className="fg-btn" onClick={() => { navigator.clipboard?.writeText(`${location.origin}/?design=${doc.id}`); say("Link copied"); }}>🔗 Copy link</button>
+              </div>
             )}
-            <div className="bl-modal-foot"><button className="bl-btn" onClick={() => setModal("")}>Done</button></div>
+            <div className="fg-modal-foot"><button className="fg-btn primary" onClick={applyDesign}>✅ Use as my home page</button></div>
           </div>
         </div>
       )}
-
-      {/* help */}
       {modal === "help" && (
-        <div className="bl-modal-bg" onClick={() => setModal("")}>
-          <div className="bl-modal" onClick={(e) => e.stopPropagation()}>
-            <h2>❓ How it works</h2>
-            <ul className="bl-help">
-              <li><b>Add</b> — drag a part from the left onto the page (or click it).</li>
-              <li><b>Move</b> — drag a piece. It snaps to the grid. <kbd>Ctrl</kbd> + drag places it anywhere, with pink lines when edges line up.</li>
-              <li><b>Resize</b> — drag the little squares on its edges and corners (<kbd>Ctrl</kbd> for no snapping).</li>
-              <li><b>Pick several</b> — <kbd>Shift</kbd>-click, or drag a box around them on an empty spot.</li>
-              <li><b>Settings</b> — the right side changes colours, shape, font, options and layering of whatever&apos;s picked. With nothing picked, it changes the whole page.</li>
-              <li><b>Try it</b> — ▶ Try it (or <kbd>P</kbd>) lets you click around your design for real.</li>
-            </ul>
-            <div className="bl-keys">
-              {[["Ctrl Z / Ctrl Shift Z", "Undo / redo"], ["Ctrl D", "Duplicate"], ["Ctrl C / V / X", "Copy / paste / cut"], ["Del", "Delete"], ["Arrows", "Nudge (Shift = 4, Ctrl = tiny)"],
-                ["[ ]", "Backward / forward"], ["Ctrl [ ]", "To back / to front"], ["Ctrl A", "Pick everything"], ["Ctrl Shift L / H", "Lock / hide"], ["G", "Grid lines on/off"],
-                ["Ctrl + / − / 0", "Zoom in / out / fit"], ["Ctrl S", "Save now (it saves by itself too)"]].map(([k, v]) => <div key={k}><kbd>{k}</kbd><span>{v}</span></div>)}
+        <div className="fg-modal-bg" onClick={() => setModal("")}>
+          <div className="fg-modal wide" onClick={(e) => e.stopPropagation()}>
+            <div className="fg-modal-top"><h2>Keyboard shortcuts</h2><button className="fg-x" onClick={() => setModal("")} aria-label="Close">×</button></div>
+            <div className="fg-keys">
+              {([
+                ["Tools", [["V", "Move"], ["H / Space", "Hand (pan)"], ["F", "Frame (auto layout)"], ["R", "Rectangle"], ["O", "Ellipse"], ["L", "Line"], ["T", "Text"], ["Shift I", "Assets"], ["P", "Try it"]]],
+                ["Edit", [["Ctrl Z / Ctrl Shift Z", "Undo / redo"], ["Ctrl C / V / X", "Copy / paste / cut"], ["Ctrl D", "Duplicate"], ["Del", "Delete"], ["Ctrl A", "Select all"], ["Esc", "Select the frame, then nothing"], ["Enter", "Select inside a frame"], ["Ctrl Shift L / H", "Lock / hide"]]],
+                ["Arrange", [["Shift A", "Add auto layout"], ["Alt Shift A", "Remove auto layout"], ["[ ]", "Backward / forward"], ["Ctrl [ ]", "To back / front"], ["Arrows", "Nudge (Shift = 4, Alt = tiny)"], ["Ctrl + drag", "Place freely"], ["Alt + point", "Measure distance"]]],
+                ["View", [["Scroll", "Move around"], ["Ctrl + scroll", "Zoom"], ["Shift 1", "Zoom to fit"], ["Shift 2", "Zoom to selection"], ["Shift 0", "100%"], ["G", "Grid lines"]]],
+              ] as [string, string[][]][]).map(([title, list]) => (
+                <div key={title}>
+                  <h3>{title}</h3>
+                  {list.map(([k, v]) => <div key={k} className="fg-key"><span>{v}</span><kbd>{k}</kbd></div>)}
+                </div>
+              ))}
             </div>
-            <div className="bl-modal-foot"><button className="bl-btn primary" onClick={() => setModal("")}>Got it</button></div>
           </div>
         </div>
       )}
