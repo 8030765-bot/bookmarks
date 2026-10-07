@@ -90,7 +90,7 @@ Parts you can use (id (name) default size {options}):
 ${partsForAI()}
 
 Auto layout: a "stack" piece lines up pieces you put inside it. Give the child "parent": "<stack id>". Children may set "sizeW"/"sizeH" to "fixed", "fill" or "hug". Stack options: dir row|column, gap, pad, align, justify.
-Piece "style" (all optional): bg, text, accent, borderColor (hex colours); glass (true/false); radius (0-999); borderWidth (0-12); shadow (none|soft|strong|glow); pad (0-80); opacity (0.05-1); font (${FONT_CHOICES.map((f) => f.id).join("|")}); size (text size %, 50-250); keep (true keeps a design piece's own colours).
+Piece "style" (all optional): bg, text, accent, borderColor (hex colours); glass (true/false); radius (0-999); borderWidth (0-12); shadow (none|soft|strong|glow); pad (0-80); opacity (0.05-1); rotate (degrees, -180 to 180); font (${FONT_CHOICES.map((f) => f.id).join("|")}); size (text size %, 50-250); keep (true keeps a design piece's own colours).
 Page ("canvas"): bg, text, accent (hex), font, tone (dark|light), bgPattern (none|dots|grid|gradient|aurora|stripes), bgImage (https url or ""), blend (true makes every piece match the page colours).
 
 Answer with ONE JSON object and nothing else:

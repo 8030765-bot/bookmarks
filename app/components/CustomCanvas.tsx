@@ -50,6 +50,7 @@ function boxLook(s: PieceStyle): CSSProperties {
   if (s.shadow && s.shadow !== "none") css.boxShadow = SHADOWS[s.shadow];
   if (s.pad !== undefined) css.padding = s.pad;
   if (s.opacity !== undefined && s.opacity < 1) css.opacity = s.opacity;
+  if (s.rotate) css.transform = `rotate(${s.rotate}deg)`;
   return css;
 }
 
