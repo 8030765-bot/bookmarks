@@ -1,0 +1,648 @@
+/*
+ * ✨ Nova — the new design (Customize → Design).
+ * Everything here only applies with <html data-ui="nova">, so the classic
+ * look is untouched. It reads the same colour variables as every theme
+ * (--bg, --surface, --text, --accent…), so all palettes, accent colours and
+ * light/dark work; it changes shape, depth, type and motion: floating glass
+ * bars, soft glowing surfaces, bigger type, rounder everything.
+ */
+
+:is(:root[data-glass],:root .ui-glass){
+  /* derived tokens */
+  --n-accent-2:#e879f9;
+  --n-accent-2:oklch(from var(--accent) calc(l + .04) c calc(h + 55));
+  --n-line:color-mix(in srgb,var(--text) 9%,transparent);
+  --n-line-strong:color-mix(in srgb,var(--text) 16%,transparent);
+  --n-glass:color-mix(in srgb,var(--surface) 78%,transparent);
+  --n-glass-strong:color-mix(in srgb,var(--surface) 88%,transparent);
+  --n-fill:color-mix(in srgb,var(--text) 4.5%,transparent);
+  --n-fill-hover:color-mix(in srgb,var(--text) 8%,transparent);
+  --n-glow:color-mix(in srgb,var(--accent) 38%,transparent);
+  --n-glow-soft:color-mix(in srgb,var(--accent) 16%,transparent);
+  --n-grad:linear-gradient(135deg,var(--accent),var(--n-accent-2));
+  --n-shadow:0 1px 0 color-mix(in srgb,#fff 5%,transparent) inset,0 24px 60px -32px rgba(0,0,0,.75);
+  --n-shadow-pop:0 30px 80px -20px rgba(0,0,0,.7),0 0 0 1px var(--n-line);
+  --n-radius:24px;
+  --n-radius-md:16px;
+  --n-radius-sm:12px;
+  --n-ease:cubic-bezier(.2,.7,.2,1);
+  --font-display:"Plus Jakarta Sans",var(--font);
+}
+:is(:root[data-glass][data-theme=light],:root[data-theme=light] .ui-glass){
+  --n-line:color-mix(in srgb,var(--text) 10%,transparent);
+  --n-glass:color-mix(in srgb,var(--surface) 70%,transparent);
+  --n-glass-strong:color-mix(in srgb,var(--surface) 90%,transparent);
+  --n-fill:color-mix(in srgb,var(--text) 4%,transparent);
+  --n-glow:color-mix(in srgb,var(--accent) 28%,transparent);
+  --n-shadow:0 1px 0 #fff inset,0 18px 50px -28px rgba(30,30,60,.28);
+  --n-shadow-pop:0 30px 80px -24px rgba(30,30,60,.35),0 0 0 1px var(--n-line);
+}
+
+/* ---------- canvas ---------- */
+:is(:root[data-glass] body,:root .ui-glass){
+  background:
+    radial-gradient(1100px 600px at 12% -8%,color-mix(in srgb,var(--accent) 22%,transparent),transparent 62%),
+    radial-gradient(900px 560px at 92% 2%,color-mix(in srgb,var(--n-accent-2) 16%,transparent),transparent 60%),
+    radial-gradient(1200px 800px at 50% 115%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 60%),
+    var(--bg);
+  background-attachment:fixed;
+  -webkit-font-smoothing:antialiased;
+}
+:is(:root[data-glass],:root .ui-glass) ::selection{background:var(--n-glow);color:var(--text)}
+:is(:root[data-glass],:root .ui-glass) *{scrollbar-width:thin;scrollbar-color:var(--n-line-strong) transparent}
+:is(:root[data-glass],:root .ui-glass) ::-webkit-scrollbar{width:10px;height:10px}
+:is(:root[data-glass],:root .ui-glass) ::-webkit-scrollbar-thumb{background:var(--n-line-strong);border-radius:99px;border:3px solid transparent;background-clip:padding-box}
+:is(:root[data-glass],:root .ui-glass) :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:10px}
+:is(:root[data-glass],:root .ui-glass) .app{padding-bottom:5rem}
+
+/* ---------- type ---------- */
+:is(:root[data-glass],:root .ui-glass) .hero h1,:is(:root[data-glass],:root .ui-glass) .fh-name,:is(:root[data-glass],:root .ui-glass) .modal h2,:is(:root[data-glass],:root .ui-glass) .brand-name,
+:is(:root[data-glass],:root .ui-glass) .drawer-head strong,:is(:root[data-glass],:root .ui-glass) .empty-state h3,:is(:root[data-glass],:root .ui-glass) .admin-title,
+:is(:root[data-glass],:root .ui-glass) .pp-hero h1,:is(:root[data-glass],:root .ui-glass) .profile-name,:is(:root[data-glass],:root .ui-glass) .poll h3,:is(:root[data-glass],:root .ui-glass) .stat-value{
+  font-family:var(--font-display);
+}
+
+/* ---------- floating top bar ---------- */
+:is(:root[data-glass],:root .ui-glass) .topbar{background:transparent;border-bottom:none;backdrop-filter:none;-webkit-backdrop-filter:none;padding:10px 12px 0;pointer-events:none}
+:is(:root[data-glass],:root .ui-glass) .topbar-inner{
+  pointer-events:auto;
+  background:var(--n-glass);
+  backdrop-filter:saturate(1.6) blur(18px);-webkit-backdrop-filter:saturate(1.6) blur(18px);
+  border:1px solid var(--n-line);
+  border-radius:20px;
+  box-shadow:var(--n-shadow);
+  padding:.5rem .6rem .5rem .7rem;
+}
+:is(:root[data-glass],:root .ui-glass) .brand-mark{
+  width:34px;height:34px;border-radius:11px;border:none;
+  background:var(--n-grad);
+  box-shadow:0 6px 18px -6px var(--n-glow),inset 0 1px 0 rgba(255,255,255,.35);
+  font-size:1rem;
+}
+:is(:root[data-glass],:root .ui-glass) .brand-name{font-weight:800;letter-spacing:-.02em;font-size:.98rem}
+:is(:root[data-glass],:root .ui-glass) .top-search{
+  height:40px;border-radius:14px;border:1px solid transparent;background:var(--n-fill);
+  transition:background .2s,box-shadow .2s,border-color .2s;
+}
+:is(:root[data-glass],:root .ui-glass) .top-search:hover{background:var(--n-fill-hover)}
+:is(:root[data-glass],:root .ui-glass) .top-search:focus-within{background:var(--n-glass-strong);border-color:color-mix(in srgb,var(--accent) 55%,transparent);box-shadow:0 0 0 4px var(--n-glow-soft)}
+:is(:root[data-glass],:root .ui-glass) .top-search .kbd{background:transparent}
+:is(:root[data-glass],:root .ui-glass) .search-suggest{border-radius:18px;background:var(--n-glass-strong);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--n-line);box-shadow:var(--n-shadow-pop)}
+:is(:root[data-glass],:root .ui-glass) .icon-btn{border-radius:12px;width:38px;height:38px}
+:is(:root[data-glass],:root .ui-glass) .icon-btn:hover{background:var(--n-fill-hover)}
+:is(:root[data-glass],:root .ui-glass) .icon-btn.on{background:var(--n-glow-soft);color:var(--accent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 40%,transparent)}
+:is(:root[data-glass],:root .ui-glass) .avatar-btn .avatar-x{box-shadow:0 0 0 2px var(--surface),0 0 0 4px color-mix(in srgb,var(--accent) 70%,transparent)}
+:is(:root[data-glass],:root .ui-glass) .icon-badge,:is(:root[data-glass],:root .ui-glass) .notif-badge{background:var(--n-grad);color:#fff;box-shadow:0 4px 12px -4px var(--n-glow)}
+
+/* menus */
+:is(:root[data-glass],:root .ui-glass) .menu,:is(:root[data-glass],:root .ui-glass) .card-menu{
+  border-radius:18px;padding:.4rem;border:1px solid var(--n-line);
+  background:var(--n-glass-strong);backdrop-filter:blur(22px) saturate(1.5);-webkit-backdrop-filter:blur(22px) saturate(1.5);
+  box-shadow:var(--n-shadow-pop);
+}
+:is(:root[data-glass],:root .ui-glass) .menu button,:is(:root[data-glass],:root .ui-glass) .menu .menu-link{border-radius:11px}
+:is(:root[data-glass],:root .ui-glass) .menu button:hover,:is(:root[data-glass],:root .ui-glass) .menu .menu-link:hover{background:var(--n-glow-soft)}
+:is(:root[data-glass],:root .ui-glass) .menu button:hover svg{color:var(--accent)}
+
+/* ---------- hero ---------- */
+:is(:root[data-glass],:root .ui-glass) .hero{position:relative;padding:3.4rem 0 2rem;isolation:isolate}
+:is(:root[data-glass],:root .ui-glass) .hero::before{
+  content:"";position:absolute;z-index:-1;left:50%;top:38%;width:min(640px,90vw);height:260px;transform:translate(-50%,-50%);
+  background:radial-gradient(closest-side,var(--n-glow),transparent);filter:blur(30px);opacity:.75;pointer-events:none;
+}
+:is(:root[data-glass],:root .ui-glass) .hero h1{
+  font-size:clamp(2.3rem,5.4vw,3.6rem);font-weight:800;letter-spacing:-.045em;line-height:1.05;
+  background:linear-gradient(100deg,var(--text) 0%,var(--text) 35%,color-mix(in srgb,var(--accent) 80%,var(--text)) 55%,var(--n-accent-2) 75%,var(--text) 100%);
+  background-size:220% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
+  animation:novaShine 9s ease-in-out infinite alternate;
+}
+@keyframes novaShine{from{background-position:0% 50%}to{background-position:100% 50%}}
+:is(:root[data-glass],:root .ui-glass) .hero .greeting{
+  display:inline-flex;align-items:center;gap:.35rem;margin:0 0 .9rem;order:-1;
+  padding:.35rem .9rem;border-radius:999px;font-size:.82rem;font-weight:650;
+  color:var(--accent);background:var(--n-glow-soft);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);
+}
+:is(:root[data-glass],:root .ui-glass) .hero{display:flex;flex-direction:column;align-items:center}
+:is(:root[data-glass],:root .ui-glass) .hero>p:not(.greeting){font-size:1.05rem;margin-top:.7rem;max-width:560px}
+:is(:root[data-glass],:root .ui-glass) .hero-stats{gap:.5rem;margin-top:1.4rem}
+:is(:root[data-glass],:root .ui-glass) .hero-stats>*{
+  display:inline-flex;align-items:center;gap:.35rem;padding:.42rem .9rem;border-radius:999px;
+  background:var(--n-glass);border:1px solid var(--n-line);
+  font-size:.82rem;
+}
+:is(:root[data-glass],:root .ui-glass) .hero-stats strong{font-size:.92rem}
+
+/* announcements & banners */
+:is(:root[data-glass],:root .ui-glass) .announcement{
+  border:1px solid var(--n-line);border-left:none;border-radius:var(--n-radius-md);
+  background:linear-gradient(90deg,color-mix(in srgb,var(--warning) 14%,transparent),transparent 70%),var(--n-glass);
+  padding:.85rem 1.1rem;box-shadow:var(--n-shadow);
+}
+
+/* ---------- buttons & controls ---------- */
+:is(:root[data-glass],:root .ui-glass) .btn{border-radius:12px;font-weight:650;transition:transform .15s var(--n-ease),box-shadow .2s,background .2s,border-color .2s}
+:is(:root[data-glass],:root .ui-glass) .btn-primary{
+  background:var(--n-grad);color:#fff;border:none;
+  box-shadow:0 8px 22px -10px var(--n-glow),inset 0 1px 0 rgba(255,255,255,.28);
+}
+:is(:root[data-glass],:root .ui-glass) .btn-primary:hover:not(:disabled){background:var(--n-grad);filter:brightness(1.08) saturate(1.1);transform:translateY(-1px);box-shadow:0 12px 28px -10px var(--n-glow),inset 0 1px 0 rgba(255,255,255,.3)}
+:is(:root[data-glass],:root .ui-glass) .btn-primary:active:not(:disabled){transform:translateY(0)}
+:is(:root[data-glass],:root .ui-glass) .btn-secondary{background:var(--n-fill);border:1px solid var(--n-line)}
+:is(:root[data-glass],:root .ui-glass) .btn-secondary:hover:not(:disabled){background:var(--n-fill-hover);border-color:var(--n-line-strong)}
+:is(:root[data-glass],:root .ui-glass) .btn-danger{border-radius:12px}
+:is(:root[data-glass],:root .ui-glass) .btn-icon{border-radius:10px}
+:is(:root[data-glass],:root .ui-glass) .btn-icon:hover{background:var(--n-fill-hover)}
+
+:is(:root[data-glass],:root .ui-glass) input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]),:is(:root[data-glass],:root .ui-glass) select,:is(:root[data-glass],:root .ui-glass) textarea{
+  background:var(--n-fill);border:1px solid var(--n-line);border-radius:12px;transition:border-color .2s,box-shadow .2s,background .2s;
+}
+:is(:root[data-glass],:root .ui-glass) input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):focus,:is(:root[data-glass],:root .ui-glass) select:focus,:is(:root[data-glass],:root .ui-glass) textarea:focus{
+  background:var(--n-glass-strong);border-color:color-mix(in srgb,var(--accent) 60%,transparent);box-shadow:0 0 0 4px var(--n-glow-soft);
+}
+:is(:root[data-glass],:root .ui-glass) .top-search input,:is(:root[data-glass],:root .ui-glass) .top-search input:focus,:is(:root[data-glass],:root .ui-glass) .cmd-input-row input,:is(:root[data-glass],:root .ui-glass) .cmd-input-row input:focus,
+:is(:root[data-glass],:root .ui-glass) .tag-input input,:is(:root[data-glass],:root .ui-glass) .tag-input input:focus{background:transparent!important;border:none!important;box-shadow:none!important}
+:is(:root[data-glass],:root .ui-glass) .tag-input{background:var(--n-fill);border-color:var(--n-line);border-radius:12px}
+:is(:root[data-glass],:root .ui-glass) input[type=range]{accent-color:var(--accent)}
+:is(:root[data-glass],:root .ui-glass) input[type=checkbox]:not([role=switch]){accent-color:var(--accent)}
+
+:is(:root[data-glass],:root .ui-glass) .seg,:is(:root[data-glass],:root .ui-glass) .seg-toggle{background:var(--n-fill);border:1px solid var(--n-line);border-radius:14px;padding:.22rem}
+:is(:root[data-glass],:root .ui-glass) .seg button,:is(:root[data-glass],:root .ui-glass) .seg-toggle button{border-radius:10px;transition:background .2s,color .2s,box-shadow .2s}
+:is(:root[data-glass],:root .ui-glass) .seg button.on,:is(:root[data-glass],:root .ui-glass) .seg-toggle button.on{
+  background:var(--n-glass-strong);color:var(--text);box-shadow:0 4px 14px -6px rgba(0,0,0,.45),inset 0 0 0 1px var(--n-line);
+}
+:is(:root[data-glass],:root .ui-glass) .pick{border-radius:999px;background:var(--n-fill);border-color:var(--n-line);transition:all .18s var(--n-ease)}
+:is(:root[data-glass],:root .ui-glass) .pick:hover{border-color:var(--n-line-strong);background:var(--n-fill-hover)}
+:is(:root[data-glass],:root .ui-glass) .pick.on{color:var(--accent);background:var(--n-glow-soft);border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
+:is(:root[data-glass],:root .ui-glass) .switch{background:var(--n-line-strong)}
+:is(:root[data-glass],:root .ui-glass) .toggle-row{background:var(--n-fill);border-color:var(--n-line);border-radius:14px}
+:is(:root[data-glass],:root .ui-glass) .toggle-row input:checked+.switch{background:var(--n-grad);box-shadow:0 0 12px -2px var(--n-glow)}
+:is(:root[data-glass],:root .ui-glass) .kbd{border-radius:7px;background:var(--n-fill);border-color:var(--n-line-strong)}
+:is(:root[data-glass],:root .ui-glass) .tag{border-radius:999px;padding:.12rem .5rem;font-weight:600}
+:is(:root[data-glass],:root .ui-glass) .badge-new{background:var(--n-grad);color:#fff;border-radius:999px;box-shadow:0 4px 10px -4px var(--n-glow)}
+
+/* ---------- actions, nav chips, shortcuts ---------- */
+:is(:root[data-glass],:root .ui-glass) .actions-row{margin-bottom:1.2rem}
+:is(:root[data-glass],:root .ui-glass) .folder-nav button,:is(:root[data-glass],:root .ui-glass) .quick-chip{
+  border-radius:999px;background:var(--n-glass);border:1px solid var(--n-line);
+  transition:transform .18s var(--n-ease),border-color .2s,background .2s,box-shadow .2s;
+}
+:is(:root[data-glass],:root .ui-glass) .folder-nav button:hover,:is(:root[data-glass],:root .ui-glass) .quick-chip:hover{
+  transform:translateY(-2px);border-color:color-mix(in srgb,var(--folder-accent,var(--accent)) 60%,transparent);
+  box-shadow:0 10px 22px -12px var(--n-glow);background:var(--n-glass-strong);
+}
+:is(:root[data-glass],:root .ui-glass) .folder-nav.sticky{
+  top:calc(var(--topbar-h,57px) + 8px);margin:0 0 .8rem;padding:.4rem .5rem;border-radius:18px;
+  background:var(--n-glass-strong);backdrop-filter:blur(18px) saturate(1.5);-webkit-backdrop-filter:blur(18px) saturate(1.5);
+  border:1px solid var(--n-line);box-shadow:var(--n-shadow);
+}
+:is(:root[data-glass],:root .ui-glass) .folder-nav.sticky button{background:var(--n-fill);border-color:transparent}
+:is(:root[data-glass],:root .ui-glass) .folder-nav.sticky button:hover{background:var(--n-glass-strong);border-color:color-mix(in srgb,var(--folder-accent,var(--accent)) 60%,transparent)}
+:is(:root[data-glass][data-stickyfh=on],:root[data-stickyfh=on] .ui-glass) .folder-card>.fh{top:calc(var(--topbar-h,57px) + var(--nav-h,0px) + 16px)}
+:is(:root[data-glass],:root .ui-glass) .quick-tabs{gap:.25rem;padding:.22rem;background:var(--n-fill);border:1px solid var(--n-line);border-radius:999px;width:fit-content;max-width:100%}
+:is(:root[data-glass],:root .ui-glass) .quick-tabs .nav-label{padding:0 .5rem 0 .55rem}
+:is(:root[data-glass],:root .ui-glass) .quick-tabs button{border-radius:999px;padding:.35rem .8rem}
+:is(:root[data-glass],:root .ui-glass) .quick-tabs button.on{background:var(--n-grad);color:#fff;box-shadow:0 6px 16px -8px var(--n-glow)}
+:is(:root[data-glass],:root .ui-glass) .quick-row{padding:.5rem .1rem .7rem}
+:is(:root[data-glass],:root .ui-glass) .results-bar{border-radius:var(--n-radius-md);background:var(--n-glass);border-color:var(--n-line)}
+:is(:root[data-glass],:root .ui-glass) .tag-bar button{border-radius:999px}
+:is(:root[data-glass],:root .ui-glass) .tag-bar button.on{border-color:var(--accent);color:var(--accent);background:var(--n-glow-soft)}
+:is(:root[data-glass],:root .ui-glass) .space-tabs{border-bottom-color:var(--n-line)}
+:is(:root[data-glass],:root .ui-glass) .space-tabs button.on{border-bottom-color:transparent;background-image:var(--n-grad);background-size:100% 2px;background-position:bottom;background-repeat:no-repeat}
+
+/* ---------- today strip & polls ---------- */
+:is(:root[data-glass],:root .ui-glass) .today-tile,:is(:root[data-glass],:root .ui-glass) .poll{
+  position:relative;border-radius:var(--n-radius-md);border:1px solid var(--n-line);
+  background:var(--n-glass);box-shadow:var(--n-shadow);
+  transition:transform .25s var(--n-ease),box-shadow .25s,border-color .25s;
+}
+:is(:root[data-glass],:root .ui-glass) .today-tile:hover{transform:translateY(-3px);border-color:color-mix(in srgb,var(--accent) 40%,transparent);box-shadow:0 18px 40px -22px var(--n-glow)}
+:is(:root[data-glass],:root .ui-glass) .today-tile::after,:is(:root[data-glass],:root .ui-glass) .poll::after{
+  content:"";position:absolute;left:14px;right:14px;top:-1px;height:1px;background:var(--n-grad);opacity:.6;border-radius:2px;pointer-events:none;
+}
+:is(:root[data-glass],:root .ui-glass) .poll-opt{border-radius:12px;background:var(--n-fill);border-color:var(--n-line)}
+:is(:root[data-glass],:root .ui-glass) .poll-opt.mine{border-color:color-mix(in srgb,var(--accent) 60%,transparent)}
+:is(:root[data-glass],:root .ui-glass) .poll-opt.mine .poll-fill{background:linear-gradient(90deg,var(--n-glow-soft),color-mix(in srgb,var(--n-accent-2) 18%,transparent))}
+
+/* ---------- folders ---------- */
+:is(:root[data-glass],:root .ui-glass) .folders{margin-top:1rem}
+:is(:root[data-glass],:root .ui-glass) .folder-card{
+  border-radius:var(--n-radius);border:1px solid var(--n-line);
+  background:
+    radial-gradient(600px 160px at 0% 0%,color-mix(in srgb,var(--folder-accent,var(--accent)) 9%,transparent),transparent 70%),
+    var(--n-glass);
+  box-shadow:var(--n-shadow);margin-bottom:1.3rem;
+  animation:novaRise .55s var(--n-ease) both;
+}
+:is(:root[data-glass],:root .ui-glass) main.folders>.folder-card:nth-child(2){animation-delay:.04s}
+:is(:root[data-glass],:root .ui-glass) main.folders>.folder-card:nth-child(3){animation-delay:.08s}
+:is(:root[data-glass],:root .ui-glass) main.folders>.folder-card:nth-child(4){animation-delay:.12s}
+:is(:root[data-glass],:root .ui-glass) main.folders>.folder-card:nth-child(5){animation-delay:.16s}
+:is(:root[data-glass],:root .ui-glass) main.folders>.folder-card:nth-child(n+6){animation-delay:.2s}
+@keyframes novaRise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+:is(:root[data-glass],:root .ui-glass) .folder-card::before{
+  left:22px;right:22px;top:0;bottom:auto;width:auto;height:1px;opacity:.85;
+  background:linear-gradient(90deg,transparent,var(--folder-accent,var(--accent)),transparent);
+}
+:is(:root[data-glass],:root .ui-glass) .folder-card.pinned{border-color:color-mix(in srgb,var(--warning) 35%,transparent)}
+:is(:root[data-glass],:root .ui-glass) .folder-card.drop-into{border-color:var(--accent);box-shadow:0 0 0 4px var(--n-glow-soft),var(--n-shadow)}
+:is(:root[data-glass],:root .ui-glass) .fh{padding:.9rem 1rem .5rem 1.1rem;border-bottom:none}
+:is(:root[data-glass],:root .ui-glass) .fh-toggle{gap:.75rem}
+:is(:root[data-glass],:root .ui-glass) .fh-emoji{
+  width:40px;height:40px;flex-shrink:0;display:grid;place-items:center;border-radius:13px;font-size:1.3rem;
+  background:color-mix(in srgb,var(--folder-accent,var(--accent)) 16%,var(--n-fill));
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--folder-accent,var(--accent)) 28%,transparent);
+}
+:is(:root[data-glass],:root .ui-glass) .fh-name{font-size:1.12rem;font-weight:750;letter-spacing:-.02em}
+:is(:root[data-glass],:root .ui-glass) .fh-count{background:var(--n-fill);border:1px solid var(--n-line);font-weight:650}
+:is(:root[data-glass],:root .ui-glass) .chev{opacity:.6}
+:is(:root[data-glass],:root .ui-glass) .fh-actions .btn-icon{opacity:.7}
+:is(:root[data-glass],:root .ui-glass) .fh:hover .fh-actions .btn-icon{opacity:1}
+:is(:root[data-glass][data-stickyfh=on],:root[data-stickyfh=on] .ui-glass) .folder-card>.fh{background:var(--n-glass-strong);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+:is(:root[data-glass],:root .ui-glass) .folder-empty{color:var(--text-muted)}
+:is(:root[data-glass],:root .ui-glass) .show-more{border-radius:14px;border-color:var(--n-line-strong);background:var(--n-fill)}
+:is(:root[data-glass],:root .ui-glass) .show-more:hover{background:var(--n-glow-soft);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+
+/* ---------- link cards ---------- */
+:is(:root[data-glass],:root .ui-glass) .cards{gap:.75rem;padding:.6rem 1rem 1.1rem;grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+:is(:root[data-glass],:root .ui-glass) .card{
+  border-radius:18px;padding:.85rem .9rem;border:1px solid var(--n-line);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--text) 3.5%,transparent),color-mix(in srgb,var(--text) 1.5%,transparent));
+  box-shadow:inset 3px 0 0 var(--card-accent,transparent);
+  transition:transform .22s var(--n-ease),box-shadow .25s,border-color .25s,background .25s;
+}
+:is(:root[data-glass],:root .ui-glass) .card:hover{
+  transform:translateY(-3px);
+  border-color:color-mix(in srgb,var(--card-accent,var(--accent)) 50%,transparent);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--card-accent,var(--accent)) 9%,transparent),color-mix(in srgb,var(--text) 2%,transparent));
+  box-shadow:inset 3px 0 0 var(--card-accent,transparent),0 18px 36px -20px var(--n-glow),0 2px 6px -2px rgba(0,0,0,.3);
+}
+:is(:root[data-glass],:root .ui-glass) .card.fav{border-color:color-mix(in srgb,var(--warning) 40%,transparent)}
+:is(:root[data-glass],:root .ui-glass) .card.kb-focus{box-shadow:0 0 0 3px var(--n-glow-soft),0 0 0 1px var(--accent)}
+:is(:root[data-glass],:root .ui-glass) .card-icon{
+  width:44px;height:44px;border-radius:14px;border:none;
+  background:color-mix(in srgb,var(--card-accent,var(--accent)) 12%,var(--n-fill));
+  box-shadow:inset 0 0 0 1px var(--n-line),0 6px 14px -8px rgba(0,0,0,.5);
+}
+:is(:root[data-glass],:root .ui-glass) .card-icon img{border-radius:6px}
+:is(:root[data-glass],:root .ui-glass) .card-main{gap:.8rem}
+:is(:root[data-glass],:root .ui-glass) .card-name{font-size:.95rem;font-weight:700;letter-spacing:-.01em}
+:is(:root[data-glass],:root .ui-glass) .card-host{font-size:.76rem;opacity:.85}
+:is(:root[data-glass],:root .ui-glass) .card-meta{padding-left:calc(44px + .8rem)}
+:is(:root[data-glass],:root .ui-glass) .card-actions{
+  top:.55rem;right:.55rem;border-radius:12px;padding:3px;gap:3px;
+  background:var(--n-glass-strong);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  box-shadow:0 8px 20px -10px rgba(0,0,0,.6),inset 0 0 0 1px var(--n-line);
+  transform:translateY(-3px) scale(.96);transition:opacity .18s,transform .22s var(--n-ease);
+}
+:is(:root[data-glass],:root .ui-glass) .card:hover .card-actions,:is(:root[data-glass],:root .ui-glass) .card:focus-within .card-actions{transform:none}
+:is(:root[data-glass],:root .ui-glass) .ca{border-radius:9px;background:transparent;border:none}
+:is(:root[data-glass],:root .ui-glass) .ca:hover{background:var(--n-fill-hover);color:var(--text)}
+:is(:root[data-glass],:root .ui-glass) .ca.on{color:var(--warning)}
+:is(:root[data-glass],:root .ui-glass) .like-btn.on{color:#ff5c8a;filter:drop-shadow(0 0 6px rgba(255,92,138,.55))}
+:is(:root[data-glass],:root .ui-glass) .cards.list{gap:.45rem}
+:is(:root[data-glass],:root .ui-glass) .cards.list .card{border-radius:14px;padding:.5rem .7rem}
+:is(:root[data-glass],:root .ui-glass) .cards.list .card:hover{transform:translateX(2px)}
+:is(:root[data-glass],:root .ui-glass) .cards.list .card-icon{width:32px;height:32px;border-radius:10px}
+:is(:root[data-glass],:root .ui-glass) .cards.list .card-meta{padding-left:0}
+:is(:root[data-glass],:root .ui-glass) .card.selected{border-color:var(--accent);box-shadow:0 0 0 3px var(--n-glow-soft)}
+
+/* ---------- my stuff, skeletons, empty states ---------- */
+:is(:root[data-glass],:root .ui-glass) .skeleton{border-radius:var(--n-radius-md);background:linear-gradient(90deg,var(--n-fill) 0,var(--n-fill-hover) 50%,var(--n-fill) 100%);background-size:200% 100%}
+:is(:root[data-glass],:root .ui-glass) .card-skel{border-radius:18px}
+:is(:root[data-glass],:root .ui-glass) .empty-state{border-radius:var(--n-radius);border:1px dashed var(--n-line-strong);background:var(--n-glass)}
+:is(:root[data-glass],:root .ui-glass) .empty-emoji{font-size:2.8rem;filter:drop-shadow(0 8px 20px var(--n-glow))}
+
+/* ---------- pop-ups ---------- */
+:is(:root[data-glass],:root .ui-glass) .modal-overlay{background:color-mix(in srgb,var(--bg) 55%,transparent);backdrop-filter:blur(14px) saturate(1.2);-webkit-backdrop-filter:blur(14px) saturate(1.2)}
+:is(:root[data-glass],:root .ui-glass) .modal{
+  border-radius:26px;border:1px solid var(--n-line-strong);padding:1.7rem;
+  background:
+    radial-gradient(500px 200px at 0% 0%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 70%),
+    var(--n-glass-strong);
+  backdrop-filter:blur(24px) saturate(1.4);-webkit-backdrop-filter:blur(24px) saturate(1.4);
+  box-shadow:var(--n-shadow-pop);
+  animation:novaPop .32s var(--n-ease);
+}
+@keyframes novaPop{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:none}}
+:is(:root[data-glass],:root .ui-glass) .modal h2{font-size:1.35rem;font-weight:800;letter-spacing:-.025em;margin-bottom:1.1rem}
+:is(:root[data-glass],:root .ui-glass) .form-group label{font-weight:650;letter-spacing:.01em}
+:is(:root[data-glass],:root .ui-glass) .more-toggle{border-radius:12px}
+:is(:root[data-glass],:root .ui-glass) .preview .card{transform:none}
+:is(:root[data-glass],:root .ui-glass) .cmd-overlay{background:color-mix(in srgb,var(--bg) 50%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+:is(:root[data-glass],:root .ui-glass) .cmd-box{border-radius:24px;border:1px solid var(--n-line-strong);background:var(--n-glass-strong);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);box-shadow:var(--n-shadow-pop);animation:novaPop .28s var(--n-ease)}
+:is(:root[data-glass],:root .ui-glass) .cmd-item{border-radius:12px}
+:is(:root[data-glass],:root .ui-glass) .cmd-item.active{background:var(--n-glow-soft);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 35%,transparent)}
+:is(:root[data-glass],:root .ui-glass) .cmd-item.active .cmd-item-icon{color:var(--accent)}
+:is(:root[data-glass],:root .ui-glass) .cmd-round{background:var(--n-fill);border-color:var(--n-line)}
+:is(:root[data-glass],:root .ui-glass) .cmd-round:hover{background:var(--n-glow-soft);border-color:color-mix(in srgb,var(--accent) 50%,transparent);color:var(--accent)}
+:is(:root[data-glass],:root .ui-glass) .cmd-status{border-radius:16px;background:var(--n-fill)}
+
+/* drawers */
+:is(:root[data-glass],:root .ui-glass) .drawer-backdrop{background:color-mix(in srgb,var(--bg) 45%,transparent);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+:is(:root[data-glass],:root .ui-glass) .drawer{
+  top:10px;right:10px;bottom:10px;border-radius:26px;border:1px solid var(--n-line-strong);
+  background:var(--n-glass-strong);backdrop-filter:blur(24px) saturate(1.4);-webkit-backdrop-filter:blur(24px) saturate(1.4);
+  box-shadow:var(--n-shadow-pop);overflow:hidden;
+}
+@media (max-width:600px){:is(:root[data-glass],:root .ui-glass) .drawer{top:0;right:0;bottom:0;border-radius:0}}
+:is(:root[data-glass],:root .ui-glass) .drawer-head{border-bottom-color:var(--n-line)}
+:is(:root[data-glass],:root .ui-glass) .notif{border-radius:14px}
+:is(:root[data-glass],:root .ui-glass) .notif.unread{background:var(--n-glow-soft);box-shadow:inset 3px 0 0 var(--accent)}
+
+/* toast */
+:is(:root[data-glass],:root .ui-glass) .toast{
+  border-radius:999px;padding:.7rem 1.1rem .7rem 1.3rem;border:1px solid var(--n-line-strong);
+  background:var(--n-glass-strong);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);box-shadow:var(--n-shadow-pop);
+  animation:novaPop .3s var(--n-ease);font-weight:550;
+}
+:is(:root[data-glass],:root .ui-glass) .toast button{border-radius:999px;border:none;background:var(--n-grad);color:#fff;padding:.25rem .8rem}
+
+/* ---------- chat ---------- */
+:is(:root[data-glass],:root .ui-glass) .chat-fab{background:var(--n-grad);color:#fff;box-shadow:0 14px 34px -10px var(--n-glow),inset 0 1px 0 rgba(255,255,255,.3);transition:transform .25s var(--n-ease),box-shadow .25s}
+:is(:root[data-glass],:root .ui-glass) .chat-fab:hover{transform:translateY(-2px) scale(1.05);box-shadow:0 20px 40px -12px var(--n-glow)}
+:is(:root[data-glass],:root .ui-glass) .chat-panel{
+  border-radius:26px;border:1px solid var(--n-line-strong);
+  background:var(--n-glass-strong);backdrop-filter:blur(26px) saturate(1.4);-webkit-backdrop-filter:blur(26px) saturate(1.4);
+  box-shadow:var(--n-shadow-pop);animation:novaPop .3s var(--n-ease);
+}
+:is(:root[data-glass],:root .ui-glass) .chat-panel.docked{border-radius:0;top:calc(var(--topbar-h,57px) + 6px)}
+:is(:root[data-glass],:root .ui-glass) .chat-header{border-bottom-color:var(--n-line)}
+:is(:root[data-glass],:root .ui-glass) .chat-text{border-radius:18px 18px 18px 6px;background:var(--n-fill);border-color:var(--n-line);padding:.5rem .8rem}
+:is(:root[data-glass],:root .ui-glass) .chat-msg.mine .chat-text{border-radius:18px 18px 6px 18px;background:var(--n-grad);border:none;color:#fff;box-shadow:0 8px 18px -12px var(--n-glow)}
+:is(:root[data-glass],:root .ui-glass) .chat-msg.mine .chat-text a{color:#fff}
+:is(:root[data-glass],:root .ui-glass) .chat-msg.mine .chat-text .chat-card{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.2)}
+:is(:root[data-glass],:root .ui-glass) .chat-compose{border-top-color:var(--n-line)}
+:is(:root[data-glass],:root .ui-glass) .chat-form textarea{border-radius:16px}
+:is(:root[data-glass],:root .ui-glass) .chat-day span{border-radius:999px;background:var(--n-fill);padding:.15rem .6rem}
+
+/* ---------- other pages ---------- */
+:is(:root[data-glass],:root .ui-glass) .pp-hero,:is(:root[data-glass],:root .ui-glass) .profile-hero,:is(:root[data-glass],:root .ui-glass) .profile-preview{border-radius:var(--n-radius);border:1px solid var(--n-line);box-shadow:var(--n-shadow)}
+:is(:root[data-glass],:root .ui-glass) .profile-stats>div,:is(:root[data-glass],:root .ui-glass) .stat-card,:is(:root[data-glass],:root .ui-glass) .person,:is(:root[data-glass],:root .ui-glass) .post,:is(:root[data-glass],:root .ui-glass) .sugg-card,
+:is(:root[data-glass],:root .ui-glass) .admin-list,:is(:root[data-glass],:root .ui-glass) .pic-card,:is(:root[data-glass],:root .ui-glass) .tool-card{
+  border-radius:var(--n-radius-md);border-color:var(--n-line);background:var(--n-glass);
+}
+:is(:root[data-glass],:root .ui-glass) .person{transition:transform .22s var(--n-ease),box-shadow .25s,border-color .25s}
+:is(:root[data-glass],:root .ui-glass) .person:hover{transform:translateY(-3px);border-color:color-mix(in srgb,var(--accent) 40%,transparent);box-shadow:0 18px 36px -22px var(--n-glow)}
+:is(:root[data-glass],:root .ui-glass) .admin-panel{background:var(--n-glass-strong);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-right-color:var(--n-line)}
+:is(:root[data-glass],:root .ui-glass) .admin-tabs button{border-radius:12px}
+:is(:root[data-glass],:root .ui-glass) .admin-tabs button.on{background:var(--n-glow-soft);color:var(--accent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 35%,transparent)}
+:is(:root[data-glass],:root .ui-glass) .admin-row{background:transparent}
+:is(:root[data-glass],:root .ui-glass) .footer{opacity:.85}
+:is(:root[data-glass],:root .ui-glass) .to-top{background:var(--n-glass-strong);border-color:var(--n-line-strong);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:var(--n-shadow)}
+:is(:root[data-glass],:root .ui-glass) .bottom-nav{background:var(--n-glass-strong);border-top-color:var(--n-line)}
+:is(:root[data-glass],:root .ui-glass) .focus-pill{background:var(--n-glass-strong);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+:is(:root[data-glass],:root .ui-glass) .offline-bar{border-radius:0 0 14px 14px}
+
+/* ---------- the "try the new look" banner (shown in Classic) ---------- */
+.nova-invite{position:relative;display:flex;align-items:center;gap:.9rem;flex-wrap:wrap;margin:0 0 1.2rem;padding:.9rem 1rem .9rem 1.1rem;border-radius:16px;overflow:hidden;
+  border:1px solid color-mix(in srgb,var(--accent) 35%,transparent);
+  background:linear-gradient(120deg,color-mix(in srgb,var(--accent) 16%,var(--surface)),color-mix(in srgb,#e879f9 12%,var(--surface)))}
+.nova-invite strong{display:block;font-size:.95rem}
+.nova-invite span{font-size:.82rem;color:var(--text-muted)}
+.nova-invite .nova-spark{font-size:1.6rem}
+.nova-invite .nova-actions{display:flex;gap:.4rem;margin-left:auto}
+
+/* the design chooser in Customize */
+.ui-choice{display:grid;grid-template-columns:1fr 1fr;gap:.7rem;margin-bottom:1rem}
+.ui-option{position:relative;display:flex;flex-direction:column;gap:.5rem;padding:.6rem;border-radius:16px;border:1px solid var(--border);background:var(--bg);text-align:left;transition:border-color .15s,box-shadow .15s}
+.ui-option:hover{border-color:var(--border-light)}
+.ui-option.on{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim)}
+.ui-option strong{font-size:.9rem}
+.ui-option em{font-style:normal;font-size:.74rem;color:var(--text-muted)}
+.ui-thumb{height:92px;border-radius:11px;overflow:hidden;position:relative;background:#0b0b0f;border:1px solid var(--border)}
+.ui-thumb.classic .t-bar{position:absolute;left:0;right:0;top:0;height:14px;background:#151515;border-bottom:1px solid #262626}
+.ui-thumb.classic .t-card{position:absolute;height:20px;border-radius:5px;background:#111;border:1px solid #262626}
+.ui-thumb.nova{background:radial-gradient(120px 70px at 15% 0%,color-mix(in srgb,var(--accent) 55%,transparent),transparent 70%),radial-gradient(110px 70px at 95% 10%,rgba(232,121,249,.45),transparent 70%),#0b0b14}
+.ui-thumb.nova .t-bar{position:absolute;left:8px;right:8px;top:6px;height:12px;border-radius:7px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.14)}
+.ui-thumb.nova .t-title{position:absolute;left:50%;top:26px;transform:translateX(-50%);width:46%;height:9px;border-radius:5px;background:linear-gradient(90deg,#fff,color-mix(in srgb,var(--accent) 70%,#fff),#f0abfc)}
+.ui-thumb.nova .t-card{position:absolute;height:22px;border-radius:8px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);box-shadow:0 6px 12px -6px color-mix(in srgb,var(--accent) 70%,transparent)}
+.ui-new{position:absolute;top:.55rem;right:.55rem;font-size:.6rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:.15rem .45rem;border-radius:999px;color:#fff;background:linear-gradient(135deg,var(--accent),#e879f9)}
+
+/* motion off: keep it still */
+:is(:root[data-glass][data-motion=off],:root[data-motion=off] .ui-glass) *{animation:none!important}
+:is(:root[data-glass][data-motion=off],:root[data-motion=off] .ui-glass) .card:hover,:is(:root[data-glass][data-motion=off],:root[data-motion=off] .ui-glass) .today-tile:hover,:is(:root[data-glass][data-motion=off],:root[data-motion=off] .ui-glass) .person:hover,
+:is(:root[data-glass][data-motion=off],:root[data-motion=off] .ui-glass) .folder-nav button:hover,:is(:root[data-glass][data-motion=off],:root[data-motion=off] .ui-glass) .quick-chip:hover{transform:none}
+/* phones: lighter effects, tighter spacing */
+@media (max-width:600px){
+  :is(:root[data-glass],:root .ui-glass) .topbar{padding:6px 6px 0}
+  :is(:root[data-glass],:root .ui-glass) .topbar-inner{border-radius:16px}
+  :is(:root[data-glass],:root .ui-glass) .hero{padding:2.2rem 0 1.4rem}
+  :is(:root[data-glass],:root .ui-glass) .folder-card{border-radius:20px}
+  :is(:root[data-glass],:root .ui-glass) .cards{padding:.5rem .7rem .9rem}
+  :is(:root[data-glass],:root .ui-glass) .modal{border-radius:22px;padding:1.3rem}
+}
+@media print{:is(:root[data-glass] body,:root .ui-glass){background:#fff}:is(:root[data-glass],:root .ui-glass) .folder-card,:is(:root[data-glass],:root .ui-glass) .card{box-shadow:none;backdrop-filter:none;animation:none}}
+
+/* =====================================================================
+   ✨ Nova layout: sidebar app, Home dashboard, folder pages, app tiles
+   ===================================================================== */
+.nv-burger{display:none}
+:is(:root[data-glass],:root .ui-glass) .nv-layout{display:grid;grid-template-columns:272px minmax(0,1fr);min-height:100vh}
+:is(:root[data-glass],:root .ui-glass) .shell.with-admin .nv-layout{grid-template-columns:240px minmax(0,1fr)}
+
+/* sidebar */
+:is(:root[data-glass],:root .ui-glass) .nv-side{
+  position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:.35rem;padding:1.1rem .85rem .9rem;
+  background:color-mix(in srgb,var(--surface) 55%,transparent);
+  backdrop-filter:blur(24px) saturate(1.4);-webkit-backdrop-filter:blur(24px) saturate(1.4);
+  border-right:1px solid var(--n-line);z-index:85;
+}
+:is(:root[data-glass],:root .ui-glass) .nv-brand{display:flex;align-items:center;gap:.7rem;padding:.2rem .4rem .8rem;text-align:left;min-width:0}
+:is(:root[data-glass],:root .ui-glass) .nv-mark{width:40px;height:40px;border-radius:13px;display:grid;place-items:center;font-size:1.15rem;flex-shrink:0;background:var(--n-grad);box-shadow:0 10px 24px -10px var(--n-glow),inset 0 1px 0 rgba(255,255,255,.35)}
+:is(:root[data-glass],:root .ui-glass) .nv-title{font-family:var(--font-display);font-weight:800;font-size:1.05rem;letter-spacing:-.02em;line-height:1.15;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:is(:root[data-glass],:root .ui-glass) .nv-add{
+  display:flex;align-items:center;justify-content:center;gap:.45rem;padding:.75rem;margin-bottom:.6rem;border-radius:14px;
+  font-weight:700;font-size:.9rem;color:#fff;background:var(--n-grad);
+  box-shadow:0 12px 26px -12px var(--n-glow),inset 0 1px 0 rgba(255,255,255,.3);transition:transform .2s var(--n-ease),filter .2s;
+}
+:is(:root[data-glass],:root .ui-glass) .nv-add:hover{transform:translateY(-1px);filter:brightness(1.08)}
+:is(:root[data-glass],:root .ui-glass) .nv-add svg{width:17px;height:17px}
+:is(:root[data-glass],:root .ui-glass) .nv-nav{display:flex;flex-direction:column;gap:2px}
+:is(:root[data-glass],:root .ui-glass) .nv-item,:is(:root[data-glass],:root .ui-glass) .nv-folder{
+  position:relative;display:flex;align-items:center;gap:.65rem;width:100%;padding:.5rem .6rem;border-radius:12px;
+  font-size:.88rem;font-weight:600;color:var(--text-muted);text-align:left;transition:background .15s,color .15s;
+}
+:is(:root[data-glass],:root .ui-glass) .nv-item:hover,:is(:root[data-glass],:root .ui-glass) .nv-folder:hover{background:var(--n-fill-hover);color:var(--text)}
+:is(:root[data-glass],:root .ui-glass) .nv-item.on{color:var(--text);background:var(--n-glow-soft)}
+:is(:root[data-glass],:root .ui-glass) .nv-item.on .nv-ico{color:var(--accent)}
+:is(:root[data-glass],:root .ui-glass) .nv-item.on::before,:is(:root[data-glass],:root .ui-glass) .nv-folder.on::before{content:"";position:absolute;left:-.85rem;top:20%;bottom:20%;width:3px;border-radius:0 3px 3px 0;background:var(--n-grad)}
+:is(:root[data-glass],:root .ui-glass) .nv-folder.on::before{background:var(--fc)}
+:is(:root[data-glass],:root .ui-glass) .nv-ico{display:flex;width:20px;justify-content:center}
+:is(:root[data-glass],:root .ui-glass) .nv-ico svg{width:17px;height:17px}
+:is(:root[data-glass],:root .ui-glass) .nv-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:is(:root[data-glass],:root .ui-glass) .nv-count{font-size:.7rem;font-weight:700;color:var(--text-muted);font-variant-numeric:tabular-nums;opacity:.8}
+:is(:root[data-glass],:root .ui-glass) .nv-new{font-size:.66rem;font-weight:800;padding:.08rem .45rem;border-radius:999px;color:#fff;background:var(--n-grad);box-shadow:0 4px 10px -4px var(--n-glow)}
+:is(:root[data-glass],:root .ui-glass) .nv-head{display:flex;align-items:center;justify-content:space-between;padding:1rem .6rem .35rem;font-size:.68rem;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--text-muted)}
+:is(:root[data-glass],:root .ui-glass) .nv-mini{width:24px;height:24px;border-radius:8px;display:grid;place-items:center;color:var(--text-muted)}
+:is(:root[data-glass],:root .ui-glass) .nv-mini:hover{background:var(--n-fill-hover);color:var(--text)}
+:is(:root[data-glass],:root .ui-glass) .nv-mini svg{width:15px;height:15px}
+:is(:root[data-glass],:root .ui-glass) .nv-folders{flex:1;min-height:0;overflow-y:auto;margin:0 -.4rem;padding:0 .4rem;display:flex;flex-direction:column;gap:2px;mask-image:linear-gradient(to bottom,#000 calc(100% - 24px),transparent);-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 24px),transparent);padding-bottom:1.2rem}
+:is(:root[data-glass],:root .ui-glass) .nv-emoji{width:28px;height:28px;flex-shrink:0;display:grid;place-items:center;border-radius:9px;font-size:.95rem;background:color-mix(in srgb,var(--fc) 18%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--fc) 25%,transparent)}
+:is(:root[data-glass],:root .ui-glass) .nv-folder.on{color:var(--text);background:color-mix(in srgb,var(--fc) 14%,transparent)}
+:is(:root[data-glass],:root .ui-glass) .nv-folder.sub{padding-left:1.6rem;font-size:.84rem}
+:is(:root[data-glass],:root .ui-glass) .nv-folder.sub .nv-emoji{width:22px;height:22px;font-size:.78rem;border-radius:7px}
+:is(:root[data-glass],:root .ui-glass) .nv-empty{font-size:.8rem;color:var(--text-muted);padding:.4rem .6rem}
+:is(:root[data-glass],:root .ui-glass) .nv-foot{display:flex;flex-direction:column;gap:.55rem;padding-top:.6rem;border-top:1px solid var(--n-line)}
+:is(:root[data-glass],:root .ui-glass) .nv-tools{display:flex;gap:.25rem}
+:is(:root[data-glass],:root .ui-glass) .nv-tools button{flex:1;height:36px;border-radius:11px;display:grid;place-items:center;color:var(--text-muted);background:var(--n-fill)}
+:is(:root[data-glass],:root .ui-glass) .nv-tools button:hover{color:var(--accent);background:var(--n-glow-soft)}
+:is(:root[data-glass],:root .ui-glass) .nv-tools svg{width:17px;height:17px}
+:is(:root[data-glass],:root .ui-glass) .nv-user{display:flex;align-items:center;gap:.65rem;padding:.45rem .5rem;border-radius:14px;text-align:left;min-width:0}
+:is(:root[data-glass],:root .ui-glass) .nv-user:hover{background:var(--n-fill-hover)}
+:is(:root[data-glass],:root .ui-glass) .nv-user span{display:flex;flex-direction:column;min-width:0}
+:is(:root[data-glass],:root .ui-glass) .nv-user strong{font-size:.86rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:is(:root[data-glass],:root .ui-glass) .nv-user em{font-style:normal;font-size:.72rem;color:var(--text-muted)}
+:is(:root[data-glass],:root .ui-glass) .nv-login{width:100%;justify-content:center}
+
+/* main column + its top bar */
+:is(:root[data-glass],:root .ui-glass) .nv-main{min-width:0;display:flex;flex-direction:column}
+:is(:root[data-glass],:root .ui-glass) .nv-main .topbar{padding:12px 24px 0}
+:is(:root[data-glass],:root .ui-glass) .nv-main .topbar-inner{max-width:1180px;margin:0 auto}
+:is(:root[data-glass],:root .ui-glass) .nv-main .topbar .brand{display:none}
+:is(:root[data-glass],:root .ui-glass) .nv-main .top-search{max-width:560px;margin:0}
+:is(:root[data-glass],:root .ui-glass) .nv-main .top-actions{margin-left:auto}
+:is(:root[data-glass],:root .ui-glass) .nv-content{width:100%;max-width:1180px;margin:0 auto;padding:1.6rem 24px 5rem}
+
+/* Home */
+:is(:root[data-glass],:root .ui-glass) .nv-hello{position:relative;padding:2.2rem 0 1.8rem;isolation:isolate}
+:is(:root[data-glass],:root .ui-glass) .nv-hello::before{content:"";position:absolute;z-index:-1;left:-5%;top:-10%;width:60%;height:140%;background:radial-gradient(closest-side,var(--n-glow),transparent);filter:blur(40px);opacity:.55}
+:is(:root[data-glass],:root .ui-glass) .nv-date{display:inline-block;font-size:.75rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+:is(:root[data-glass],:root .ui-glass) .nv-hello h1{
+  margin-top:.5rem;font-family:var(--font-display);font-size:clamp(2.2rem,4.6vw,3.8rem);font-weight:800;letter-spacing:-.045em;line-height:1.05;
+  background:linear-gradient(100deg,var(--text) 0%,var(--text) 40%,color-mix(in srgb,var(--accent) 80%,var(--text)) 70%,var(--n-accent-2) 100%);
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
+}
+:is(:root[data-glass],:root .ui-glass) .nv-hello p{margin-top:.7rem;font-size:1.08rem;color:var(--text-muted);max-width:620px}
+:is(:root[data-glass],:root .ui-glass) .nv-stats{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1.3rem}
+:is(:root[data-glass],:root .ui-glass) .nv-stats>*{display:inline-flex;align-items:center;gap:.35rem;padding:.42rem .9rem;border-radius:999px;font-size:.82rem;color:var(--text-muted);background:var(--n-glass);border:1px solid var(--n-line)}
+:is(:root[data-glass],:root .ui-glass) .nv-stats strong{color:var(--text)}
+:is(:root[data-glass],:root .ui-glass) .nv-block{margin-top:2.2rem}
+:is(:root[data-glass],:root .ui-glass) .nv-h2{display:flex;align-items:center;gap:.55rem;margin-bottom:1rem;font-family:var(--font-display);font-size:1.2rem;font-weight:800;letter-spacing:-.02em}
+:is(:root[data-glass],:root .ui-glass) .nv-h2::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--n-grad);box-shadow:0 0 12px var(--n-glow)}
+:is(:root[data-glass],:root .ui-glass) .nv-home .today{margin-top:.4rem}
+:is(:root[data-glass],:root .ui-glass) .nv-home .polls{margin-top:1.4rem}
+
+:is(:root[data-glass],:root .ui-glass) .nv-recent{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.85rem}
+:is(:root[data-glass],:root .ui-glass) .nv-recent-tile{
+  display:flex;flex-direction:column;align-items:center;gap:.45rem;padding:1.1rem .7rem .95rem;border-radius:20px;text-align:center;
+  background:var(--n-glass);border:1px solid var(--n-line);box-shadow:var(--n-shadow);
+  transition:transform .25s var(--n-ease),box-shadow .25s,border-color .25s;
+}
+:is(:root[data-glass],:root .ui-glass) .nv-recent-tile:hover{transform:translateY(-4px);border-color:color-mix(in srgb,var(--accent) 45%,transparent);box-shadow:0 22px 40px -22px var(--n-glow)}
+:is(:root[data-glass],:root .ui-glass) .nv-recent-icon{width:58px;height:58px;border-radius:18px;display:grid;place-items:center;background:var(--n-fill);box-shadow:inset 0 0 0 1px var(--n-line)}
+:is(:root[data-glass],:root .ui-glass) .nv-recent-icon img,:is(:root[data-glass],:root .ui-glass) .nv-recent-icon .fav-letter{width:32px!important;height:32px!important;border-radius:8px}
+:is(:root[data-glass],:root .ui-glass) .nv-recent-name{font-weight:700;font-size:.88rem;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:is(:root[data-glass],:root .ui-glass) .nv-recent-folder{font-size:.72rem;color:var(--text-muted);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+:is(:root[data-glass],:root .ui-glass) .nv-bento{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:1.1rem}
+:is(:root[data-glass],:root .ui-glass) .nv-tile{
+  position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:.35rem;min-height:210px;padding:1.3rem 1.3rem 1.1rem;border-radius:26px;text-align:left;overflow:hidden;
+  background:
+    radial-gradient(260px 200px at 100% 0%,color-mix(in srgb,var(--fc) 34%,transparent),transparent 70%),
+    radial-gradient(200px 160px at 0% 100%,color-mix(in srgb,var(--fc) 12%,transparent),transparent 70%),
+    var(--n-glass);
+  border:1px solid color-mix(in srgb,var(--fc) 22%,var(--n-line));box-shadow:var(--n-shadow);
+  transition:transform .3s var(--n-ease),box-shadow .3s,border-color .3s;
+  animation:novaRise .55s var(--n-ease) both;
+}
+:is(:root[data-glass],:root .ui-glass) .nv-tile:nth-child(2){animation-delay:.04s}:is(:root[data-glass],:root .ui-glass) .nv-tile:nth-child(3){animation-delay:.08s}
+:is(:root[data-glass],:root .ui-glass) .nv-tile:nth-child(4){animation-delay:.12s}:is(:root[data-glass],:root .ui-glass) .nv-tile:nth-child(n+5){animation-delay:.16s}
+:is(:root[data-glass],:root .ui-glass) .nv-tile:hover{transform:translateY(-5px);border-color:color-mix(in srgb,var(--fc) 55%,transparent);box-shadow:0 28px 50px -26px color-mix(in srgb,var(--fc) 70%,transparent)}
+:is(:root[data-glass],:root .ui-glass) .nv-tile.wide{grid-column:span 2}
+@media (max-width:640px){:is(:root[data-glass],:root .ui-glass) .nv-tile.wide{grid-column:auto}}
+:is(:root[data-glass],:root .ui-glass) .nv-tile-top{display:flex;align-items:center;justify-content:space-between;width:100%;margin-bottom:.6rem}
+:is(:root[data-glass],:root .ui-glass) .nv-tile-emoji{width:58px;height:58px;display:grid;place-items:center;border-radius:18px;font-size:1.9rem;background:color-mix(in srgb,var(--fc) 22%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--fc) 35%,transparent),0 12px 24px -14px var(--fc)}
+:is(:root[data-glass],:root .ui-glass) .nv-tile-name{font-family:var(--font-display);font-size:1.3rem;font-weight:800;letter-spacing:-.025em;line-height:1.15}
+:is(:root[data-glass],:root .ui-glass) .nv-tile-sub{font-size:.8rem;color:var(--text-muted);font-weight:600}
+:is(:root[data-glass],:root .ui-glass) .nv-tile-desc{font-size:.82rem;color:var(--text-muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+:is(:root[data-glass],:root .ui-glass) .nv-tile-icons{display:flex;align-items:center;margin-top:auto;padding-top:.9rem}
+:is(:root[data-glass],:root .ui-glass) .nv-tile-fav{width:32px;height:32px;display:grid;place-items:center;border-radius:50%;margin-right:-8px;background:var(--surface);box-shadow:0 0 0 2px color-mix(in srgb,var(--surface) 90%,transparent),0 4px 10px -4px rgba(0,0,0,.5)}
+:is(:root[data-glass],:root .ui-glass) .nv-tile-fav img,:is(:root[data-glass],:root .ui-glass) .nv-tile-fav .fav-letter{width:18px!important;height:18px!important;border-radius:4px}
+:is(:root[data-glass],:root .ui-glass) .nv-tile-more{margin-left:14px;font-size:.75rem;font-weight:700;color:var(--text-muted)}
+
+/* a folder's own page */
+:is(:root[data-glass],:root .ui-glass) .nv-banner{
+  position:relative;display:flex;align-items:center;flex-wrap:wrap;gap:1.2rem;padding:2rem;margin:.6rem 0 1.4rem;border-radius:30px;overflow:hidden;isolation:isolate;
+  background:
+    radial-gradient(500px 260px at 100% 0%,color-mix(in srgb,var(--fc) 45%,transparent),transparent 70%),
+    radial-gradient(400px 240px at 0% 120%,color-mix(in srgb,var(--fc) 22%,transparent),transparent 70%),
+    var(--n-glass);
+  border:1px solid color-mix(in srgb,var(--fc) 28%,var(--n-line));box-shadow:var(--n-shadow);
+  animation:novaRise .5s var(--n-ease) both;
+}
+:is(:root[data-glass],:root .ui-glass) .nv-banner::after{content:"";position:absolute;inset:0;z-index:-1;background:repeating-linear-gradient(135deg,transparent 0 22px,color-mix(in srgb,var(--text) 2.5%,transparent) 22px 23px);mask-image:linear-gradient(90deg,transparent,#000);-webkit-mask-image:linear-gradient(90deg,transparent,#000)}
+:is(:root[data-glass],:root .ui-glass) .nv-banner-emoji{width:84px;height:84px;flex-shrink:0;display:grid;place-items:center;border-radius:26px;font-size:2.8rem;background:color-mix(in srgb,var(--fc) 24%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--fc) 40%,transparent),0 20px 40px -20px var(--fc)}
+:is(:root[data-glass],:root .ui-glass) .nv-banner-text{flex:1 1 240px;min-width:0}
+:is(:root[data-glass],:root .ui-glass) .nv-banner h1{font-family:var(--font-display);font-size:clamp(1.9rem,3.6vw,2.9rem);font-weight:800;letter-spacing:-.04em;line-height:1.05}
+:is(:root[data-glass],:root .ui-glass) .nv-banner p{margin-top:.45rem;color:var(--text-muted);font-size:.98rem}
+:is(:root[data-glass],:root .ui-glass) .nv-banner-actions{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+:is(:root[data-glass],:root .ui-glass) .nv-banner-actions .btn-secondary{padding:.6rem .7rem}
+.nv-folder-view:not(.searching) main.folders{margin-top:0}
+:is(:root[data-glass],:root .ui-glass) .nv-folder-view:not(.searching) main.folders>.folder-card:not(.my-stuff){background:none;border:none;box-shadow:none;animation:none;overflow:visible}
+:is(:root[data-glass],:root .ui-glass) .nv-folder-view:not(.searching) main.folders>.folder-card:not(.my-stuff)::before{display:none}
+.nv-folder-view:not(.searching) main.folders>.folder-card:not(.my-stuff)>.fh{display:none}
+:is(:root[data-glass],:root .ui-glass) .nv-folder-view:not(.searching) main.folders>.folder-card>.cards{padding-left:0;padding-right:0}
+:is(:root[data-glass],:root .ui-glass) .nv-folder-view .sub-folder{margin-top:1.4rem}
+:is(:root[data-glass],:root .ui-glass) .nv-content .results-bar{margin-top:.4rem}
+
+/* websites as app tiles (grid view) */
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list){grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:1rem}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card{
+  align-items:center;text-align:center;gap:.3rem;padding:1.35rem .8rem 1.05rem;border-radius:24px;min-height:178px;
+}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card:hover{transform:translateY(-5px) scale(1.01)}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card-main{flex-direction:column;gap:.8rem;width:100%}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card-icon{
+  width:70px;height:70px;border-radius:22px;
+  background:linear-gradient(160deg,color-mix(in srgb,var(--card-accent,var(--accent)) 24%,var(--n-fill)),color-mix(in srgb,var(--card-accent,var(--accent)) 8%,var(--n-fill)));
+  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 10%,transparent),inset 0 0 0 1px var(--n-line),0 14px 26px -16px rgba(0,0,0,.7);
+  transition:transform .3s var(--n-ease);
+}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card:hover .card-icon{transform:scale(1.06) rotate(-2deg)}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card-icon img,:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card-icon .fav-letter{width:40px!important;height:40px!important;border-radius:10px;font-size:1.35rem!important}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card-emoji{font-size:1.1rem;right:-4px;bottom:-4px}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card-body{align-items:center;width:100%}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card-name{display:block;white-space:normal;text-align:center;font-size:.92rem;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card-name>span:not(.card-title){display:inline-flex;vertical-align:middle;margin-left:.25rem}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card-host{text-align:center;width:100%;margin-top:.15rem}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card-desc{display:none}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card-meta{display:none}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card.expanded{grid-column:1/-1;align-items:stretch;text-align:left}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card.expanded .card-main{flex-direction:row}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card.expanded .card-body{align-items:flex-start}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card.expanded .card-name,:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card.expanded .card-host{text-align:left}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card.expanded .card-meta{display:flex;padding-left:0}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .like-btn{left:.6rem;right:auto;top:.6rem;bottom:auto}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card-check{top:auto;bottom:.6rem;left:.6rem}
+
+/* phones & small screens: the sidebar slides in */
+@media (max-width:900px){
+  :is(:root[data-glass],:root .ui-glass) .nv-layout,:is(:root[data-glass],:root .ui-glass) .shell.with-admin .nv-layout{grid-template-columns:minmax(0,1fr)}
+  :is(:root[data-glass],:root .ui-glass) .nv-side{position:fixed;left:0;top:0;bottom:0;width:min(300px,86vw);transform:translateX(-105%);transition:transform .3s var(--n-ease);background:var(--n-glass-strong);box-shadow:var(--n-shadow-pop)}
+  :is(:root[data-glass],:root .ui-glass) .nv-side.open{transform:none}
+  :is(:root[data-glass],:root .ui-glass) .nv-scrim{position:fixed;inset:0;z-index:84;background:color-mix(in srgb,var(--bg) 50%,transparent);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);animation:fadeIn .2s}
+  :is(:root[data-glass],:root .ui-glass) .nv-burger{display:flex}
+  :is(:root[data-glass],:root .ui-glass) .nv-main .topbar{padding:8px 10px 0}
+  :is(:root[data-glass],:root .ui-glass) .nv-content{padding:1rem 14px 6rem}
+  :is(:root[data-glass],:root .ui-glass) .nv-banner{padding:1.3rem;border-radius:24px}
+  :is(:root[data-glass],:root .ui-glass) .nv-banner-emoji{width:64px;height:64px;font-size:2.1rem;border-radius:20px}
+  :is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list){grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:.7rem}
+  :is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card{min-height:150px;padding:1rem .6rem .9rem}
+  :is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card-icon{width:58px;height:58px;border-radius:18px}
+}
+
+:is(:root[data-glass],:root .ui-glass) .nv-wave{display:inline-block;-webkit-text-fill-color:initial;background:none;transform-origin:70% 80%;animation:novaWave 2.4s ease-in-out .6s 2}
+@keyframes novaWave{0%,60%,100%{transform:rotate(0)}10%,30%{transform:rotate(16deg)}20%,40%{transform:rotate(-8deg)}}
+:is(:root[data-glass],:root .ui-glass) .nv-content main.folders{border-top:none;padding-top:0}
+:is(:root[data-glass],:root .ui-glass) .nv-item.on::before,:is(:root[data-glass],:root .ui-glass) .nv-folder.on::before{left:0}
+:is(:root[data-glass],:root .ui-glass) .nv-folder.on{background:color-mix(in srgb,var(--fc) 20%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--fc) 35%,transparent)}
+:is(:root[data-glass],:root .ui-glass) .nv-folder.on .nv-count{color:var(--text)}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card-actions{top:auto;bottom:.55rem;right:auto;left:50%;transform:translate(-50%,4px) scale(.96)}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card:hover .card-actions,:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card:focus-within .card-actions{transform:translate(-50%,0)}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card-check{bottom:auto;top:.6rem;left:auto;right:.6rem}
+:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card.expanded .card-actions{left:auto;right:.6rem;top:.6rem;bottom:auto;transform:none}
+@media (max-width:900px){
+  :is(:root[data-glass],:root .ui-glass) .nv-side{z-index:110}
+  :is(:root[data-glass],:root .ui-glass) .nv-scrim{z-index:105}
+}
+:is(:root[data-glass],:root .ui-glass) .bottom-nav .bn-add{background:var(--n-grad);color:#fff;box-shadow:0 10px 24px -10px var(--n-glow)}
