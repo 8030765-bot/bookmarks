@@ -40,6 +40,17 @@
 .cmd-item-hint{font-size:.78rem;color:var(--text-muted);white-space:nowrap}
 .cmd-empty{padding:1.5rem;text-align:center;color:var(--text-muted);font-size:.9rem}
 @media (max-width:600px){.cmd-overlay{padding-top:4vh}.cmd-round{width:42px;height:42px}}
+.cmd-input-row>svg{width:18px;height:18px;color:var(--text-muted);flex-shrink:0}
+.cmd-clear{width:26px;height:26px;display:flex;align-items:center;justify-content:center;border-radius:6px;color:var(--text-muted);flex-shrink:0}
+.cmd-clear:hover{background:var(--surface-hover);color:var(--text)}
+.cmd-clear svg{width:14px;height:14px}
+.cmd-item-label mark{background:none;color:var(--accent,var(--text));font-weight:700;text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}
+.cmd-empty span{display:block;margin-top:.4rem;font-size:.8rem}
+.cmd-foot{display:flex;align-items:center;gap:1rem;padding:.5rem 1rem;border-top:1px solid var(--border);font-size:.75rem;color:var(--text-muted)}
+.cmd-foot>span{display:flex;align-items:center;gap:.3rem}
+.cmd-foot .kbd{font-size:.68rem}
+.cmd-foot-count{margin-left:auto}
+@media (pointer:coarse){.cmd-foot{display:none}}
 
 /* Admin sidebar */
 :root{--admin-w:420px}
@@ -386,6 +397,7 @@ mark{background:rgba(255,184,77,.28);color:inherit;border-radius:3px;padding:0 1
 
 /* shortcuts */
 .shortcut-list{display:flex;flex-direction:column}
+.shortcut-find{margin:-.25rem 0 .6rem}
 .shortcut-row{display:flex;justify-content:space-between;align-items:center;padding:.5rem 0;border-bottom:1px solid var(--border);font-size:.88rem}
 .shortcut-row:last-child{border-bottom:none}
 
@@ -1101,6 +1113,7 @@ a.person:hover{border-color:var(--border-light);background:var(--surface-hover)}
 .today-show:hover{color:var(--text)}
 .today-show svg{width:13px;height:13px}
 .today-row{display:flex;gap:.55rem;overflow-x:auto;padding-bottom:.35rem;scrollbar-width:thin}
+@media (pointer:coarse){.today-row{scroll-snap-type:x mandatory;scroll-padding-left:0}.today-row>*{scroll-snap-align:start}}
 .today-tile{flex:0 0 auto;width:210px;display:flex;flex-direction:column;gap:.25rem;padding:.65rem .75rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);text-align:left;font-size:.84rem;min-width:0}
 a.today-tile:hover,button.today-tile:hover{border-color:var(--border-light);background:var(--surface-hover)}
 .today-tile.wyr{width:280px}

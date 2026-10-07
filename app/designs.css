@@ -576,7 +576,7 @@
 }
 .ui-new{z-index:2}
 /* narrow screens: the search summary wraps instead of squashing */
-@media (max-width:700px){.results-bar{flex-wrap:wrap}.results-bar .enter-hint{display:none}}
+@media (max-width:700px){.results-bar{flex-wrap:wrap}.results-bar .enter-hint{display:none}.results-tools{flex-wrap:wrap;flex-shrink:1;min-width:0}}
 /* phones show card buttons in the normal flow: keep them centred under the tile (Nova and Orbit) */
 @media (max-width:900px){:is(:root[data-glass],:root .ui-glass) .nv-content .cards:not(.list) .card-actions{transform:none!important;align-self:center}}
 

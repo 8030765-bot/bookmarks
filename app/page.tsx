@@ -672,6 +672,12 @@ export default function HomePage() {
   useEffect(() => { document.documentElement.setAttribute("data-april", aprilOn ? "on" : "off"); }, [aprilOn]);
   // first visit: a short tour; later: a keyboard tip; after updates: what's new
   const firstVisit = useFirstVisit();
+  const [keyTipGone, setKeyTipGone] = useState(false);
+  useEffect(() => {
+    if (!firstVisit.keyTip) return;
+    const t = setTimeout(() => setKeyTipGone(true), 12000);
+    return () => clearTimeout(t);
+  }, [firstVisit.keyTip]);
   const whatsNew = useWhatsNewAfterUpdate();
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -1090,6 +1096,12 @@ export default function HomePage() {
   const parsed = useMemo(() => parseQuery(search), [search]);
   const q = search.trim().toLowerCase();
   const filtering = parsed.active || tagFilters.length > 0;
+  // results show at the top of the page (the welcome bits step aside), so go up to them
+  const wasFiltering = useRef(false);
+  useEffect(() => {
+    if (filtering && !wasFiltering.current && window.scrollY > 120) window.scrollTo({ top: 0 });
+    wasFiltering.current = filtering;
+  }, [filtering]);
   const matchCtx: MatchContext = { prefs: personal.links, favorites: favoriteSet, since, me: user, avgRating: (id) => aggRatings[id]?.avg || 0, deep: searchNotes };
   const folderPrefs = personal.folders;
   const spaces = useMemo(
@@ -1865,7 +1877,10 @@ export default function HomePage() {
     if (e.key === "Escape") {
       // a pop-up, drawer or menu on top was already closed (just that one) by EscapeClose
       if (e.defaultPrevented) return;
-      if (document.activeElement === searchRef.current && search) { setSearch(""); return; }
+      if (document.activeElement === searchRef.current) {
+        if (search) setSearch(""); else searchRef.current?.blur();
+        return;
+      }
       if (cardMenu) { setCardMenu(null); return; }
       if (!modal && !showCmd && !suggest && (selected.size || focusedId || expandedId)) {
         clearSelection(); setFocusedId(null); setExpandedId(null); return;
@@ -1911,6 +1926,8 @@ export default function HomePage() {
         b: () => personal.setLinkPref(l.id, { later: !personal.links[l.id]?.later }),
         d: () => personal.setLinkPref(l.id, { done: !personal.links[l.id]?.done }),
         i: () => setExpandedId(expandedId === l.id ? null : l.id),
+        c: () => cardActions.copy(l),
+        e: () => (canEditFolder(f) ? cardActions.edit(f, l) : data?.settings?.suggestionsEnabled !== false ? cardActions.suggest(f, l) : showToast("Only admins can edit this one")),
         " ": () => toggleSelect(l.id, e.shiftKey),
       };
       if (/^[1-5]$/.test(k)) { e.preventDefault(); cardActions.rate(l.id, Number(k)); return; }
@@ -2082,6 +2099,8 @@ export default function HomePage() {
     id: `${folder.id}:${link.id}`,
     label: link.name,
     hint: folder.name,
+    keywords: [link.url.replace(/^https?:\/\/(www\.)?/, ""), ...(link.tags || [])].join(" "),
+    copy: link.url,
     icon: <Favicon url={link.url} name={link.name} size={16} />,
     run: () => { setShowCmd(false); trackAndOpen(folder, link, true); },
   });
@@ -2337,7 +2356,7 @@ export default function HomePage() {
   );
   const bannersEl = (
     <>
-        {look.ui === "classic" && novaInvite && (
+        {look.ui === "classic" && novaInvite && !firstVisit.tour && !filtering && (
           <div className="nova-invite" role="status">
             <span className="nova-spark" aria-hidden="true">✨</span>
             <div>
@@ -3492,13 +3511,13 @@ export default function HomePage() {
       {dropHint && <div className="drop-overlay" aria-hidden="true"><div>🔗 Drop it on a folder, or anywhere to add it</div></div>}
       {look.sideNav && !PAGED_DESIGNS.includes(look.ui) && look.ui !== "custom" && !builderPreview && <SideNav folders={topFolders} active={activeFolder} onJump={jumpToFolder} counts={(f) => f.links.length} />}
       {designEl ?? (
-      <div className="app">
-        {heroEl}
+      <div className={`app ${filtering ? "is-filtering" : ""}`}>
+        {!filtering && heroEl}
 
         {bannersEl}
 
-        {customOrder
-          ? look.order.map((sec) => <Fragment key={sec}>{sec === "today" ? todayBlock : sec === "polls" ? pollsBlock : !filtering && quickBlock}</Fragment>)
+        {filtering ? null : customOrder
+          ? look.order.map((sec) => <Fragment key={sec}>{sec === "today" ? todayBlock : sec === "polls" ? pollsBlock : quickBlock}</Fragment>)
           : <>{todayBlock}{pollsBlock}</>}
 
         {actionsRowEl}
@@ -3761,7 +3780,7 @@ export default function HomePage() {
       {modal?.type === "feedback" && <FeedbackModal kind={modal.kind} user={user} onClose={() => setModal(null)} toast={showToast} />}
       {whatsNew.show && !modal && <WhatsNewPopup onClose={whatsNew.close} />}
       {firstVisit.tour && <Tour onDone={firstVisit.endTour} />}
-      {firstVisit.keyTip && !firstVisit.tour && (
+      {firstVisit.keyTip && !keyTipGone && !firstVisit.tour && !modal && !showCmd && (
         <div className="key-tip" role="status">
           ⌨️ Tip: press <span className="kbd">/</span> to search, <span className="kbd">N</span> to add a website, <span className="kbd">?</span> for every shortcut.
           <button className="btn-icon sm" onClick={firstVisit.endKeyTip} aria-label="Got it" title="Got it"><Icon name="x" /></button>
@@ -4101,11 +4120,13 @@ export default function HomePage() {
             run: () => { setShowCmd(false); if (!user) openLogin(); else openChat(); },
           }}
           shortcuts={paletteActions().slice(0, 8)}
+          onCopied={() => showToast("Link copied")}
           sections={[
-            { title: "Actions", items: paletteActions() },
-            { title: "Most visited", emptyQueryOnly: true, items: mostVisited.slice(0, 5).map(linkItem) },
-            { title: "Folders", queryOnly: true, items: sortedFolders.map(folderItem) },
-            { title: "Websites", queryOnly: true, items: allRefs.map(linkItem) },
+            { title: "Recently opened", emptyQueryOnly: true, items: recentOpened.slice(0, 5).map(linkItem) },
+            { title: "Most visited", emptyQueryOnly: true, items: mostVisited.filter((r) => !recentOpened.slice(0, 5).includes(r)).slice(0, 5).map(linkItem) },
+            { title: "Websites", queryOnly: true, limit: 8, items: allRefs.map(linkItem) },
+            { title: "Folders", queryOnly: true, limit: 5, items: sortedFolders.map(folderItem) },
+            { title: "Actions", limit: 8, items: paletteActions() },
           ]}
         />
       )}
